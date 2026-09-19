@@ -181,5 +181,30 @@ namespace Scrim.Tests {
             bool removedNonExistent = service.RemoveMessage("non-existent-id");
             Assert.False(removedNonExistent);
         }
+
+        [Theory]
+        [InlineData(":O", "😮")]
+        [InlineData(":o", "😮")]
+        [InlineData(":-O", "😮")]
+        [InlineData("Whoa :O that is awesome!", "Whoa 😮 that is awesome!")]
+        [InlineData(":)", "😊")]
+        [InlineData(":D", "😀")]
+        [InlineData(";)", "😉")]
+        [InlineData(":(", "😢")]
+        [InlineData("<3", "❤️")]
+        [InlineData(":fire:", "🔥")]
+        [InlineData(":thumbsup:", "👍")]
+        [InlineData("http://localhost:8080/test", "http://localhost:8080/test")]
+        public void ConvertEmoticons_ConvertsExpectedEmoticonsSafely(string input, string expected) {
+            string result = LiveChatService.ConvertEmoticons(input);
+            Assert.Equal(expected, result);
+        }
+
+        [Fact]
+        public void AddMessage_ConvertsEmoticonsInChatMessage() {
+            var service = new LiveChatService();
+            var msg = service.AddMessage("User", "Check this out :O <3 :fire:");
+            Assert.Equal("Check this out 😮 ❤️ 🔥", msg.Text);
+        }
     }
 }

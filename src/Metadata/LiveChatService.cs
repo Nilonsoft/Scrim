@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using Scrim.Configuration;
 
 namespace Scrim.Metadata {
@@ -131,6 +132,7 @@ namespace Scrim.Metadata {
             }
 
             string cleanText = string.IsNullOrWhiteSpace(text) ? "" : text.Trim();
+            cleanText = ConvertEmoticons(cleanText);
             if (cleanText.Length > 300) {
                 cleanText = cleanText.Substring(0, 300);
             }
@@ -157,6 +159,49 @@ namespace Scrim.Metadata {
             MessagePosted?.Invoke(message);
             return message;
         }
+
+        public static string ConvertEmoticons(string text) {
+            if (string.IsNullOrEmpty(text)) {
+                return text;
+            }
+
+            string result = text;
+            foreach (var rule in EmoticonRules) {
+                result = rule.Pattern.Replace(result, rule.Replacement);
+            }
+            return result;
+        }
+
+        private static readonly (Regex Pattern, string Replacement)[] EmoticonRules = new[] {
+            // Shortcodes
+            (new Regex(@":fire:", RegexOptions.IgnoreCase | RegexOptions.Compiled), "🔥"),
+            (new Regex(@":(?:thumbsup|\+1):", RegexOptions.IgnoreCase | RegexOptions.Compiled), "👍"),
+            (new Regex(@":(?:thumbsdown|-1):", RegexOptions.IgnoreCase | RegexOptions.Compiled), "👎"),
+            (new Regex(@":(?:party|tada):", RegexOptions.IgnoreCase | RegexOptions.Compiled), "🎉"),
+            (new Regex(@":(?:music|note):", RegexOptions.IgnoreCase | RegexOptions.Compiled), "🎵"),
+            (new Regex(@":radio:", RegexOptions.IgnoreCase | RegexOptions.Compiled), "📻"),
+            (new Regex(@":rocket:", RegexOptions.IgnoreCase | RegexOptions.Compiled), "🚀"),
+            (new Regex(@":100:", RegexOptions.IgnoreCase | RegexOptions.Compiled), "💯"),
+            (new Regex(@":skull:", RegexOptions.IgnoreCase | RegexOptions.Compiled), "💀"),
+            (new Regex(@":star:", RegexOptions.IgnoreCase | RegexOptions.Compiled), "⭐"),
+            (new Regex(@":eyes:", RegexOptions.IgnoreCase | RegexOptions.Compiled), "👀"),
+            (new Regex(@":sparkles:", RegexOptions.IgnoreCase | RegexOptions.Compiled), "✨"),
+            (new Regex(@":clap:", RegexOptions.IgnoreCase | RegexOptions.Compiled), "👏"),
+            (new Regex(@":wave:", RegexOptions.IgnoreCase | RegexOptions.Compiled), "👋"),
+            (new Regex(@":heart:", RegexOptions.IgnoreCase | RegexOptions.Compiled), "❤️"),
+
+            // Standard punctuation emoticons safely bounded by whitespace, line boundaries, or punctuation
+            (new Regex(@"(?<=^|\s)(?:</3)(?=$|\s|[.,!?])", RegexOptions.Compiled), "💔"),
+            (new Regex(@"(?<=^|\s)(?:<3)(?=$|\s|[.,!?])", RegexOptions.Compiled), "❤️"),
+            (new Regex(@"(?<=^|\s)(?:[:=]-?[oO])(?=$|\s|[.,!?])", RegexOptions.Compiled), "😮"),
+            (new Regex(@"(?<=^|\s)(?:[:=]-?D|x-?D|X-?D)(?=$|\s|[.,!?])", RegexOptions.Compiled), "😀"),
+            (new Regex(@"(?<=^|\s)(?:[:=]-?[\)\]])(?=$|\s|[.,!?])", RegexOptions.Compiled), "😊"),
+            (new Regex(@"(?<=^|\s)(?:;-?[\)\]])(?=$|\s|[.,!?])", RegexOptions.Compiled), "😉"),
+            (new Regex(@"(?<=^|\s)(?:[:=]-?[\(\[]|:'-?\()(?=$|\s|[.,!?])", RegexOptions.Compiled), "😢"),
+            (new Regex(@"(?<=^|\s)(?:[:=]-?[pP])(?=$|\s|[.,!?])", RegexOptions.Compiled), "😛"),
+            (new Regex(@"(?<=^|\s)(?:[:=]-?[/\\|])(?=$|\s|[.,!?])", RegexOptions.Compiled), "😐"),
+            (new Regex(@"(?<=^|\s)(?:[B8]-?\))(?=$|\s|[.,!?])", RegexOptions.Compiled), "😎")
+        };
 
         public IReadOnlyList<ChatMessage> GetRecentMessages() {
             lock (_lock) {

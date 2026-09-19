@@ -2944,15 +2944,41 @@
             </div>
 
             <!-- Broadcaster Message Input -->
-            <div style="display: flex; gap: 8px; align-items: center;">
-                <input type="text" class="scrim-input" style="flex: 1; font-size: 12px; padding: 8px 10px; background: #12141a; border-color: #2b303c;" 
-                       placeholder="Reply to chat as DJ..." 
-                       value="@HostChatMessage" 
-                       @oninput="@((ChangeEventArgs e) => HostChatMessage = e.Value?.ToString() ?? "")"
-                       @onkeydown="@((KeyboardEventArgs e) => { if (e.Key == "Enter") SendHostMessage(); })" />
-                <button class="scrim-btn-primary" style="padding: 8px 14px; font-size: 12px; white-space: nowrap; background: #ef4444; border-color: #ef4444;" @onclick="SendHostMessage">
-                    Send 🎙️
-                </button>
+            <div style="position: relative;">
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <div style="position: relative; flex: 1; display: flex; align-items: center;">
+                        <input type="text" class="scrim-input" style="width: 100%; font-size: 12px; padding: 8px 34px 8px 10px; background: #12141a; border-color: #2b303c;" 
+                               placeholder="Reply to chat as DJ... (:O, :), :D autoconvert)" 
+                               value="@HostChatMessage" 
+                               @oninput="OnHostChatMessageInput"
+                               @onkeydown="@((KeyboardEventArgs e) => { if (e.Key == "Enter") SendHostMessage(); })" />
+                        <button type="button" style="position: absolute; right: 6px; background: transparent; border: none; font-size: 16px; cursor: pointer; padding: 2px 4px; border-radius: 4px; line-height: 1; opacity: 0.8;" 
+                                title="Choose emoji" 
+                                @onclick="ToggleHostEmojiPicker">
+                            😊
+                        </button>
+                    </div>
+                    <button class="scrim-btn-primary" style="padding: 8px 14px; font-size: 12px; white-space: nowrap; background: #ef4444; border-color: #ef4444;" @onclick="SendHostMessage">
+                        Send 🎙️
+                    </button>
+                </div>
+
+                @if (ShowHostEmojiPicker) {
+                    <div style="position: absolute; bottom: 100%; left: 0; margin-bottom: 6px; background: #14171e; border: 1px solid #2b303d; border-radius: 8px; padding: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.6); z-index: 50; width: 280px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 11px; font-weight: 700; color: #00d2ff;">
+                            <span>EMOJIS</span>
+                            <span style="font-size: 10px; color: #64748b; font-weight: normal;">:O converts to 😮</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; max-height: 140px; overflow-y: auto;">
+                            @foreach (var emo in QuickEmojis) {
+                                <button type="button" style="background: transparent; border: 1px solid transparent; font-size: 16px; cursor: pointer; padding: 4px; border-radius: 4px;" 
+                                        @onclick="@(() => InsertHostEmoji(emo))">
+                                    @emo
+                                </button>
+                            }
+                        </div>
+                    </div>
+                }
             </div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px; font-size: 10px; color: #64748b;">
                 <span>Sending as verified <strong>@(string.IsNullOrWhiteSpace(ProfileManager.CurrentProfile.HostName) ? "DJ" : $"{ProfileManager.CurrentProfile.HostName} [DJ]")</strong></span>
@@ -2971,6 +2997,13 @@
     private bool ShowAssignNicknameModal = false;
     private string AssignTargetUser = "";
     private string NewAssignedNickname = "";
+    private bool ShowHostEmojiPicker = false;
+    private static readonly string[] QuickEmojis = new[] {
+        "😮", "😊", "😀", "😉", "😛", "😎", "😢", "😭", "😆", "😐",
+        "❤️", "💔", "🔥", "👍", "👎", "👏", "🎉", "🎵", "📻", "🚀",
+        "💯", "💀", "⭐", "👀", "✨", "👋", "😍", "🤔", "🥳", "🤘",
+        "🍻", "⚡"
+    };
 
     private void AddBlacklistWord() {
         if (string.IsNullOrWhiteSpace(NewBlacklistWord)) return;
@@ -3158,11 +3191,27 @@
 
     private void SendHostMessage() {
         if (string.IsNullOrWhiteSpace(HostChatMessage)) return;
-        string text = HostChatMessage.Trim();
+        string text = LiveChatService.ConvertEmoticons(HostChatMessage.Trim());
         HostChatMessage = "";
+        ShowHostEmojiPicker = false;
         string hostName = string.IsNullOrWhiteSpace(ProfileManager.CurrentProfile.HostName) ? "DJ" : ProfileManager.CurrentProfile.HostName;
         ChatService.AddMessage(hostName, text, isHost: true, color: "#ef4444");
         _ = AutoScrollChatAsync();
+    }
+
+    private void OnHostChatMessageInput(ChangeEventArgs e) {
+        string raw = e.Value?.ToString() ?? "";
+        HostChatMessage = LiveChatService.ConvertEmoticons(raw);
+    }
+
+    private void ToggleHostEmojiPicker() {
+        ShowHostEmojiPicker = !ShowHostEmojiPicker;
+    }
+
+    private void InsertHostEmoji(string emoji) {
+        HostChatMessage += emoji;
+        ShowHostEmojiPicker = false;
+        StateHasChanged();
     }
 
     private void ClearChat() {

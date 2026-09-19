@@ -1721,12 +1721,104 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    // Chat form submission
+    // Emoticon Auto-Conversion
+    function convertEmoticons(text) {
+        if (!text) return '';
+        const rules = [
+            // Shortcodes
+            { p: /:fire:/gi, r: '🔥' },
+            { p: /:(?:thumbsup|\+1):/gi, r: '👍' },
+            { p: /:(?:thumbsdown|-1):/gi, r: '👎' },
+            { p: /:(?:party|tada):/gi, r: '🎉' },
+            { p: /:(?:music|note):/gi, r: '🎵' },
+            { p: /:radio:/gi, r: '📻' },
+            { p: /:rocket:/gi, r: '🚀' },
+            { p: /:100:/gi, r: '💯' },
+            { p: /:skull:/gi, r: '💀' },
+            { p: /:star:/gi, r: '⭐' },
+            { p: /:eyes:/gi, r: '👀' },
+            { p: /:sparkles:/gi, r: '✨' },
+            { p: /:clap:/gi, r: '👏' },
+            { p: /:wave:/gi, r: '👋' },
+            { p: /:heart:/gi, r: '❤️' },
+
+            // Punctuation Emoticons (safely bounded)
+            { p: /(?<=^|\s)(?:<\/3)(?=$|\s|[.,!?])/g, r: '💔' },
+            { p: /(?<=^|\s)(?:<3)(?=$|\s|[.,!?])/g, r: '❤️' },
+            { p: /(?<=^|\s)(?:[:=]-?[oO])(?=$|\s|[.,!?])/g, r: '😮' },
+            { p: /(?<=^|\s)(?:[:=]-?D|x-?D|X-?D)(?=$|\s|[.,!?])/g, r: '😀' },
+            { p: /(?<=^|\s)(?:[:=]-?[\)\]])(?=$|\s|[.,!?])/g, r: '😊' },
+            { p: /(?<=^|\s)(?:;-?[\)\]])(?=$|\s|[.,!?])/g, r: '😉' },
+            { p: /(?<=^|\s)(?:[:=]-?[\(\[]|:'-?\()(?=$|\s|[.,!?])/g, r: '😢' },
+            { p: /(?<=^|\s)(?:[:=]-?[pP])(?=$|\s|[.,!?])/g, r: '😛' },
+            { p: /(?<=^|\s)(?:[:=]-?[/\\|])(?=$|\s|[.,!?])/g, r: '😐' },
+            { p: /(?<=^|\s)(?:[B8]-?\))(?=$|\s|[.,!?])/g, r: '😎' }
+        ];
+        let res = text;
+        for (let i = 0; i < rules.length; i++) {
+            res = res.replace(rules[i].p, rules[i].r);
+        }
+        return res;
+    }
+
+    // Chat form submission & Emoji picker wiring
+    const chatEmojiToggleBtn = document.getElementById('chatEmojiToggleBtn');
+    const chatEmojiPicker = document.getElementById('chatEmojiPicker');
+
+    if (chatMessageInput) {
+        chatMessageInput.addEventListener('input', function () {
+            const curVal = chatMessageInput.value;
+            const converted = convertEmoticons(curVal);
+            if (converted !== curVal) {
+                const prevPos = chatMessageInput.selectionStart;
+                const diff = converted.length - curVal.length;
+                chatMessageInput.value = converted;
+                if (prevPos !== null) {
+                    const nextPos = Math.max(0, prevPos + diff);
+                    chatMessageInput.setSelectionRange(nextPos, nextPos);
+                }
+            }
+        });
+    }
+
+    if (chatEmojiToggleBtn && chatEmojiPicker) {
+        chatEmojiToggleBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            const isHidden = chatEmojiPicker.style.display === 'none' || !chatEmojiPicker.style.display;
+            chatEmojiPicker.style.display = isHidden ? 'block' : 'none';
+            chatEmojiToggleBtn.classList.toggle('active', isHidden);
+            chatEmojiPicker.setAttribute('aria-hidden', isHidden ? 'false' : 'true');
+        });
+
+        chatEmojiPicker.addEventListener('click', function (e) {
+            const btn = e.target.closest('.chat-emoji-item');
+            if (!btn || !chatMessageInput) return;
+            const emoji = btn.getAttribute('data-emoji') || btn.textContent.trim();
+            if (!emoji) return;
+
+            const start = chatMessageInput.selectionStart !== null ? chatMessageInput.selectionStart : chatMessageInput.value.length;
+            const end = chatMessageInput.selectionEnd !== null ? chatMessageInput.selectionEnd : chatMessageInput.value.length;
+            const val = chatMessageInput.value;
+            chatMessageInput.value = val.substring(0, start) + emoji + val.substring(end);
+            const newPos = start + emoji.length;
+            chatMessageInput.focus();
+            chatMessageInput.setSelectionRange(newPos, newPos);
+        });
+
+        document.addEventListener('click', function (e) {
+            if (chatEmojiPicker.style.display !== 'none' && !chatEmojiPicker.contains(e.target) && e.target !== chatEmojiToggleBtn && !chatEmojiToggleBtn.contains(e.target)) {
+                chatEmojiPicker.style.display = 'none';
+                chatEmojiToggleBtn.classList.remove('active');
+                chatEmojiPicker.setAttribute('aria-hidden', 'true');
+            }
+        });
+    }
+
     if (chatForm && chatMessageInput) {
         chatForm.addEventListener('submit', function (e) {
             e.preventDefault();
             if (!isChatEnabled || isUserBanned) return;
-            const text = chatMessageInput.value.trim();
+            const text = convertEmoticons(chatMessageInput.value.trim());
             if (!text) return;
 
             const sender = (chatNicknameInput ? chatNicknameInput.value.trim() : '') || 'Anonymous';
