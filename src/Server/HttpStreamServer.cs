@@ -1,6 +1,8 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Threading;
 using System.Threading.Tasks;
 using Scrim.Configuration;
@@ -24,43 +26,81 @@ namespace Scrim.Server {
             _networkDiscovery = networkDiscovery;
         }
 
+        private static int FindAvailablePort(int startingPort) {
+            try {
+                var activeTcpPorts = IPGlobalProperties.GetIPGlobalProperties()
+                    .GetActiveTcpListeners()
+                    .Select(endpoint => endpoint.Port)
+                    .ToHashSet();
+
+                int port = startingPort;
+                while (activeTcpPorts.Contains(port) && port < 65535) {
+                    port++;
+                }
+                return port;
+            } catch {
+                return startingPort;
+            }
+        }
+
         public void Start(int port) {
             if (_listener != null && _listener.IsListening) return;
 
-            _listener = new HttpListener();
-            _listener.Prefixes.Add($"http://localhost:{port}/");
-            _listener.Prefixes.Add($"http://127.0.0.1:{port}/");
+            int targetPort = FindAvailablePort(port);
 
-            var profile = _profileManager.CurrentProfile;
-            if (profile.EnableNetworkAccess) {
-                // Bind to all active local IPv4 addresses on the network so other LAN devices can connect
-                foreach (var ip in _networkDiscovery.GetAllLocalIps()) {
+            for (int attempt = 0; attempt < 10; attempt++) {
+                var listener = new HttpListener();
+                listener.Prefixes.Add($"http://localhost:{targetPort}/");
+                listener.Prefixes.Add($"http://127.0.0.1:{targetPort}/");
+
+                var profile = _profileManager.CurrentProfile;
+                if (profile.EnableNetworkAccess) {
+                    foreach (var ip in _networkDiscovery.GetAllLocalIps()) {
+                        try {
+                            listener.Prefixes.Add($"http://{ip}:{targetPort}/");
+                        } catch { }
+                    }
+
                     try {
-                        _listener.Prefixes.Add($"http://{ip}:{port}/");
+                        listener.Prefixes.Add($"http://+:{targetPort}/");
                     } catch { }
                 }
 
-                // Attempt wildcard registration if URL reservation / permissions permit
                 try {
-                    _listener.Prefixes.Add($"http://+:{port}/");
-                } catch { }
-
-                // Trigger UPnP automatic router port forwarding if enabled for outside-network listeners
-                if (profile.EnableUpnpPortForwarding) {
-                    Task.Run(() => _networkDiscovery.TryMapUpnpPort(port));
+                    listener.Start();
+                    _listener = listener;
+                    if (targetPort != port) {
+                        profile.Port = targetPort;
+                        _profileManager.SaveProfile(profile);
+                    }
+                    if (profile.EnableNetworkAccess && profile.EnableUpnpPortForwarding) {
+                        Task.Run(() => _networkDiscovery.TryMapUpnpPort(targetPort));
+                    }
+                    break;
+                } catch (Exception) {
+                    // Try removing wildcard prefix first
+                    if (listener.Prefixes.Contains($"http://+:{targetPort}/")) {
+                        listener.Prefixes.Remove($"http://+:{targetPort}/");
+                        try {
+                            listener.Start();
+                            _listener = listener;
+                            if (targetPort != port) {
+                                profile.Port = targetPort;
+                                _profileManager.SaveProfile(profile);
+                            }
+                            if (profile.EnableNetworkAccess && profile.EnableUpnpPortForwarding) {
+                                Task.Run(() => _networkDiscovery.TryMapUpnpPort(targetPort));
+                            }
+                            break;
+                        } catch { }
+                    }
+                    try { listener.Close(); } catch { }
+                    targetPort++;
                 }
             }
 
-            try {
-                _listener.Start();
-            } catch (Exception) {
-                // If wildcard prefix failed, fall back to localhost and local IPs only
-                if (_listener.Prefixes.Contains($"http://+:{port}/")) {
-                    _listener.Prefixes.Remove($"http://+:{port}/");
-                    try { _listener.Start(); } catch { }
-                }
-            }
-            
+            if (_listener == null || !_listener.IsListening) return;
+
             _cts = new CancellationTokenSource();
             
             Task.Run(() => AcceptLoop(_cts.Token));

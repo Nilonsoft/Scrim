@@ -47,6 +47,18 @@ namespace Scrim {
         protected override void OnStartup(StartupEventArgs e) {
             base.OnStartup(e);
 
+            var profileManager = Services.GetRequiredService<IProfileManager>();
+            if (e.Args.Length > 0) {
+                for (int i = 0; i < e.Args.Length; i++) {
+                    if ((e.Args[i] == "--profile" || e.Args[i] == "-p") && i + 1 < e.Args.Length) {
+                        string profileName = e.Args[i + 1];
+                        profileManager.LoadProfile(profileName);
+                    } else if (e.Args[i] == "--port" && i + 1 < e.Args.Length && int.TryParse(e.Args[i + 1], out int p)) {
+                        profileManager.CurrentProfile.Port = p;
+                    }
+                }
+            }
+
             var effectLoader = Services.GetRequiredService<VoiceEffectLoader>();
             effectLoader.LoadEffects();
 

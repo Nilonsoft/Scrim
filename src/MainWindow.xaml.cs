@@ -23,6 +23,21 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        Loaded += MainWindow_Loaded;
+    }
+
+    private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        var profileManager = ((App)Application.Current).Services.GetService<IProfileManager>();
+        var profile = profileManager?.CurrentProfile;
+        if (profile != null)
+        {
+            this.Title = $"Scrim Console - {profile.ProfileName} (:{profile.Port})";
+            if (TrayIcon != null)
+            {
+                TrayIcon.ToolTipText = $"Scrim Console - {profile.ProfileName} (:{profile.Port})";
+            }
+        }
     }
 
     private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
