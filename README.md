@@ -82,6 +82,7 @@
 
 Comprehensive guides, specifications, and architecture documents are located in the [`docs/`](docs/) directory:
 
+- 🚀 **[Post-Installation & User Guide](docs/post-install-guide.md)**: Comprehensive end-user handbook—from running the installer, setting up FFmpeg, 1-click virtual audio routing, and going on air to station chat, custom banners, and sharing links.
 - 📖 **[User & Feature Guide](docs/user-guide.md)**: Complete walkthrough of all 11 console cards, real-time live chat, virtual audio, mic controls, and web player options.
 - 🎨 **[Web Player Themes & Custom Theme Guide](docs/web-themes.md)**: Guide to built-in themes (Dark, Goth, Pink, Flowers, Light, Rock & Roll) and creating user JSON themes in `~/.scrim/themes/`.
 - 🌐 **[Network & Outside Broadcasting Guide](docs/network-broadcasting.md)**: Details on local LAN sharing, UPnP port forwarding, custom domain overrides, and media player endpoints.
