@@ -18,6 +18,7 @@ namespace Scrim.Configuration {
         public bool MuteAppLocally { get; set; } = false;
         public int AppStreamVolume { get; set; } = 100;
         public string CaptureDeviceId { get; set; } = "";
+        public string CustomPublicUrl { get; set; } = "";
 
         // Web Player Branding Customization
         public string StationName { get; set; } = "GLOBAL INDIE RADIO";

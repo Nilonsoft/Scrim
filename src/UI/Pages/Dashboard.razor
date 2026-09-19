@@ -372,6 +372,9 @@
     private bool IsVirtualDeviceReady = false;
     private string? DetectedVirtualDeviceId;
     private string? DetectedVirtualDeviceName;
+    private bool IsVbCableInstalled = false;
+    private string? VbCableDeviceId;
+    private string? VbCableDeviceName;
     private bool IsInstallingVirtualCable = false;
     private string? VirtualCableInstallStatus;
     private readonly WindowEnumerator _enumerator = new();
@@ -889,12 +892,14 @@
     }
 
     private void CheckVirtualDeviceStatus() {
+        IsVbCableInstalled = VirtualDeviceService.IsVbCableInstalled(out VbCableDeviceId, out VbCableDeviceName);
         IsVirtualDeviceReady = VirtualDeviceService.IsVirtualDeviceInstalled(out DetectedVirtualDeviceId, out DetectedVirtualDeviceName);
     }
 
-    private void UseDetectedVirtualDevice() {
-        if (!string.IsNullOrEmpty(DetectedVirtualDeviceId)) {
-            ProfileManager.CurrentProfile.CaptureDeviceId = DetectedVirtualDeviceId;
+    private void UseDetectedVirtualDevice(string? deviceId = null) {
+        var targetId = deviceId ?? (!string.IsNullOrEmpty(VbCableDeviceId) ? VbCableDeviceId : DetectedVirtualDeviceId);
+        if (!string.IsNullOrEmpty(targetId)) {
+            ProfileManager.CurrentProfile.CaptureDeviceId = targetId;
             ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
             EnsureAudioMonitoring(SelectedProcessId);
             StateHasChanged();
@@ -1352,39 +1357,66 @@
                 </select>
 
                 <!-- Virtual Audio Device Status & 1-Click Setup -->
-                <div style="margin-top: 8px; background: #14171d; border: 1px solid #252a35; border-radius: 8px; padding: 8px 10px;">
-                    @if (IsVirtualDeviceReady) {
-                        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;">
-                            <div style="display: flex; align-items: center; gap: 6px;">
-                                <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #10b981; box-shadow: 0 0 6px #10b981;"></span>
-                                <span style="font-size: 11px; font-weight: 600; color: #e2e8f0;">Virtual Device: @(DetectedVirtualDeviceName?.Replace("Speakers (", "").TrimEnd(')'))</span>
-                            </div>
-                            <div style="display: flex; gap: 6px;">
-                                @if (ProfileManager.CurrentProfile.CaptureDeviceId != DetectedVirtualDeviceId) {
-                                    <button class="pill-option" style="padding: 2px 8px; font-size: 10px; background: #00d2ff; color: #0b0d14; font-weight: 700;" @onclick="UseDetectedVirtualDevice" title="Route Scrim stream capture to this virtual device">
-                                        🎯 Select for Stream
+                <div style="margin-top: 8px;">
+                    @if (IsVbCableInstalled) {
+                        <div style="background: #14171d; border: 1px solid #252a35; border-radius: 8px; padding: 8px 10px;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;">
+                                <div style="display: flex; align-items: center; gap: 6px;">
+                                    <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #10b981; box-shadow: 0 0 6px #10b981;"></span>
+                                    <span style="font-size: 11px; font-weight: 600; color: #e2e8f0;">VB-Audio Virtual Cable (Ready)</span>
+                                </div>
+                                <div style="display: flex; gap: 6px;">
+                                    @if (ProfileManager.CurrentProfile.CaptureDeviceId != VbCableDeviceId) {
+                                        <button class="pill-option" style="padding: 2px 8px; font-size: 10px; background: #00d2ff; color: #0b0d14; font-weight: 700;" @onclick="@(() => UseDetectedVirtualDevice(VbCableDeviceId))" title="Route Scrim stream capture to VB-Audio Cable">
+                                            🎯 Select for Stream
+                                        </button>
+                                    }
+                                    <button class="pill-option" style="padding: 2px 8px; font-size: 10px; color: #94a3b8;" @onclick="OpenWindowsAppVolume" title="Open Windows Volume Mixer to assign music apps to this device">
+                                        ⚙ Route App in Windows
                                     </button>
-                                }
-                                <button class="pill-option" style="padding: 2px 8px; font-size: 10px; color: #94a3b8;" @onclick="OpenWindowsAppVolume" title="Open Windows Volume Mixer to assign music apps to this device">
-                                    ⚙ Route App in Windows
-                                </button>
+                                </div>
                             </div>
-                        </div>
-                        <div style="font-size: 10px; color: #64748b; margin-top: 4px; line-height: 1.4;">
-                            💡 Click <b>Route App in Windows</b> to set your music app's output to this device for 100% silent local listening.
+                            <div style="font-size: 10px; color: #64748b; margin-top: 4px; line-height: 1.4;">
+                                💡 Click <b>Route App in Windows</b> to set your music app's output to CABLE Input for 100% silent local listening.
+                            </div>
                         </div>
                     } else {
-                        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;">
-                            <div>
-                                <div style="font-size: 11px; font-weight: 600; color: #e2e8f0;">Scrim Virtual Audio Cable</div>
-                                <div style="font-size: 10px; color: #64748b;">Install WHQL virtual cable for isolated stream audio.</div>
+                        <div style="background: linear-gradient(135deg, rgba(0, 210, 255, 0.08), rgba(99, 102, 241, 0.08)); border: 1px solid rgba(0, 210, 255, 0.35); border-radius: 8px; padding: 10px 12px;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                                <div>
+                                    <div style="display: flex; align-items: center; gap: 6px;">
+                                        <span style="font-size: 13px;">📥</span>
+                                        <span style="font-size: 12px; font-weight: 700; color: #00d2ff;">1-Click Install Virtual Audio Driver</span>
+                                    </div>
+                                    <div style="font-size: 10px; color: #94a3b8; margin-top: 2px;">
+                                        Install official WHQL VB-Audio Cable driver for silent background app streaming.
+                                    </div>
+                                </div>
+                                <button class="scrim-btn-primary" style="padding: 5px 12px; font-size: 11px; font-weight: 700;" @onclick="InstallVirtualAudioCable" disabled="@IsInstallingVirtualCable">
+                                    @(IsInstallingVirtualCable ? "⏳ Installing Driver..." : "📥 Install Virtual Driver")
+                                </button>
                             </div>
-                            <button class="pill-option" style="padding: 3px 10px; font-size: 10px; background: #00d2ff; color: #0b0d14; font-weight: 700;" @onclick="InstallVirtualAudioCable" disabled="@IsInstallingVirtualCable">
-                                @(IsInstallingVirtualCable ? "⏳ Installing..." : "📥 Install Virtual Cable")
-                            </button>
+                            @if (!string.IsNullOrEmpty(VirtualCableInstallStatus)) {
+                                <div style="font-size: 10px; color: #38bdf8; margin-top: 6px; padding: 4px 8px; background: rgba(0,0,0,0.3); border-radius: 4px;">@VirtualCableInstallStatus</div>
+                            }
                         </div>
-                        @if (!string.IsNullOrEmpty(VirtualCableInstallStatus)) {
-                            <div style="font-size: 10px; color: #38bdf8; margin-top: 4px;">@VirtualCableInstallStatus</div>
+
+                        @if (IsVirtualDeviceReady && !string.IsNullOrEmpty(DetectedVirtualDeviceName) && DetectedVirtualDeviceId != VbCableDeviceId) {
+                            <div style="margin-top: 6px; background: #14171d; border: 1px solid #252a35; border-radius: 6px; padding: 6px 10px; display: flex; align-items: center; justify-content: space-between; gap: 6px;">
+                                <div style="font-size: 11px; color: #94a3b8;">
+                                    Detected Device: <strong style="color: #cbd5e1;">@(DetectedVirtualDeviceName?.Replace("Speakers (", "").TrimEnd(')'))</strong>
+                                </div>
+                                <div style="display: flex; gap: 6px;">
+                                    @if (ProfileManager.CurrentProfile.CaptureDeviceId != DetectedVirtualDeviceId) {
+                                        <button class="pill-option" style="padding: 2px 8px; font-size: 10px; background: #00d2ff; color: #0b0d14; font-weight: 700;" @onclick="@(() => UseDetectedVirtualDevice(DetectedVirtualDeviceId))" title="Route Scrim stream capture to this device">
+                                            🎯 Select for Stream
+                                        </button>
+                                    }
+                                    <button class="pill-option" style="padding: 2px 8px; font-size: 10px; color: #94a3b8;" @onclick="OpenWindowsAppVolume" title="Open Windows Volume Mixer">
+                                        ⚙ Route App
+                                    </button>
+                                </div>
+                            </div>
                         }
                     }
                 </div>
@@ -2049,6 +2081,25 @@
                     </div>
                 </div>
 
+                <!-- Custom Public Domain / Host / IP (Optional) -->
+                <div style="background: #14171d; border: 1px solid #252a35; border-radius: 6px; padding: 8px 10px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                        <span style="font-size: 11px; font-weight: 600; color: #cbd5e1;">Custom Domain / Public Host (Optional)</span>
+                        @if (!string.IsNullOrWhiteSpace(ProfileManager.CurrentProfile.CustomPublicUrl)) {
+                            <button class="pill-option" style="padding: 1px 6px; font-size: 9px; color: #ef4444;" @onclick="ClearCustomPublicUrl" title="Reset to auto-detected public IP">✕ Reset</button>
+                        }
+                    </div>
+                    <div style="font-size: 10px; color: #64748b; margin-bottom: 6px;">
+                        Override public IP with your DDNS, domain name, or custom IP.
+                    </div>
+                    <div style="display: flex; gap: 6px; align-items: center;">
+                        <input type="text" class="scrim-input" style="flex: 1; font-size: 11px; padding: 4px 8px; font-family: monospace; background: #0f1115; border-color: #2b303c;"
+                               placeholder="e.g. radio.mydomain.com:8080 or 123.45.67.89:8080"
+                               value="@ProfileManager.CurrentProfile.CustomPublicUrl"
+                               @onchange="OnCustomPublicUrlChanged" />
+                    </div>
+                </div>
+
                 <!-- Direct Stream Endpoint for VLC / Media Players -->
                 <div>
                     <div style="display: flex; justify-content: space-between; font-size: 11px; color: #94a3b8; margin-bottom: 3px;">
@@ -2058,10 +2109,10 @@
                     <div style="display: flex; gap: 6px; align-items: center;">
                         <div style="flex: 1; display: flex; align-items: center; background: #1a1d26; border: 1px solid #2d323e; border-radius: 6px; padding: 5px 8px; overflow: hidden;">
                             <span style="font-family: monospace; font-size: 11px; color: #f59e0b; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">
-                                @(GetLocalNetworkUrl())/stream
+                                @(GetOutsideNetworkUrl())/stream
                             </span>
                         </div>
-                        <button class="scrim-btn-secondary" style="padding: 4px 10px; font-size: 11px; white-space: nowrap; color: #f59e0b; border-color: rgba(245, 158, 11, 0.4);" @onclick='() => CopyUrl($"{GetLocalNetworkUrl()}/stream", "VLC_Card")'>
+                        <button class="scrim-btn-secondary" style="padding: 4px 10px; font-size: 11px; white-space: nowrap; color: #f59e0b; border-color: rgba(245, 158, 11, 0.4);" @onclick='() => CopyUrl($"{GetOutsideNetworkUrl()}/stream", "VLC_Card")'>
                             @(CopiedUrlTarget == "VLC_Card" ? "✓" : "Copy")
                         </button>
                     </div>
@@ -2085,7 +2136,28 @@
 
     private string GetLocalNetworkUrl() => NetworkDiscovery.GetLocalShareUrl(ProfileManager.CurrentProfile.Port);
 
-    private string GetOutsideNetworkUrl() => NetworkDiscovery.GetPublicShareUrl(ProfileManager.CurrentProfile.Port);
+    private string GetOutsideNetworkUrl() {
+        var custom = ProfileManager.CurrentProfile.CustomPublicUrl?.Trim();
+        if (!string.IsNullOrEmpty(custom)) {
+            if (!custom.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !custom.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) {
+                custom = "http://" + custom;
+            }
+            return custom;
+        }
+        return NetworkDiscovery.GetPublicShareUrl(ProfileManager.CurrentProfile.Port);
+    }
+
+    private void OnCustomPublicUrlChanged(ChangeEventArgs e) {
+        ProfileManager.CurrentProfile.CustomPublicUrl = e.Value?.ToString()?.Trim() ?? "";
+        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        StateHasChanged();
+    }
+
+    private void ClearCustomPublicUrl() {
+        ProfileManager.CurrentProfile.CustomPublicUrl = "";
+        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        StateHasChanged();
+    }
 
     private void CopyUrl(string url, string target) {
         try {

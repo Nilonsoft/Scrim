@@ -19,7 +19,7 @@ namespace Scrim.Audio {
             "virtual line"
         };
 
-        public bool IsVirtualDeviceInstalled(out string? deviceId, out string? deviceName) {
+        public bool IsVbCableInstalled(out string? deviceId, out string? deviceName) {
             deviceId = null;
             deviceName = null;
 
@@ -27,7 +27,6 @@ namespace Scrim.Audio {
                 var enumerator = new MMDeviceEnumerator();
                 var devices = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
 
-                // Priority 1: Check for official VB-Audio Cable
                 foreach (var d in devices) {
                     string name = d.FriendlyName;
                     if (name.Contains("cable input", StringComparison.OrdinalIgnoreCase) ||
@@ -37,8 +36,26 @@ namespace Scrim.Audio {
                         return true;
                     }
                 }
+            } catch (Exception ex) {
+                Console.WriteLine($"[VirtualAudioDeviceService] Error checking VB-Cable: {ex.Message}");
+            }
 
-                // Priority 2: Check for other known virtual/isolated render devices (e.g. Steam Streaming Speakers)
+            return false;
+        }
+
+        public bool IsVirtualDeviceInstalled(out string? deviceId, out string? deviceName) {
+            if (IsVbCableInstalled(out deviceId, out deviceName)) {
+                return true;
+            }
+
+            deviceId = null;
+            deviceName = null;
+
+            try {
+                var enumerator = new MMDeviceEnumerator();
+                var devices = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
+
+                // Check for other known virtual/isolated render devices (e.g. Steam Streaming Speakers)
                 foreach (var d in devices) {
                     string name = d.FriendlyName;
                     foreach (var kw in VirtualDeviceKeywords) {
@@ -59,29 +76,42 @@ namespace Scrim.Audio {
         public async Task<(bool Success, string Message, string? DeviceId)> InstallVirtualCableAsync() {
             try {
                 string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-                string driverDir = Path.Combine(baseDir, "Audio", "Drivers", "VBCABLE");
-                string installerPath = Path.Combine(driverDir, "VBCABLE_Setup_x64.exe");
+                string[] candidateDirs = new[] {
+                    Path.Combine(baseDir, "Audio", "Drivers", "VBCABLE"),
+                    Path.Combine(baseDir, "..", "..", "..", "src", "Audio", "Drivers", "VBCABLE"),
+                    Path.Combine(baseDir, "..", "..", "..", "Audio", "Drivers", "VBCABLE"),
+                    Path.Combine(Directory.GetCurrentDirectory(), "src", "Audio", "Drivers", "VBCABLE"),
+                    Path.Combine(Directory.GetCurrentDirectory(), "Audio", "Drivers", "VBCABLE")
+                };
 
-                // Check alternative development path if not in publish directory
-                if (!File.Exists(installerPath)) {
-                    string devDriverDir = Path.Combine(baseDir, "..", "..", "..", "Audio", "Drivers", "VBCABLE");
-                    if (File.Exists(Path.Combine(devDriverDir, "VBCABLE_Setup_x64.exe"))) {
-                        installerPath = Path.GetFullPath(Path.Combine(devDriverDir, "VBCABLE_Setup_x64.exe"));
+                string? driverDir = null;
+                string? installerPath = null;
+
+                foreach (var dir in candidateDirs) {
+                    string candidate = Path.Combine(dir, "VBCABLE_Setup_x64.exe");
+                    if (File.Exists(candidate)) {
+                        installerPath = Path.GetFullPath(candidate);
                         driverDir = Path.GetDirectoryName(installerPath)!;
+                        break;
                     }
                 }
 
                 // If unextracted zip exists, extract it
-                if (!File.Exists(installerPath)) {
-                    string zipPath = Path.Combine(baseDir, "Audio", "Drivers", "VBCABLE_Driver_Pack43.zip");
-                    if (!File.Exists(zipPath)) {
-                        zipPath = Path.Combine(baseDir, "..", "..", "..", "Audio", "Drivers", "VBCABLE_Driver_Pack43.zip");
-                    }
+                if (string.IsNullOrEmpty(installerPath)) {
+                    string[] zipCandidates = new[] {
+                        Path.Combine(baseDir, "Audio", "Drivers", "VBCABLE_Driver_Pack43.zip"),
+                        Path.Combine(baseDir, "..", "..", "..", "src", "Audio", "Drivers", "VBCABLE_Driver_Pack43.zip"),
+                        Path.Combine(Directory.GetCurrentDirectory(), "src", "Audio", "Drivers", "VBCABLE_Driver_Pack43.zip")
+                    };
 
-                    if (File.Exists(zipPath)) {
-                        Directory.CreateDirectory(driverDir);
-                        ZipFile.ExtractToDirectory(zipPath, driverDir, true);
-                        installerPath = Path.Combine(driverDir, "VBCABLE_Setup_x64.exe");
+                    foreach (var z in zipCandidates) {
+                        if (File.Exists(z)) {
+                            driverDir = Path.Combine(Path.GetDirectoryName(z)!, "VBCABLE");
+                            Directory.CreateDirectory(driverDir);
+                            ZipFile.ExtractToDirectory(z, driverDir, true);
+                            installerPath = Path.Combine(driverDir, "VBCABLE_Setup_x64.exe");
+                            break;
+                        }
                     }
                 }
 
