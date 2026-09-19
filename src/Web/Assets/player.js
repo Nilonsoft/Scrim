@@ -1129,9 +1129,12 @@ document.addEventListener('DOMContentLoaded', function () {
                     if (dedicationInput) dedicationInput.value = '';
                     if (requestSuccess) {
                         requestSuccess.style.display = 'block';
+                        requestSuccess.textContent = dedication
+                            ? `Request submitted & dedicated to ${dedication}!`
+                            : 'Request submitted to DJ!';
                         setTimeout(function () {
                             requestSuccess.style.display = 'none';
-                        }, 3500);
+                        }, 4000);
                     }
                 }
             }).catch(function (err) {
@@ -1151,7 +1154,7 @@ document.addEventListener('DOMContentLoaded', function () {
         requests.forEach(function (req, index) {
             const li = document.createElement('li');
             li.className = 'queue-item';
-            const dedicationHtml = req.dedication ? `<span class="queue-dedication">❤️ For: ${escapeHtml(req.dedication)}</span>` : '';
+            const dedicationHtml = req.dedication ? `<span class="queue-dedication">❤️ Dedicated to: ${escapeHtml(req.dedication)}</span>` : '';
             li.innerHTML = `
                 <div class="queue-info">
                     <span class="queue-track">${index + 1}. ${escapeHtml(req.query)}</span>
@@ -1271,7 +1274,7 @@ document.addEventListener('DOMContentLoaded', function () {
             <div class="chat-msg-header">
                 <div class="chat-msg-sender-wrap">
                     <strong class="chat-msg-sender" style="color: ${escapeHtml(senderColor)};">${escapeHtml(msg.sender || 'Anonymous')}</strong>
-                    ${msg.isHost ? '<span class="chat-host-badge">HOST</span>' : ''}
+                    ${msg.isHost ? '<span class="chat-host-badge">DJ</span>' : ''}
                 </div>
                 <span class="chat-msg-time">${timeStr}</span>
             </div>

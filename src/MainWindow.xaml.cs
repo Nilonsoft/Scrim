@@ -39,15 +39,36 @@ public partial class MainWindow : Window
             }
         }
 
-        try
-        {
-            string iconPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "app.ico");
-            if (System.IO.File.Exists(iconPath) && TrayIcon != null)
-            {
-                TrayIcon.Icon = new System.Drawing.Icon(iconPath);
+        try {
+            System.Drawing.Icon? appIcon = null;
+            if (!string.IsNullOrEmpty(Environment.ProcessPath)) {
+                try {
+                    appIcon = System.Drawing.Icon.ExtractAssociatedIcon(Environment.ProcessPath);
+                } catch { }
             }
-        }
-        catch { }
+
+            if (appIcon == null) {
+                string iconPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "app.ico");
+                if (System.IO.File.Exists(iconPath)) {
+                    appIcon = new System.Drawing.Icon(iconPath);
+                }
+            }
+
+            if (appIcon != null) {
+                if (TrayIcon != null) {
+                    TrayIcon.Icon = appIcon;
+                }
+
+                if (this.Icon == null) {
+                    try {
+                        this.Icon = System.Windows.Interop.Imaging.CreateBitmapSourceFromHIcon(
+                            appIcon.Handle,
+                            System.Windows.Int32Rect.Empty,
+                            System.Windows.Media.Imaging.BitmapSizeOptions.FromEmptyOptions());
+                    } catch { }
+                }
+            }
+        } catch { }
     }
 
     private void BlazorWebView_Initialized(object? sender, Microsoft.AspNetCore.Components.WebView.BlazorWebViewInitializedEventArgs e)

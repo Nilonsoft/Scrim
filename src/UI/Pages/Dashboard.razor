@@ -1726,8 +1726,8 @@
                         <div style="flex: 1; padding-right: 10px;">
                             <div style="font-weight: 600; font-size: 13px; color: #fff;">@req.Query</div>
                             @if (!string.IsNullOrWhiteSpace(req.Dedication)) {
-                                <div style="font-size: 11px; color: #f43f5e; display: flex; align-items: center; gap: 4px; margin-top: 2px;">
-                                    <span>❤️ Dedicated to: <strong>@req.Dedication</strong></span>
+                                <div style="font-size: 11px; color: #f43f5e; background: rgba(244, 63, 94, 0.12); border: 1px solid rgba(244, 63, 94, 0.28); border-radius: 4px; padding: 2px 7px; display: inline-flex; align-items: center; gap: 4px; margin-top: 3px; font-weight: 500;">
+                                    <span>❤️ Dedicated to: <strong style="color: #fff;">@req.Dedication</strong></span>
                                 </div>
                             }
                             <div style="font-size: 11px; color: #727988; margin-top: 2px;">@req.RequestedAt.ToLocalTime().ToString("t") • Status: @req.Status</div>
@@ -2267,7 +2267,7 @@
                                 <div style="display: flex; align-items: center; gap: 6px;">
                                     <strong style="color: @(msg.IsHost ? "#ef4444" : msg.Color);">@msg.Sender</strong>
                                     @if (msg.IsHost) {
-                                        <span style="font-size: 9px; font-weight: 700; color: #fff; background: #ef4444; border-radius: 3px; padding: 1px 4px; letter-spacing: 0.5px;">HOST</span>
+                                        <span style="font-size: 9px; font-weight: 700; color: #fff; background: #ef4444; border-radius: 3px; padding: 1px 4px; letter-spacing: 0.5px;">DJ</span>
                                     }
                                 </div>
                                 <span style="font-size: 9px; color: #64748b; font-family: monospace;">@msg.Timestamp.ToLocalTime().ToString("HH:mm:ss")</span>
@@ -2281,7 +2281,7 @@
             <!-- Broadcaster Message Input -->
             <div style="display: flex; gap: 8px; align-items: center;">
                 <input type="text" class="scrim-input" style="flex: 1; font-size: 12px; padding: 8px 10px; background: #12141a; border-color: #2b303c;" 
-                       placeholder="Reply to chat as Host..." 
+                       placeholder="Reply to chat as DJ..." 
                        value="@HostChatMessage" 
                        @oninput="@((ChangeEventArgs e) => HostChatMessage = e.Value?.ToString() ?? "")"
                        @onkeydown="@((KeyboardEventArgs e) => { if (e.Key == "Enter") SendHostMessage(); })" />
@@ -2290,7 +2290,7 @@
                 </button>
             </div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px; font-size: 10px; color: #64748b;">
-                <span>Sending as verified <strong>@(string.IsNullOrWhiteSpace(ProfileManager.CurrentProfile.HostName) ? "Host" : ProfileManager.CurrentProfile.HostName)</strong></span>
+                <span>Sending as verified <strong>@(string.IsNullOrWhiteSpace(ProfileManager.CurrentProfile.HostName) ? "DJ" : $"{ProfileManager.CurrentProfile.HostName} [DJ]")</strong></span>
                 <span>Press Enter to send</span>
             </div>
         </div>,
@@ -2328,7 +2328,7 @@
         if (string.IsNullOrWhiteSpace(HostChatMessage)) return;
         string text = HostChatMessage.Trim();
         HostChatMessage = "";
-        string hostName = string.IsNullOrWhiteSpace(ProfileManager.CurrentProfile.HostName) ? "Host / Broadcaster" : ProfileManager.CurrentProfile.HostName;
+        string hostName = string.IsNullOrWhiteSpace(ProfileManager.CurrentProfile.HostName) ? "DJ" : ProfileManager.CurrentProfile.HostName;
         ChatService.AddMessage(hostName, text, isHost: true, color: "#ef4444");
     }
 
