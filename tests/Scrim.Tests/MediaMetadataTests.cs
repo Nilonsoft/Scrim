@@ -47,5 +47,28 @@ namespace Scrim.Tests {
 
             Assert.Equal(expectedUrl, meta.AlbumArtUrl);
         }
+
+        [Fact]
+        public void MediaMetadata_DurationAndPosition_StoreAndRetrieveValues() {
+            var meta = new MediaMetadata {
+                Title = "Song with Timeline",
+                Duration = TimeSpan.FromMinutes(3.5),
+                Position = TimeSpan.FromMinutes(1.5),
+                IsPlaying = true
+            };
+
+            Assert.Equal(TimeSpan.FromMinutes(3.5), meta.Duration);
+            Assert.Equal(TimeSpan.FromMinutes(1.5), meta.Position);
+            Assert.True(meta.IsPlaying);
+        }
+
+        [Fact]
+        public void MediaMetadata_Defaults_AreZeroOrFalse() {
+            var meta = new MediaMetadata();
+
+            Assert.Equal(TimeSpan.Zero, meta.Duration);
+            Assert.Equal(TimeSpan.Zero, meta.Position);
+            Assert.False(meta.IsPlaying);
+        }
     }
 }

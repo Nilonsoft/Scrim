@@ -558,11 +558,12 @@ body {
 }
 
 .media-progress-fill {
-    width: 48%;
+    width: 0%;
     height: 100%;
     background: #ffffff;
     border-radius: 2px;
     position: relative;
+    transition: width 0.15s linear;
 }
 
 .media-progress-thumb {

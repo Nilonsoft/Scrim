@@ -328,6 +328,9 @@
     private string CurrentTrackArtist = "Scrim Broadcast";
     private string CurrentTrackExtra = "Live System Audio";
     private string? CurrentTrackAlbumArtBase64 = null;
+    private TimeSpan CurrentTrackDuration = TimeSpan.Zero;
+    private TimeSpan CurrentTrackPosition = TimeSpan.Zero;
+    private DateTimeOffset LastPositionUpdate = DateTimeOffset.UtcNow;
 
     // Playlists
     private class PlaylistItem {
@@ -381,7 +384,10 @@
             CurrentTrackArtist = string.IsNullOrWhiteSpace(MetadataService.CurrentMetadata.Artist) ? "Live Stream" : MetadataService.CurrentMetadata.Artist;
             CurrentTrackExtra = string.IsNullOrWhiteSpace(MetadataService.CurrentMetadata.Album) ? "Broadcast Audio" : MetadataService.CurrentMetadata.Album;
             CurrentTrackAlbumArtBase64 = MetadataService.CurrentMetadata.AlbumArtBase64;
-            IsPlayingMedia = true;
+            CurrentTrackDuration = MetadataService.CurrentMetadata.Duration;
+            CurrentTrackPosition = MetadataService.CurrentMetadata.Position;
+            LastPositionUpdate = DateTimeOffset.UtcNow;
+            IsPlayingMedia = MetadataService.CurrentMetadata.IsPlaying;
         }
 
         // Restore user choices from persisted profile
@@ -435,10 +441,21 @@
             await InvokeAsync(StateHasChanged);
         });
 
-        // Periodic UI poll for active listener updates and active applications
-        _refreshTimer = new System.Timers.Timer(1500);
+        // Periodic UI poll for active listener updates, active applications, and track progress
+        _refreshTimer = new System.Timers.Timer(1000);
         _refreshTimer.Elapsed += (s, e) => {
             RefreshWindows();
+            if (IsPlayingMedia && CurrentTrackDuration > TimeSpan.Zero) {
+                var now = DateTimeOffset.UtcNow;
+                var delta = now - LastPositionUpdate;
+                if (delta >= TimeSpan.FromSeconds(0.7)) {
+                    CurrentTrackPosition += delta;
+                    if (CurrentTrackPosition > CurrentTrackDuration) {
+                        CurrentTrackPosition = CurrentTrackDuration;
+                    }
+                    LastPositionUpdate = now;
+                }
+            }
             InvokeAsync(StateHasChanged);
         };
         _refreshTimer.Start();
@@ -506,7 +523,12 @@
                 CurrentTrackArtist = string.IsNullOrWhiteSpace(meta.Artist) ? "Live Stream" : meta.Artist;
                 CurrentTrackExtra = string.IsNullOrWhiteSpace(meta.Album) ? "Broadcast Audio" : meta.Album;
                 CurrentTrackAlbumArtBase64 = meta.AlbumArtBase64;
-                IsPlayingMedia = true;
+                if (meta.Duration > TimeSpan.Zero) {
+                    CurrentTrackDuration = meta.Duration;
+                }
+                CurrentTrackPosition = meta.Position;
+                LastPositionUpdate = DateTimeOffset.UtcNow;
+                IsPlayingMedia = meta.IsPlaying;
             }
             StateHasChanged();
         });
@@ -949,6 +971,35 @@
         StateHasChanged();
     }
 
+    private double GetProgressPercentage() {
+        if (CurrentTrackDuration <= TimeSpan.Zero) return 0.0;
+        double pct = (CurrentTrackPosition.TotalSeconds / CurrentTrackDuration.TotalSeconds) * 100.0;
+        return Math.Clamp(pct, 0.0, 100.0);
+    }
+
+    private string GetTimeDisplay() {
+        if (CurrentTrackDuration > TimeSpan.Zero) {
+            var remaining = CurrentTrackDuration - CurrentTrackPosition;
+            if (remaining < TimeSpan.Zero) remaining = TimeSpan.Zero;
+            return $"-{(int)remaining.TotalMinutes}:{remaining.Seconds:D2}";
+        }
+        if (CurrentTrackPosition > TimeSpan.Zero) {
+            return $"{(int)CurrentTrackPosition.TotalMinutes}:{CurrentTrackPosition.Seconds:D2}";
+        }
+        return "0:00";
+    }
+
+    private async Task OnProgressClick(MouseEventArgs e) {
+        if (CurrentTrackDuration > TimeSpan.Zero) {
+            double ratio = Math.Clamp(e.OffsetX / 260.0, 0.0, 1.0);
+            var target = TimeSpan.FromSeconds(CurrentTrackDuration.TotalSeconds * ratio);
+            CurrentTrackPosition = target;
+            LastPositionUpdate = DateTimeOffset.UtcNow;
+            await MetadataService.SeekAsync(target);
+            StateHasChanged();
+        }
+    }
+
     private void PlaySoundEffect(string soundName) {
         Task.Run(() => {
             try {
@@ -1069,6 +1120,14 @@
         CurrentTrackTitle = track.Title;
         CurrentTrackArtist = track.Artist;
         CurrentTrackExtra = $"Duration: {track.Duration}";
+        if (TimeSpan.TryParseExact(track.Duration, @"m\:ss", null, out var d) || 
+            TimeSpan.TryParseExact(track.Duration, @"mm\:ss", null, out d)) {
+            CurrentTrackDuration = d;
+        } else {
+            CurrentTrackDuration = TimeSpan.FromMinutes(3.5);
+        }
+        CurrentTrackPosition = TimeSpan.Zero;
+        LastPositionUpdate = DateTimeOffset.UtcNow;
         IsPlayingMedia = true;
     }
 
@@ -1515,13 +1574,13 @@
                 </div>
             </div>
 
-            <div class="media-progress-container">
+            <div class="media-progress-container" @onclick="OnProgressClick" style="cursor: pointer;" title="Click to seek">
                 <div class="media-progress-bar">
-                    <div class="media-progress-fill">
+                    <div class="media-progress-fill" style="width: @(GetProgressPercentage().ToString("F1", System.Globalization.CultureInfo.InvariantCulture))%;">
                         <div class="media-progress-thumb"></div>
                     </div>
                 </div>
-                <div class="media-time">-0:13</div>
+                <div class="media-time">@GetTimeDisplay()</div>
             </div>
 
             <div class="media-controls-row">

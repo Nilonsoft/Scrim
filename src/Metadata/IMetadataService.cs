@@ -7,6 +7,9 @@ namespace Scrim.Metadata {
         public string Album { get; set; } = string.Empty;
         public byte[]? AlbumArt { get; set; }
         public string? AlbumArtUrl { get; set; }
+        public TimeSpan Duration { get; set; } = TimeSpan.Zero;
+        public TimeSpan Position { get; set; } = TimeSpan.Zero;
+        public bool IsPlaying { get; set; } = false;
 
         public string? AlbumArtBase64 => AlbumArt != null && AlbumArt.Length > 0 
             ? $"data:image/jpeg;base64,{Convert.ToBase64String(AlbumArt)}" 
@@ -21,5 +24,6 @@ namespace Scrim.Metadata {
         System.Threading.Tasks.Task<bool> TogglePlayPauseAsync();
         System.Threading.Tasks.Task<bool> SkipNextAsync();
         System.Threading.Tasks.Task<bool> SkipPreviousAsync();
+        System.Threading.Tasks.Task<bool> SeekAsync(TimeSpan position);
     }
 }
