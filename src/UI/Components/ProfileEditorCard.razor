@@ -4,6 +4,15 @@
 <div class="card p-3 mb-3" style="background-color: #181818; border: 1px solid #383838; border-radius: 8px;">
     <h4 style="color: white; margin-top: 0;">Stream Profile</h4>
 
+    <div class="mb-3">
+        <label class="form-label text-muted">Active Profile</label>
+        <select class="form-select bg-dark text-white border-secondary" @bind="SelectedProfileName">
+            @foreach (var p in AvailableProfiles) {
+                <option value="@p">@p</option>
+            }
+        </select>
+    </div>
+
     @if (CurrentProfile != null) {
         <div class="mb-3">
             <label class="form-label text-muted">Profile Name</label>
@@ -27,10 +36,29 @@
 </div>
 
 @code {
+    private IEnumerable<string> AvailableProfiles = Array.Empty<string>();
+
+    private string _selectedProfileName = "Default";
+    public string SelectedProfileName {
+        get => _selectedProfileName;
+        set {
+            if (_selectedProfileName != value) {
+                _selectedProfileName = value;
+                LoadSelectedProfile();
+            }
+        }
+    }
+
     private ScrimProfile? CurrentProfile;
 
     protected override void OnInitialized() {
-        // Just bind to the current active profile
+        AvailableProfiles = ProfileManager.GetAvailableProfiles();
+        _selectedProfileName = AvailableProfiles.FirstOrDefault() ?? "Default";
+        LoadSelectedProfile();
+    }
+
+    private void LoadSelectedProfile() {
+        ProfileManager.LoadProfile(SelectedProfileName);
         CurrentProfile = ProfileManager.CurrentProfile;
     }
 

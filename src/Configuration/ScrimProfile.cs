@@ -10,6 +10,7 @@ namespace Scrim.Configuration {
 
     public interface IProfileManager {
         ScrimProfile CurrentProfile { get; }
+        System.Collections.Generic.IEnumerable<string> GetAvailableProfiles();
         void SaveProfile(ScrimProfile profile);
         void LoadProfile(string name);
     }

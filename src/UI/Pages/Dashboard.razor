@@ -1,16 +1,84 @@
+@using Scrim.Plugins
+@inject PluginLoader PluginLoader
+
 <div style="background-color: #121212; min-height: 100vh; padding: 20px; color: white;">
     <div class="container-fluid">
         <div class="row">
-            <div class="col-md-4">
-                <TrackInfoCard Title="Scrim Radio" Artist="Live Setup" />
-                <MicControlCard />
-                <ProfileEditorCard />
+            <div class="col-md-4" 
+                 ondragover="event.preventDefault();" 
+                 @ondrop="() => HandleDrop(0)">
+                
+                @foreach (var comp in LeftColumn) {
+                    <div draggable="true" 
+                         @ondragstart="() => HandleDragStart(comp, 0)" 
+                         style="cursor: grab; margin-bottom: 1rem;">
+                        <DynamicComponent Type="@comp" Parameters="@GetParametersFor(comp)" />
+                    </div>
+                }
             </div>
-            <div class="col-md-8">
-                <StreamControlCard />
-                <QueueCard />
-                <!-- Plugin zone could go here -->
+            
+            <div class="col-md-8" 
+                 ondragover="event.preventDefault();" 
+                 @ondrop="() => HandleDrop(1)">
+                 
+                @foreach (var comp in RightColumn) {
+                    <div draggable="true" 
+                         @ondragstart="() => HandleDragStart(comp, 1)" 
+                         style="cursor: grab; margin-bottom: 1rem;">
+                        <DynamicComponent Type="@comp" Parameters="@GetParametersFor(comp)" />
+                    </div>
+                }
             </div>
         </div>
     </div>
 </div>
+
+@code {
+    private List<Type> LeftColumn = new();
+    private List<Type> RightColumn = new();
+
+    private Type? draggedComponent;
+    private int sourceColumnIndex;
+
+    protected override void OnInitialized() {
+        LeftColumn.Add(typeof(TrackInfoCard));
+        LeftColumn.Add(typeof(MicControlCard));
+        LeftColumn.Add(typeof(ProfileEditorCard));
+
+        RightColumn.Add(typeof(StreamControlCard));
+        RightColumn.Add(typeof(QueueCard));
+
+        foreach (var plugin in PluginLoader.LoadedPlugins) {
+            if (plugin is IUiExtension uiExt) {
+                RightColumn.Add(uiExt.ComponentType);
+            }
+        }
+    }
+
+    private void HandleDragStart(Type component, int columnIndex) {
+        draggedComponent = component;
+        sourceColumnIndex = columnIndex;
+    }
+
+    private void HandleDrop(int targetColumnIndex) {
+        if (draggedComponent == null) return;
+
+        if (sourceColumnIndex == 0) LeftColumn.Remove(draggedComponent);
+        else RightColumn.Remove(draggedComponent);
+
+        if (targetColumnIndex == 0) LeftColumn.Add(draggedComponent);
+        else RightColumn.Add(draggedComponent);
+
+        draggedComponent = null;
+        StateHasChanged();
+    }
+
+    private Dictionary<string, object> GetParametersFor(Type comp) {
+        var dict = new Dictionary<string, object>();
+        if (comp == typeof(TrackInfoCard)) {
+            dict["Title"] = "Scrim Radio";
+            dict["Artist"] = "Live Setup";
+        }
+        return dict;
+    }
+}
