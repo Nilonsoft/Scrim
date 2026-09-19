@@ -26,6 +26,7 @@ namespace Scrim.Configuration {
         public bool RestrictToLocalNetwork { get; set; } = false;
         public bool EnableChat { get; set; } = true;
         public System.Collections.Generic.List<string> NicknameBlacklist { get; set; } = new();
+        public System.Collections.Generic.List<BannedChatUser> BannedUsers { get; set; } = new();
 
         // Song History Configuration
         public bool EnableSongHistory { get; set; } = true;
@@ -69,6 +70,12 @@ namespace Scrim.Configuration {
     public class WebNavLink {
         public string Label { get; set; } = "";
         public string Url { get; set; } = "";
+    }
+
+    public class BannedChatUser {
+        public string UserId { get; set; } = "";
+        public string Nickname { get; set; } = "";
+        public DateTime BannedAt { get; set; } = DateTime.UtcNow;
     }
 
     public enum CloseToTrayMode {

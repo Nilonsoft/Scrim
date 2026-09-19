@@ -8,5 +8,6 @@ namespace Scrim.Metadata {
         public DateTime Timestamp { get; set; } = DateTime.UtcNow;
         public bool IsHost { get; set; } = false;
         public string Color { get; set; } = "#00d2ff";
+        public string? UserId { get; set; }
     }
 }

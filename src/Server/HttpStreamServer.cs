@@ -39,6 +39,7 @@ namespace Scrim.Server {
             _networkDiscovery = networkDiscovery;
             _themeService = themeService ?? new ThemeService();
             _chatService = chatService ?? new LiveChatService();
+            _chatService.SyncBannedUsers(_profileManager.CurrentProfile.BannedUsers);
             _reactionService = reactionService ?? new SongReactionService(metadataService);
             _historyService = historyService ?? new SongHistoryService(metadataService);
         }
@@ -585,6 +586,14 @@ namespace Scrim.Server {
                 immediateChannel.Writer.TryWrite($"data: {assignJson}\n\n");
             };
 
+            Action<string> onBanned = (bannedId) => {
+                immediateChannel.Writer.TryWrite($"data: {{\"type\":\"chat_user_banned\",\"userId\":\"{EscapeJson(bannedId)}\"}}\n\n");
+            };
+
+            Action<string> onUnbanned = (unbannedId) => {
+                immediateChannel.Writer.TryWrite($"data: {{\"type\":\"chat_user_unbanned\",\"userId\":\"{EscapeJson(unbannedId)}\"}}\n\n");
+            };
+
             Action<string, ReactionCounts> onReaction = (type, counts) => {
                 string reactionJson = $"{{\"type\":\"reaction\",\"reaction\":\"{EscapeJson(type)}\",\"counts\":{{\"thumbsUp\":{counts.ThumbsUp},\"thumbsDown\":{counts.ThumbsDown},\"heart\":{counts.Heart}}}}}";
                 immediateChannel.Writer.TryWrite($"data: {reactionJson}\n\n");
@@ -654,6 +663,8 @@ namespace Scrim.Server {
             _chatService.ChatCleared += onClear;
             _chatService.ChatStatusChanged += onStatus;
             _chatService.NicknameAssigned += onAssign;
+            _chatService.UserBanned += onBanned;
+            _chatService.UserUnbanned += onUnbanned;
             _reactionService.ReactionReceived += onReaction;
             _reactionService.CountsReset += onResetReactions;
             _historyService.HistoryChanged += onHistoryChanged;
@@ -723,6 +734,8 @@ namespace Scrim.Server {
                 _chatService.ChatCleared -= onClear;
                 _chatService.ChatStatusChanged -= onStatus;
                 _chatService.NicknameAssigned -= onAssign;
+                _chatService.UserBanned -= onBanned;
+                _chatService.UserUnbanned -= onUnbanned;
                 _reactionService.ReactionReceived -= onReaction;
                 _reactionService.CountsReset -= onResetReactions;
                 _historyService.HistoryChanged -= onHistoryChanged;
@@ -739,13 +752,16 @@ namespace Scrim.Server {
                 var response = context.Response;
                 response.ContentType = "application/json; charset=utf-8";
                 response.Headers.Add("Access-Control-Allow-Origin", "*");
+                string rawClientId = context.Request.QueryString["clientId"] ?? "";
+                string userHash = ComputeUserHash(context, rawClientId);
+                bool isBanned = _chatService.IsUserBanned(userHash);
                 bool isEnabled = _profileManager.CurrentProfile.EnableChat;
                 var blacklist = _profileManager.CurrentProfile.NicknameBlacklist;
                 string blacklistJson = string.Join(",", blacklist.Select(b => $"\"{EscapeJson(b)}\""));
                 var messages = _chatService.GetRecentMessages().Select(m => 
                     $"{{\"id\":\"{EscapeJson(m.Id)}\",\"sender\":\"{EscapeJson(m.Sender)}\",\"text\":\"{EscapeJson(m.Text)}\",\"timestamp\":\"{m.Timestamp:o}\",\"isHost\":{(m.IsHost ? "true" : "false")},\"color\":\"{EscapeJson(m.Color)}\"}}"
                 );
-                string json = $"{{\"enabled\":{(isEnabled ? "true" : "false")},\"blacklist\":[{blacklistJson}],\"messages\":[{string.Join(",", messages)}]}}";
+                string json = $"{{\"enabled\":{(isEnabled ? "true" : "false")},\"isBanned\":{(isBanned ? "true" : "false")},\"blacklist\":[{blacklistJson}],\"messages\":[{string.Join(",", messages)}]}}";
                 byte[] buffer = System.Text.Encoding.UTF8.GetBytes(json);
                 response.ContentLength64 = buffer.Length;
                 response.OutputStream.Write(buffer, 0, buffer.Length);
@@ -772,6 +788,20 @@ namespace Scrim.Server {
                 string body = reader.ReadToEnd();
                 var textMatch = System.Text.RegularExpressions.Regex.Match(body, "\"text\"\\s*:\\s*\"(.*?)\"");
                 var senderMatch = System.Text.RegularExpressions.Regex.Match(body, "\"sender\"\\s*:\\s*\"(.*?)\"");
+                var clientMatch = System.Text.RegularExpressions.Regex.Match(body, "\"clientId\"\\s*:\\s*\"(.*?)\"");
+
+                string rawClientId = clientMatch.Success ? clientMatch.Groups[1].Value : (context.Request.QueryString["clientId"] ?? "");
+                string userHash = ComputeUserHash(context, rawClientId);
+
+                if (_chatService.IsUserBanned(userHash)) {
+                    context.Response.StatusCode = 403;
+                    byte[] err = System.Text.Encoding.UTF8.GetBytes("{\"error\":\"You have been banned from sending messages in this chat.\",\"isBanned\":true}");
+                    context.Response.ContentType = "application/json; charset=utf-8";
+                    context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+                    context.Response.OutputStream.Write(err, 0, err.Length);
+                    context.Response.Close();
+                    return;
+                }
 
                 string text = textMatch.Success ? textMatch.Groups[1].Value : "";
                 string sender = senderMatch.Success ? senderMatch.Groups[1].Value : "Anonymous";
@@ -790,7 +820,7 @@ namespace Scrim.Server {
                 }
 
                 if (!string.IsNullOrWhiteSpace(text)) {
-                    _chatService.AddMessage(sender, text, isHost: false);
+                    _chatService.AddMessage(sender, text, isHost: false, userId: userHash);
                 }
 
                 context.Response.ContentType = "application/json; charset=utf-8";

@@ -1,24 +1,33 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Scrim.Configuration;
 
 namespace Scrim.Metadata {
     public interface ILiveChatService {
-        ChatMessage AddMessage(string sender, string text, bool isHost = false, string? color = null);
+        ChatMessage AddMessage(string sender, string text, bool isHost = false, string? color = null, string? userId = null);
         IReadOnlyList<ChatMessage> GetRecentMessages();
         void Clear();
         void NotifyStatusChanged(bool enabled);
         void AssignNickname(string targetName, string assignedName);
         bool IsNicknameAllowed(string nickname, IEnumerable<string> blacklist);
+        void BanUser(string userId, string? nickname = null);
+        void UnbanUser(string userId);
+        bool IsUserBanned(string userId);
+        IReadOnlyList<BannedChatUser> GetBannedUsers();
+        void SyncBannedUsers(IEnumerable<BannedChatUser> bannedUsers);
         event Action<ChatMessage>? MessagePosted;
         event Action? ChatCleared;
         event Action<bool>? ChatStatusChanged;
         event Action<string, string>? NicknameAssigned;
+        event Action<string>? UserBanned;
+        event Action<string>? UserUnbanned;
     }
 
     public class LiveChatService : ILiveChatService {
         private readonly object _lock = new();
         private readonly List<ChatMessage> _messages = new();
+        private readonly Dictionary<string, BannedChatUser> _bannedUsers = new(StringComparer.OrdinalIgnoreCase);
         private const int MaxMessages = 100;
 
         private static readonly string[] ListenerColors = new[] {
@@ -30,6 +39,8 @@ namespace Scrim.Metadata {
         public event Action? ChatCleared;
         public event Action<bool>? ChatStatusChanged;
         public event Action<string, string>? NicknameAssigned;
+        public event Action<string>? UserBanned;
+        public event Action<string>? UserUnbanned;
 
         public void AssignNickname(string targetName, string assignedName) {
             string cleanTarget = targetName?.Trim() ?? string.Empty;
@@ -52,7 +63,65 @@ namespace Scrim.Metadata {
             return true;
         }
 
-        public ChatMessage AddMessage(string sender, string text, bool isHost = false, string? color = null) {
+        public void BanUser(string userId, string? nickname = null) {
+            if (string.IsNullOrWhiteSpace(userId)) return;
+            string cleanId = userId.Trim();
+            string cleanNick = string.IsNullOrWhiteSpace(nickname) ? "User" : nickname.Trim();
+
+            lock (_lock) {
+                _bannedUsers[cleanId] = new BannedChatUser {
+                    UserId = cleanId,
+                    Nickname = cleanNick,
+                    BannedAt = DateTime.UtcNow
+                };
+
+                // Purge messages sent by this banned user
+                _messages.RemoveAll(m => m.UserId != null && m.UserId.Equals(cleanId, StringComparison.OrdinalIgnoreCase));
+            }
+
+            UserBanned?.Invoke(cleanId);
+        }
+
+        public void UnbanUser(string userId) {
+            if (string.IsNullOrWhiteSpace(userId)) return;
+            string cleanId = userId.Trim();
+            bool removed;
+
+            lock (_lock) {
+                removed = _bannedUsers.Remove(cleanId);
+            }
+
+            if (removed) {
+                UserUnbanned?.Invoke(cleanId);
+            }
+        }
+
+        public bool IsUserBanned(string userId) {
+            if (string.IsNullOrWhiteSpace(userId)) return false;
+            lock (_lock) {
+                return _bannedUsers.ContainsKey(userId.Trim());
+            }
+        }
+
+        public IReadOnlyList<BannedChatUser> GetBannedUsers() {
+            lock (_lock) {
+                return _bannedUsers.Values.ToList();
+            }
+        }
+
+        public void SyncBannedUsers(IEnumerable<BannedChatUser> bannedUsers) {
+            if (bannedUsers == null) return;
+            lock (_lock) {
+                _bannedUsers.Clear();
+                foreach (var b in bannedUsers) {
+                    if (!string.IsNullOrWhiteSpace(b?.UserId)) {
+                        _bannedUsers[b.UserId.Trim()] = b;
+                    }
+                }
+            }
+        }
+
+        public ChatMessage AddMessage(string sender, string text, bool isHost = false, string? color = null, string? userId = null) {
             string cleanSender = string.IsNullOrWhiteSpace(sender) ? "Anonymous Listener" : sender.Trim();
             if (cleanSender.Length > 32) {
                 cleanSender = cleanSender.Substring(0, 32);
@@ -71,7 +140,8 @@ namespace Scrim.Metadata {
                 Text = cleanText,
                 Timestamp = DateTime.UtcNow,
                 IsHost = isHost,
-                Color = chosenColor
+                Color = chosenColor,
+                UserId = userId?.Trim()
             };
 
             lock (_lock) {
