@@ -1002,6 +1002,9 @@ document.addEventListener('DOMContentLoaded', function () {
         if (cleanTitle !== "") {
             lastTrackTitle = cleanTitle;
         }
+        if (trackChanged) {
+            refreshReactionsState();
+        }
         const hasRealTrack = cleanTitle !== "" && 
             cleanTitle !== "Awaiting Audio Source..." && 
             cleanTitle !== "Awaiting Track Info..." && 
@@ -1180,6 +1183,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
                 if (data.type === 'reaction_reset') {
                     updateReactionCounts(data.counts || { thumbsUp: 0, thumbsDown: 0, heart: 0 });
+                    refreshReactionsState();
                 }
             } catch (err) {
                 console.error("SSE parse error", err);
@@ -1457,7 +1461,36 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    // Song Reactions System
+    // Song Reactions System (Single-Vote Switcher & Per-Song Memory)
+    let anonClientId = localStorage.getItem('scrim_anon_uid');
+    if (!anonClientId) {
+        anonClientId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+            ? crypto.randomUUID()
+            : 'c_' + Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
+        try {
+            localStorage.setItem('scrim_anon_uid', anonClientId);
+        } catch (e) {}
+    }
+
+    let currentUserReaction = null;
+
+    function highlightUserReaction(reaction) {
+        currentUserReaction = reaction;
+        const allBtns = [btnReactionThumbsUp, btnReactionLove, btnReactionThumbsDown];
+        allBtns.forEach(function (b) {
+            if (b) b.classList.remove('active');
+        });
+
+        if (!reaction) return;
+        if (reaction === 'thumbs_up' || reaction === 'thumbsup' || reaction === 'like') {
+            if (btnReactionThumbsUp) btnReactionThumbsUp.classList.add('active');
+        } else if (reaction === 'heart' || reaction === 'love') {
+            if (btnReactionLove) btnReactionLove.classList.add('active');
+        } else if (reaction === 'thumbs_down' || reaction === 'thumbsdown' || reaction === 'dislike') {
+            if (btnReactionThumbsDown) btnReactionThumbsDown.classList.add('active');
+        }
+    }
+
     function updateReactionCounts(counts) {
         if (!counts) return;
         if (countThumbsUp && counts.thumbsUp !== undefined) {
@@ -1469,6 +1502,18 @@ document.addEventListener('DOMContentLoaded', function () {
         if (countThumbsDown && counts.thumbsDown !== undefined) {
             countThumbsDown.textContent = counts.thumbsDown;
         }
+    }
+
+    function refreshReactionsState() {
+        fetch('/api/reactions?clientId=' + encodeURIComponent(anonClientId)).then(function (res) {
+            if (res.ok) return res.json();
+            return null;
+        }).then(function (data) {
+            if (data) {
+                if (data.counts) updateReactionCounts(data.counts);
+                highlightUserReaction(data.userReaction || null);
+            }
+        }).catch(function () {});
     }
 
     function spawnFloatingReaction(type, sourceEl) {
@@ -1522,17 +1567,23 @@ document.addEventListener('DOMContentLoaded', function () {
             }, 300);
         }
 
-        spawnFloatingReaction(type, btnEl);
+        // Spawn particle only if we're selecting or switching to a new reaction
+        if (currentUserReaction !== type) {
+            spawnFloatingReaction(type, btnEl);
+        }
 
         fetch('/api/reactions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: type })
+            body: JSON.stringify({ type: type, clientId: anonClientId })
         }).then(function (res) {
             return res.json();
         }).then(function (data) {
-            if (data && data.counts) {
-                updateReactionCounts(data.counts);
+            if (data) {
+                if (data.counts) {
+                    updateReactionCounts(data.counts);
+                }
+                highlightUserReaction(data.userReaction || null);
             }
         }).catch(function (err) {
             console.error("Failed to post reaction", err);
@@ -1555,13 +1606,8 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    // Initial reactions fetch
-    fetch('/api/reactions').then(function (res) {
-        if (res.ok) return res.json();
-        return null;
-    }).then(function (data) {
-        if (data) updateReactionCounts(data);
-    }).catch(function () {});
+    // Initial reactions & user vote fetch
+    refreshReactionsState();
 
     // Progressive Web App (PWA) Support
     if ('serviceWorker' in navigator) {

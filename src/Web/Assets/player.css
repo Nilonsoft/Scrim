@@ -1491,6 +1491,41 @@ body {
     transform: scale(1.22);
 }
 
+.reaction-btn.active {
+    font-weight: 700;
+}
+
+.reaction-btn[data-reaction="thumbs_up"].active {
+    background: rgba(56, 189, 248, 0.22);
+    border-color: #38bdf8;
+    box-shadow: 0 0 16px rgba(56, 189, 248, 0.45);
+    color: #ffffff;
+}
+
+.reaction-btn[data-reaction="heart"].active,
+.reaction-btn.reaction-love.active {
+    background: rgba(244, 63, 94, 0.24);
+    border-color: #f43f5e;
+    box-shadow: 0 0 16px rgba(244, 63, 94, 0.5);
+    color: #ffffff;
+}
+
+.reaction-btn[data-reaction="thumbs_down"].active {
+    background: rgba(148, 163, 184, 0.22);
+    border-color: #cbd5e1;
+    box-shadow: 0 0 14px rgba(148, 163, 184, 0.35);
+    color: #ffffff;
+}
+
+.reaction-btn.active .reaction-count {
+    color: #ffffff;
+    font-weight: 800;
+}
+
+.reaction-btn.active .reaction-emoji {
+    transform: scale(1.18);
+}
+
 .reaction-emoji {
     font-size: 14px;
     line-height: 1;

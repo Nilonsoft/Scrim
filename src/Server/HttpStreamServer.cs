@@ -606,13 +606,28 @@ namespace Scrim.Server {
             }
         }
 
+        private string ComputeUserHash(HttpListenerContext context, string? rawClientId) {
+            string ip = context.Request.Headers["X-Forwarded-For"] ?? context.Request.RemoteEndPoint?.Address.ToString() ?? "unknown";
+            string userAgent = context.Request.Headers["User-Agent"] ?? "";
+            string client = string.IsNullOrWhiteSpace(rawClientId) ? "anon" : rawClientId.Trim();
+            string raw = $"{ip}_{client}_{userAgent}";
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            byte[] bytes = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(raw));
+            return Convert.ToHexString(bytes).Substring(0, 16);
+        }
+
         private void HandleReactionGetRequest(HttpListenerContext context) {
             try {
                 var response = context.Response;
                 response.ContentType = "application/json; charset=utf-8";
                 response.Headers.Add("Access-Control-Allow-Origin", "*");
+                string rawClientId = context.Request.QueryString["clientId"] ?? "";
+                string userHash = ComputeUserHash(context, rawClientId);
+
                 var counts = _reactionService.CurrentCounts;
-                string json = $"{{\"thumbsUp\":{counts.ThumbsUp},\"thumbsDown\":{counts.ThumbsDown},\"heart\":{counts.Heart}}}";
+                string? userReaction = _reactionService.GetUserReaction(userHash);
+                string userReactionJson = userReaction != null ? $"\"{EscapeJson(userReaction)}\"" : "null";
+                string json = $"{{\"thumbsUp\":{counts.ThumbsUp},\"thumbsDown\":{counts.ThumbsDown},\"heart\":{counts.Heart},\"userReaction\":{userReactionJson}}}";
                 byte[] buffer = System.Text.Encoding.UTF8.GetBytes(json);
                 response.ContentLength64 = buffer.Length;
                 response.OutputStream.Write(buffer, 0, buffer.Length);
@@ -630,12 +645,17 @@ namespace Scrim.Server {
                 var typeMatch = System.Text.RegularExpressions.Regex.Match(body, "\"type\"\\s*:\\s*\"(.*?)\"");
                 string reactionType = typeMatch.Success ? typeMatch.Groups[1].Value : (context.Request.QueryString["type"] ?? "");
 
-                var counts = _reactionService.AddReaction(reactionType);
+                var clientMatch = System.Text.RegularExpressions.Regex.Match(body, "\"clientId\"\\s*:\\s*\"(.*?)\"");
+                string rawClientId = clientMatch.Success ? clientMatch.Groups[1].Value : (context.Request.QueryString["clientId"] ?? "");
+                string userHash = ComputeUserHash(context, rawClientId);
+
+                var counts = _reactionService.AddOrSwitchReaction(userHash, reactionType, out string? activeReaction);
 
                 context.Response.ContentType = "application/json; charset=utf-8";
                 context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
                 context.Response.StatusCode = 200;
-                string json = $"{{\"success\":true,\"reaction\":\"{EscapeJson(reactionType)}\",\"counts\":{{\"thumbsUp\":{counts.ThumbsUp},\"thumbsDown\":{counts.ThumbsDown},\"heart\":{counts.Heart}}}}}";
+                string activeReactionJson = activeReaction != null ? $"\"{EscapeJson(activeReaction)}\"" : "null";
+                string json = $"{{\"success\":true,\"userReaction\":{activeReactionJson},\"counts\":{{\"thumbsUp\":{counts.ThumbsUp},\"thumbsDown\":{counts.ThumbsDown},\"heart\":{counts.Heart}}}}}";
                 byte[] ok = System.Text.Encoding.UTF8.GetBytes(json);
                 context.Response.OutputStream.Write(ok, 0, ok.Length);
             } catch {

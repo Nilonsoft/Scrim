@@ -1859,10 +1859,11 @@
                     <h4 class="media-meta-title">@CurrentTrackTitle</h4>
                     <div class="media-meta-artist">@CurrentTrackArtist</div>
                     <div class="media-meta-extra">@CurrentTrackExtra</div>
-                    <div class="media-reactions-row" style="display: flex; gap: 8px; align-items: center; margin-top: 6px; font-size: 12px; color: #94a3b8;">
+                    <div class="media-reactions-row" style="display: flex; gap: 8px; align-items: center; margin-top: 6px; font-size: 12px; color: #94a3b8; flex-wrap: wrap;">
                         <span title="Thumbs Up" style="background: rgba(255,255,255,0.06); padding: 2px 8px; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px;">👍 <strong style="color: #38bdf8;">@ReactionService.CurrentCounts.ThumbsUp</strong></span>
                         <span title="Love" style="background: rgba(255,255,255,0.06); padding: 2px 8px; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px;">❤️ <strong style="color: #f43f5e;">@ReactionService.CurrentCounts.Heart</strong></span>
                         <span title="Thumbs Down" style="background: rgba(255,255,255,0.06); padding: 2px 8px; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px;">👎 <strong style="color: #94a3b8;">@ReactionService.CurrentCounts.ThumbsDown</strong></span>
+                        <button class="pill-option" style="padding: 1px 6px; font-size: 10px; background: transparent; border: 1px solid rgba(255,255,255,0.15); color: #94a3b8; border-radius: 10px;" @onclick="ResetCurrentSongReactions" title="Reset reactions for current track">Reset</button>
                     </div>
                 </div>
             </div>
@@ -2451,6 +2452,11 @@
 
     private void OnReactionCountsReset(ReactionCounts counts) {
         InvokeAsync(StateHasChanged);
+    }
+
+    private void ResetCurrentSongReactions() {
+        ReactionService.Reset();
+        StateHasChanged();
     }
 
     private void SendHostMessage() {
