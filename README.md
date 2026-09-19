@@ -1,43 +1,100 @@
 # Scrim Broadcast Console
 
-Scrim is a Windows desktop radio broadcast console built with C# and Blazor Hybrid. It intercepts audio streams from a targeted application in real time, overlays an on-air DJ microphone bus with automatic sidechain ducking, encodes the mixed stream on the fly across multiple formats, and broadcasts the audio as an Icecast-compatible HTTP stream.
+[![Windows](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-blue?logo=windows)](https://microsoft.com)
+[![.NET 10](https://img.shields.io/badge/.NET-10.0-purple?logo=dotnet)](https://dotnet.microsoft.com)
+[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+
+**Scrim** is a high-performance Windows desktop radio broadcast console and streaming station built with C# and Blazor Hybrid. It intercepts desktop or application audio in real time, overlays an on-air DJ microphone with automatic sidechain ducking, provides granular DSP voice changers, transcodes streams on the fly into MP3, AAC, Opus, or lossless FLAC, and broadcasts via an embedded HTTP streaming server and interactive HTML5 web player.
+
+---
+
+## Key Features
+
+### ⚡ 1-Click Virtual Audio Setup
+- **Integrated WHQL Driver**: Bundles the official Microsoft-certified VB-Audio Virtual Cable driver for silent background app capture.
+- **Zero-Configuration Routing**: Programmatically sets Windows default playback to the virtual cable via CoreAudio policy (`IPolicyConfig`), automatically streaming all PC audio and music apps into Scrim without manual Windows Mixer setup.
+- **1-Click Speaker Restoration**: Safely restores your physical speakers/headphones at any time with a single click.
+
+### 🎚️ Modular Studio Console
+- **3-Column Drag & Drop Interface**: Customize your studio layout with 10 reorderable cards (Audio Routing, Network & Internet, Master VU, Voice FX, Song Queue, Encoding, Media Player, Soundboard, Website Branding, and Playlist).
+- **Proportional Column Layouts**: Toggle between **Studio** (Little-Big-Little) and **Equal** (1fr-1fr-1fr) sizing modes.
+- **Synchronized ON AIR & Transmitter (TX)**: Visual status badges and real-time audio transmission indicators keep you informed when sound is flowing.
+- **Calibrated Stereo dB VU Meters**: High-frequency analog-style response bars with precise numeric decibel readouts (`-40 dB` to `0.0 dB`).
+
+### 🎙️ Live Microphone & Voice FX Engine
+- **Push-to-Talk & Push-to-Mute**: Flexible hardware-style microphone switching.
+- **Headphone Sidetone (Hear Myself)**: Ultra-low latency (25ms) local monitoring so you can hear your voice in real time.
+- **Off-Air Mic Check**: Test microphone levels, proximity, and voice changers in your headphones without broadcasting to listeners.
+- **DSP Voice Changers**: Real-time granular pitch shifting and vocal formant filtering with presets for **Anime Girl**, **Woman**, **Man**, **Robot**, **Radio**, and **Alien**, plus Lua/JSON/DLL plugin expansion.
+- **Sidechain Ducking**: Automatically attenuates background music by **-14 dB** with broadcast-standard attack (20ms) and release (250ms) curves when speaking.
+
+### 📻 Zero-Latency Live Transcoding
+- **Multi-Format Support**: Broadcast in universal **MP3**, high-efficiency **AAC**, speech-optimized **Opus**, or bit-perfect lossless **FLAC**.
+- **On-The-Fly Hot-Swapping**: Switch audio codecs and bitrates (`64k` to `320k`) instantly while live on the air without dropping listener connections.
+
+### 🌐 Network & Internet Broadcasting
+- **Local Wi-Fi / LAN Sharing**: Share direct playback links for devices on your home network.
+- **Automatic UPnP Port Forwarding**: Effortlessly broadcast over the internet without manual router port configuration.
+- **Custom Domain / Host Override**: Enter custom domain names or DDNS hostnames (e.g. `radio.mydomain.com:8080`) that propagate across all share links.
+- **Direct Media Player Endpoint**: Native `/stream` endpoint for direct listening in VLC, Winamp, foobar2000, and mobile streaming apps.
+
+### 🎨 Modern Responsive Web Player
+- **Dark Glassmorphism Interface**: Real-time track metadata and album art synchronized via Windows System Media Transport Controls (SMTC).
+- **4 Selectable Visualizers**: Choose between Neon Frequency Spectrum, Dynamic Waveform, Glowing Retro VU Meter, or Pulsing Sound Bars.
+- **Listener Song Requests**: Remote listeners can submit song requests and notes directly to the DJ's on-air moderation queue.
+
+---
 
 ## Prerequisites
 
-Scrim relies on **FFmpeg** to encode audio streams on the fly into MP3, AAC, or Opus formats. You must have FFmpeg installed and accessible in your system's `PATH`.
+- **Windows 10 / 11 (64-bit)**
+- **FFmpeg**: Required for on-the-fly audio transcoding. Must be accessible in your system's `PATH`.
+  ```powershell
+  winget install ffmpeg
+  ```
 
-### Installing FFmpeg on Windows:
-1. Open PowerShell as Administrator.
-2. Install via Winget:
+---
+
+## Quick Start
+
+1. **Clone and Build**:
    ```powershell
-   winget install ffmpeg
+   git clone https://github.com/Nilonsoft/Scrim.git
+   cd Scrim
+   dotnet build src/Scrim.csproj
    ```
-3. Restart your terminal or the Scrim application to ensure the `PATH` variables have refreshed.
+2. **Run Scrim**:
+   ```powershell
+   dotnet run --project src/Scrim.csproj
+   ```
+3. **Set Up Virtual Audio**: Click **`[ ⚡ Setup Virtual Device ]`** in the **Audio Routing** card to automatically configure audio routing.
+4. **Go On Air**: Click **`🔴 ON AIR`** to start broadcasting!
 
-## Voice Changers & Processing FX
-
-Scrim includes built-in real-time DSP voice changers with dual-tap granular pitch shifting and vocal formant filtering:
-- **Anime Girl**: High-pitch shift (+7.2 semitones, 1.52x ratio) with chest resonance high-pass cut (<320Hz) and sparkling presence boost (3.5kHz - 8kHz) for a cute anime heroine vocal tone.
-- **Woman**: Shifts vocal fundamental frequency up (+4.2 semitones) and filters low-end rumble for a clear, natural feminine tone.
-- **Man**: Shifts pitch down (-4.5 semitones) and shapes low-mid chest resonance for a deep baritone broadcast voice.
-- **Robot**: 50Hz metallic ring modulation.
-- **Radio**: Vintage bandpass speaker filtering with soft clipping saturation.
-- **Alien**: High-frequency frequency-modulated tremolo.
-- Custom extensions via Lua scripts, JSON DSP effect chains, and .NET DLL plugins.
+---
 
 ## Documentation
 
-All detailed project specifications, architectural guides, and development resources are stored in the `/docs` directory.
+Comprehensive guides, specifications, and architecture documents are located in the [`docs/`](docs/) directory:
 
-- [Project Specification & Master Implementation Guide](docs/spec.md)
-- [Network & Outside Broadcasting Guide](docs/network-broadcasting.md)
-- [Plugin Development Guide](docs/plugin-development.md)
+- 📖 **[User & Feature Guide](docs/user-guide.md)**: Complete walkthrough of all 10 console cards, virtual audio, mic controls, and web player options.
+- 🌐 **[Network & Outside Broadcasting Guide](docs/network-broadcasting.md)**: Details on local LAN sharing, UPnP port forwarding, custom domain overrides, and media player endpoints.
+- 📐 **[Project Specification & Architecture](docs/spec.md)**: Deep technical dive into the WASAPI loopback capture, mixing pipelines, and transcoding engine.
+- 🔌 **[Plugin Development Guide](docs/plugin-development.md)**: Instructions for developing custom voice effects and DSP processors via Lua, JSON, or C# DLLs.
 
-## Building & Deploying
+---
 
-To build, test, or publish Scrim as a self-contained executable, use the provided PowerShell script:
+## Building the Installer
+
+Scrim includes automated WiX Toolset v5 scripts to generate a standalone Windows MSI installer package:
 
 ```powershell
-.\scrim.ps1 -Build
-.\scrim.ps1 -Publish
+pwsh -NoProfile -File ./build-installer.ps1
 ```
+
+The resulting installer (`bin/ScrimSetup-v1.0.0.msi`) bundles all dependencies and driver payloads for offline 1-click installation with automatic desktop shortcuts and in-place upgrade support.
+
+---
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).

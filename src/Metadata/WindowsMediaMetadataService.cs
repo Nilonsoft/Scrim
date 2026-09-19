@@ -117,7 +117,7 @@ namespace Scrim.Metadata {
             }
 
             try {
-                var session = _sessionManager?.GetCurrentSession();
+                var session = await GetBestMediaSessionAsync();
                 if (session == null) return;
 
                 var props = await session.TryGetMediaPropertiesAsync();
@@ -125,6 +125,13 @@ namespace Scrim.Metadata {
                     string title = props.Title?.Trim() ?? string.Empty;
                     string artist = props.Artist?.Trim() ?? string.Empty;
                     string album = props.AlbumTitle?.Trim() ?? string.Empty;
+
+                    // Never overwrite a playing track's info or artwork with a browser playing Scrim's own stream
+                    if (IsStreamArtifactOrEmpty(title, artist)) {
+                        if (!string.IsNullOrEmpty(CurrentMetadata.Title) && CurrentMetadata.Title != "Awaiting Audio Source...") {
+                            return;
+                        }
+                    }
 
                     TimeSpan duration = TimeSpan.Zero;
                     TimeSpan position = TimeSpan.Zero;
@@ -146,6 +153,7 @@ namespace Scrim.Metadata {
                     } catch { }
 
                     bool trackChanged = !string.IsNullOrEmpty(title) && 
+                        !IsStreamArtifactOrEmpty(title, artist) &&
                         (title != CurrentMetadata.Title || artist != CurrentMetadata.Artist || album != CurrentMetadata.Album);
 
                     byte[]? artBytes = CurrentMetadata.AlbumArt;
@@ -203,6 +211,57 @@ namespace Scrim.Metadata {
                     }
                 }
             } catch { }
+        }
+
+        private static bool IsStreamArtifactOrEmpty(string? title, string? artist) {
+            if (string.IsNullOrWhiteSpace(title)) return true;
+            string t = title.Trim().ToLowerInvariant();
+            if (t == "stream" || t == "stream.mp3" || t == "live" || t == "listen" || 
+                t == "localhost" || t.StartsWith("localhost:") || t.StartsWith("127.0.0.1:") || 
+                t.StartsWith("http://") || t.StartsWith("https://") || t == "scrim" ||
+                t == "awaiting audio source..." || t == "awaiting track info..." || t == "unknown track") {
+                return true;
+            }
+            return false;
+        }
+
+        private async Task<GlobalSystemMediaTransportControlsSession?> GetBestMediaSessionAsync() {
+            if (_sessionManager == null) return null;
+
+            try {
+                var sessions = _sessionManager.GetSessions();
+                if (sessions == null || sessions.Count == 0) {
+                    return _sessionManager.GetCurrentSession();
+                }
+
+                GlobalSystemMediaTransportControlsSession? bestSession = null;
+                bool bestHasArt = false;
+
+                foreach (var s in sessions) {
+                    try {
+                        var props = await s.TryGetMediaPropertiesAsync();
+                        if (props == null) continue;
+                        string t = props.Title?.Trim() ?? "";
+                        if (IsStreamArtifactOrEmpty(t, props.Artist)) continue;
+
+                        var pb = s.GetPlaybackInfo();
+                        bool isPlaying = pb != null && pb.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+                        bool hasThumb = props.Thumbnail != null;
+
+                        if (bestSession == null) {
+                            bestSession = s;
+                            bestHasArt = hasThumb;
+                        } else if (isPlaying && (!bestHasArt || hasThumb)) {
+                            bestSession = s;
+                            bestHasArt = hasThumb;
+                        }
+                    } catch { }
+                }
+
+                return bestSession ?? _sessionManager.GetCurrentSession();
+            } catch {
+                return _sessionManager?.GetCurrentSession();
+            }
         }
 
         private static async Task<(string? ArtUrl, TimeSpan Duration)> FetchItunesInfoAsync(string artist, string title) {

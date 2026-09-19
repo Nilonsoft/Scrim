@@ -950,12 +950,9 @@
             ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
             EnsureAudioMonitoring(SelectedProcessId);
 
-            bool defaultSet = VirtualDeviceService.SetDefaultPlaybackDevice(targetDeviceId);
-            if (defaultSet) {
-                VirtualCableInstallStatus = "✔ Ready! Windows audio is now routed through Virtual Cable into Scrim.";
-            } else {
-                VirtualCableInstallStatus = "✔ Scrim is now capturing Virtual Cable! (Click Windows Mixer to route specific apps).";
-            }
+            // Open Windows Sound App Volume Settings so the user can easily assign their music player
+            VirtualDeviceService.OpenAppVolumeSettings();
+            VirtualCableInstallStatus = $"✔ Virtual device ready! In the Windows Sound window that just opened, set your music app's output to '{targetDeviceName ?? "CABLE Input"}'.";
         } else {
             VirtualCableInstallStatus = "Driver installed. If device is not immediately visible, restart Scrim or check Windows Sound.";
         }
@@ -1420,16 +1417,14 @@
                                 }
                             </div>
                             <div style="font-size: 11px; color: #94a3b8; margin-top: 3px; max-width: 380px;">
-                                Automatically sets up a virtual device so your apps and music play directly into Scrim without manual routing.
+                                Installs and connects an isolated virtual cable so your music app streams cleanly to Scrim without sending your other PC sounds.
                             </div>
                         </div>
 
                         <div style="display: flex; gap: 8px; align-items: center;">
-                            @if (IsVirtualDeviceActive && !string.IsNullOrEmpty(OriginalDefaultDeviceId)) {
-                                <button class="scrim-btn-secondary" style="padding: 6px 12px; font-size: 11px;" @onclick="RestoreOriginalAudioDevice" title="Switch Windows default playback back to your original speakers">
-                                    ↩ Restore Speakers
-                                </button>
-                            }
+                            <button class="scrim-btn-secondary" style="padding: 7px 12px; font-size: 11px;" @onclick="OpenWindowsAppVolume" title="Open Windows Volume Mixer to assign your music app to CABLE Input">
+                                ⚙ Sound Settings
+                            </button>
                             <button class="scrim-btn-primary" style="padding: 7px 16px; font-size: 12px; font-weight: 700; box-shadow: 0 0 12px rgba(0, 210, 255, 0.3);" 
                                     @onclick="OneClickSetupVirtualAudio" disabled="@IsInstallingVirtualCable">
                                 @(IsInstallingVirtualCable ? "⏳ Setting Up..." : (IsVirtualDeviceActive ? "✔ Virtual Audio Ready" : "⚡ Setup Virtual Device"))
@@ -1438,9 +1433,13 @@
                     </div>
 
                     @if (!string.IsNullOrEmpty(VirtualCableInstallStatus)) {
-                        <div style="font-size: 11px; color: #38bdf8; margin-top: 8px; padding: 6px 10px; background: rgba(0,0,0,0.35); border-radius: 6px; display: flex; align-items: center; justify-content: space-between;">
+                        <div style="font-size: 11px; color: #38bdf8; margin-top: 8px; padding: 6px 10px; background: rgba(0,0,0,0.35); border-radius: 6px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
                             <span>@VirtualCableInstallStatus</span>
-                            <button class="scrim-btn-secondary" style="padding: 2px 8px; font-size: 10px;" @onclick="OpenWindowsAppVolume" title="Open Windows Volume Mixer">⚙ Windows Mixer</button>
+                            <button class="scrim-btn-secondary" style="padding: 2px 8px; font-size: 10px; white-space: nowrap;" @onclick="OpenWindowsAppVolume" title="Open Windows Volume Mixer">Open Settings ↗</button>
+                        </div>
+                    } else if (IsVirtualDeviceActive) {
+                        <div style="font-size: 10px; color: #64748b; margin-top: 6px;">
+                            💡 In the Windows Sound window: Find your music app (Spotify, browser, etc.) and change its <b>Output</b> dropdown to <b>CABLE Input</b>.
                         </div>
                     }
                 </div>

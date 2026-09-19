@@ -683,32 +683,48 @@ document.addEventListener('DOMContentLoaded', function () {
         const albumBadge = document.getElementById('albumBadge');
         const albumSub = document.getElementById('albumSub');
 
-        const hasRealTrack = title && title.trim() !== "" && 
-            title !== "Awaiting Audio Source..." && 
-            title !== "Awaiting Track Info..." && 
-            title !== "Unknown Track";
+        const cleanTitle = (title || "").trim();
+        const hasRealTrack = cleanTitle !== "" && 
+            cleanTitle !== "Awaiting Audio Source..." && 
+            cleanTitle !== "Awaiting Track Info..." && 
+            cleanTitle !== "Unknown Track" &&
+            cleanTitle.toLowerCase() !== "stream" &&
+            cleanTitle.toLowerCase() !== "stream.mp3" &&
+            cleanTitle.toLowerCase() !== "live" &&
+            cleanTitle.toLowerCase() !== "listen" &&
+            !cleanTitle.startsWith("http://") &&
+            !cleanTitle.startsWith("https://") &&
+            !cleanTitle.includes("localhost:") &&
+            !cleanTitle.includes("127.0.0.1:");
 
         if (hasRealTrack) {
             // Real track info received: reveal actual artwork and clean typography
             if (albumArt) {
                 albumArt.classList.remove('loading');
                 if (hasArt && albumArtUrl) {
-                    albumArt.style.backgroundImage = "url('" + albumArtUrl + "')";
+                    const cacheBuster = albumArtUrl.startsWith('/') ? (albumArtUrl.includes('?') ? '&' : '?') + 't=' + Date.now() : '';
+                    albumArt.style.backgroundImage = "url('" + albumArtUrl + cacheBuster + "')";
                     albumArt.style.backgroundSize = "cover";
                     albumArt.style.backgroundPosition = "center";
-                } else if (!hasArt) {
+                } else if (!hasArt && !albumArt.style.backgroundImage) {
                     albumArt.style.backgroundImage = "linear-gradient(135deg, #1b3d68 0%, #059669 50%, #dc2626 100%)";
                 }
             }
             if (metaContainer) metaContainer.classList.remove('meta-loading');
 
-            if (trackTitle) trackTitle.textContent = title;
+            if (trackTitle) trackTitle.textContent = cleanTitle;
             if (trackArtist) trackArtist.textContent = (artist || "LIVE STREAM").toUpperCase();
-            if (bottomTrackName) bottomTrackName.textContent = title;
+            if (bottomTrackName) bottomTrackName.textContent = cleanTitle;
 
-            if (albumBadge) albumBadge.textContent = title;
+            if (albumBadge) albumBadge.textContent = cleanTitle;
             if (albumSub) albumSub.textContent = (artist || "LIVE STREAM").toUpperCase();
         } else {
+            // If already displaying a valid track, don't revert to placeholder on temporary stream/connection events
+            const currentTitle = trackTitle ? trackTitle.textContent : "";
+            if (currentTitle && currentTitle !== "Awaiting Track Info..." && currentTitle !== "Awaiting Audio Source..." && currentTitle !== "Awaiting Stream...") {
+                return;
+            }
+
             // No track info from app: show sleek radar loading animation
             if (albumArt) {
                 albumArt.classList.add('loading');
