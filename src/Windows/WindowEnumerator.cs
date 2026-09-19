@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -21,8 +22,7 @@ namespace Scrim.Windows {
         private static extern bool IsWindowVisible(nint hWnd);
 
         public IEnumerable<WindowInfo> GetActiveWindows() {
-            var windows = new List<WindowInfo>();
-            var seen = new HashSet<(uint, string)>();
+            var windowMap = new Dictionary<uint, WindowInfo>();
             uint myPid = (uint)Environment.ProcessId;
 
             EnumWindows((hWnd, lParam) => {
@@ -37,15 +37,20 @@ namespace Scrim.Windows {
                         title != "Program Manager") {
                         GetWindowThreadProcessId(hWnd, out uint processId);
 
-                        if (processId != myPid && !seen.Contains((processId, title))) {
+                        if (processId != myPid) {
                             try {
-                                var process = Process.GetProcessById((int)processId);
-                                seen.Add((processId, title));
-                                windows.Add(new WindowInfo {
-                                    ProcessId = processId,
-                                    Title = title,
-                                    ProcessName = process.ProcessName
-                                });
+                                if (windowMap.TryGetValue(processId, out var existing)) {
+                                    if (title.Length > existing.Title.Length) {
+                                        existing.Title = title;
+                                    }
+                                } else {
+                                    var process = Process.GetProcessById((int)processId);
+                                    windowMap[processId] = new WindowInfo {
+                                        ProcessId = processId,
+                                        Title = title,
+                                        ProcessName = process.ProcessName
+                                    };
+                                }
                             } catch { }
                         }
                     }
@@ -53,7 +58,10 @@ namespace Scrim.Windows {
                 return true;
             }, nint.Zero);
 
-            return windows;
+            return windowMap.Values
+                .OrderBy(w => w.ProcessName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(w => w.Title, StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
     }
 }

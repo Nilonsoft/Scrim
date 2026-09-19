@@ -779,7 +779,7 @@
                 Windows = newWindows;
                 var savedName = ProfileManager.CurrentProfile.TargetProcessName;
                 if (!string.IsNullOrEmpty(savedName) && !savedName.Equals("System Audio", StringComparison.OrdinalIgnoreCase)) {
-                    if (SelectedProcessId == 0 || !Windows.Any(w => w.ProcessId == SelectedProcessId)) {
+                    if (SelectedProcessId != 0 && !Windows.Any(w => w.ProcessId == SelectedProcessId)) {
                         var reconnected = Windows.FirstOrDefault(w => string.Equals(w.ProcessName, savedName, StringComparison.OrdinalIgnoreCase))
                                        ?? Windows.FirstOrDefault(w => w.Title.Contains(savedName, StringComparison.OrdinalIgnoreCase));
                         if (reconnected != null) {
@@ -1597,7 +1597,7 @@
                     <label class="scrim-label" style="margin: 0; font-size: 11px;">App Volume on Stream</label>
                     <div style="display: flex; align-items: center; gap: 6px;">
                         <span style="font-family: monospace; font-size: 11px; font-weight: 700; color: #00d2ff;">@(ProfileManager.CurrentProfile.AppStreamVolume)%</span>
-                        <button class="pill-option" style="padding: 2px 6px; font-size: 9px;" @onclick="@(() => SetAppStreamVolume(100))" title="Reset to 100%">100%</button>
+                        <button class="pill-option" style="padding: 2px 6px; font-size: 9px;" @onclick="@(() => SetAppStreamVolume(100))" title="Reset to 100%">Reset</button>
                         <button class="pill-option @(ProfileManager.CurrentProfile.AppStreamVolume == 0 ? "active" : "")" 
                                 style="padding: 2px 6px; font-size: 9px; @(ProfileManager.CurrentProfile.AppStreamVolume == 0 ? "background: #ef4444; border-color: #ef4444; color: white;" : "")" 
                                 @onclick="ToggleMuteStreamVolume" 
