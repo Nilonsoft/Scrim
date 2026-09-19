@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using Windows.Media.Control;
 
 namespace Scrim.Metadata {
@@ -322,17 +323,40 @@ namespace Scrim.Metadata {
             }
         }
 
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, nuint dwExtraInfo);
+
+        private const byte VK_MEDIA_NEXT_TRACK = 0xB0;
+        private const byte VK_MEDIA_PREV_TRACK = 0xB1;
+        private const byte VK_MEDIA_PLAY_PAUSE = 0xB3;
+        private const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
+        private const uint KEYEVENTF_KEYUP = 0x0002;
+
+        private static void SendMediaKey(byte vk) {
+            try {
+                keybd_event(vk, 0, KEYEVENTF_EXTENDEDKEY, 0);
+                keybd_event(vk, 0, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0);
+            } catch { }
+        }
+
         public async Task<bool> TogglePlayPauseAsync() {
             try {
                 if (_sessionManager == null) {
                     _sessionManager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
                 }
-                var session = _sessionManager?.GetCurrentSession();
+                var session = await GetBestMediaSessionAsync();
                 if (session != null) {
-                    return await session.TryTogglePlayPauseAsync();
+                    bool ok = await session.TryTogglePlayPauseAsync();
+                    if (ok) {
+                        _ = Task.Delay(300).ContinueWith(_ => UpdateMetadataAsync());
+                        return true;
+                    }
                 }
             } catch { }
-            return false;
+
+            SendMediaKey(VK_MEDIA_PLAY_PAUSE);
+            _ = Task.Delay(300).ContinueWith(_ => UpdateMetadataAsync());
+            return true;
         }
 
         public async Task<bool> SkipNextAsync() {
@@ -340,12 +364,19 @@ namespace Scrim.Metadata {
                 if (_sessionManager == null) {
                     _sessionManager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
                 }
-                var session = _sessionManager?.GetCurrentSession();
+                var session = await GetBestMediaSessionAsync();
                 if (session != null) {
-                    return await session.TrySkipNextAsync();
+                    bool ok = await session.TrySkipNextAsync();
+                    if (ok) {
+                        _ = Task.Delay(300).ContinueWith(_ => UpdateMetadataAsync());
+                        return true;
+                    }
                 }
             } catch { }
-            return false;
+
+            SendMediaKey(VK_MEDIA_NEXT_TRACK);
+            _ = Task.Delay(300).ContinueWith(_ => UpdateMetadataAsync());
+            return true;
         }
 
         public async Task<bool> SkipPreviousAsync() {
@@ -353,12 +384,19 @@ namespace Scrim.Metadata {
                 if (_sessionManager == null) {
                     _sessionManager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
                 }
-                var session = _sessionManager?.GetCurrentSession();
+                var session = await GetBestMediaSessionAsync();
                 if (session != null) {
-                    return await session.TrySkipPreviousAsync();
+                    bool ok = await session.TrySkipPreviousAsync();
+                    if (ok) {
+                        _ = Task.Delay(300).ContinueWith(_ => UpdateMetadataAsync());
+                        return true;
+                    }
                 }
             } catch { }
-            return false;
+
+            SendMediaKey(VK_MEDIA_PREV_TRACK);
+            _ = Task.Delay(300).ContinueWith(_ => UpdateMetadataAsync());
+            return true;
         }
 
         public async Task<bool> SeekAsync(TimeSpan position) {
@@ -366,9 +404,13 @@ namespace Scrim.Metadata {
                 if (_sessionManager == null) {
                     _sessionManager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
                 }
-                var session = _sessionManager?.GetCurrentSession();
+                var session = await GetBestMediaSessionAsync();
                 if (session != null) {
-                    return await session.TryChangePlaybackPositionAsync((long)position.Ticks);
+                    bool ok = await session.TryChangePlaybackPositionAsync((long)position.Ticks);
+                    if (ok) {
+                        _ = Task.Delay(300).ContinueWith(_ => UpdateMetadataAsync());
+                        return true;
+                    }
                 }
             } catch { }
             return false;
