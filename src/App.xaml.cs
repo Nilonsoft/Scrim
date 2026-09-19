@@ -23,6 +23,7 @@ namespace Scrim {
             services.AddSingleton<IThemeService, ThemeService>();
 
             // Audio & Encoding
+            services.AddSingleton<IFFmpegService, FFmpegService>();
             services.AddSingleton<VoiceEffectLoader>();
             services.AddSingleton<MultiFormatTranscoder>();
             services.AddSingleton<AudioDuckingMixer>();

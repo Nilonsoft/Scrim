@@ -54,7 +54,7 @@
 ## Prerequisites
 
 - **Windows 10 / 11 (64-bit)**
-- **FFmpeg**: Required for on-the-fly audio transcoding. Must be accessible in your system's `PATH`.
+- **FFmpeg**: Required for on-the-fly audio transcoding (MP3, AAC, FLAC, Opus). Scrim automatically detects FFmpeg on installation and launch; if missing, an in-app guidance modal provides 1-click `winget` installation, package manager commands, and manual setup instructions.
   ```powershell
   winget install ffmpeg
   ```

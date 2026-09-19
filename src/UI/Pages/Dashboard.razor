@@ -29,6 +29,7 @@
 @inject ILiveChatService ChatService
 @inject ISongReactionService ReactionService
 @inject ISongHistoryService HistoryService
+@inject IFFmpegService FFmpegService
 
 <!-- Top Header Bar -->
 <header class="scrim-topbar">
@@ -64,6 +65,11 @@
                 <div id="topbar-tx-indicator" class="topbar-tx-fill"></div>
             </div>
         </div>
+        @if (!FFmpegService.IsInstalled) {
+            <button class="scrim-btn-danger" style="padding: 4px 10px; font-size: 11px; display: flex; align-items: center; gap: 6px; background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #ef4444; border-radius: 6px; cursor: pointer;" @onclick="@(() => ShowFFmpegModal = true)" title="FFmpeg not detected. Click for installation instructions.">
+                <span>⚠️ FFmpeg Missing</span>
+            </button>
+        }
     </div>
 
     <!-- Right Listeners Count & Web Player Link -->
@@ -208,6 +214,93 @@
             
             <div style="margin-top: 18px; text-align: right;">
                 <button class="scrim-btn-secondary" style="padding: 6px 16px; font-size: 12px;" @onclick="@(() => ShowShareModal = false)">Close</button>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- FFmpeg Installation Instructions Modal -->
+@if (ShowFFmpegModal) {
+    <div style="position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 1000;" @onclick="@(() => ShowFFmpegModal = false)">
+        <div style="background: #181b22; border: 1px solid #ef4444; border-radius: 12px; padding: 24px; max-width: 580px; width: 92%; box-shadow: 0 16px 40px rgba(0,0,0,0.9);" @onclick:stopPropagation="true">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+                <h3 style="margin: 0; font-size: 17px; color: #f87171; display: flex; align-items: center; gap: 8px;">
+                    ⚠️ FFmpeg Required for Streaming
+                </h3>
+                <button class="scrim-dots-btn" @onclick="@(() => ShowFFmpegModal = false)">✕</button>
+            </div>
+
+            <p style="font-size: 13px; color: #cbd5e1; margin-top: 0; margin-bottom: 16px; line-height: 1.5;">
+                Scrim requires <strong>FFmpeg</strong> on your computer to encode live audio into <strong>MP3, AAC, FLAC, and Opus</strong> streams for your listeners.
+            </p>
+
+            <div style="display: flex; flex-direction: column; gap: 14px;">
+                <!-- Option 1: winget (Recommended) -->
+                <div style="background: #12141a; border: 1px solid rgba(0, 210, 255, 0.4); border-radius: 8px; padding: 14px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-size: 11px; font-weight: 700; color: #00d2ff; letter-spacing: 0.5px;">RECOMMENDED (FASTEST) — WINDOWS PACKAGE MANAGER</span>
+                        <span style="font-size: 10px; background: rgba(0, 210, 255, 0.15); color: #00d2ff; padding: 2px 6px; border-radius: 4px;">1-Click</span>
+                    </div>
+                    <div style="font-size: 12px; color: #94a3b8; margin-bottom: 10px;">
+                        Open PowerShell or Windows Terminal and run:
+                    </div>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <div style="flex: 1; display: flex; align-items: center; background: #0c0e12; border: 1px solid #2d323e; border-radius: 6px; padding: 8px 12px; font-family: monospace; color: #38bdf8; font-size: 13px;">
+                            winget install ffmpeg
+                        </div>
+                        <button class="scrim-btn-primary" style="padding: 8px 16px; font-size: 12px; white-space: nowrap;" @onclick="CopyWingetCommand">
+                            @(CopiedWinget ? "✓ Copied!" : "Copy Command")
+                        </button>
+                    </div>
+                    <div style="margin-top: 10px; display: flex; justify-content: flex-end;">
+                        <button class="scrim-btn-secondary" style="font-size: 11px; padding: 4px 10px;" @onclick="LaunchPowerShellWinget" title="Launch a PowerShell window with the winget install command">
+                            ⚡ Open PowerShell with Command
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Option 2: Chocolatey & Scoop -->
+                <div style="background: #12141a; border: 1px solid #232731; border-radius: 8px; padding: 12px;">
+                    <div style="font-size: 11px; font-weight: 700; color: #94a3b8; letter-spacing: 0.5px; margin-bottom: 6px;">
+                        ALTERNATIVE PACKAGE MANAGERS
+                    </div>
+                    <div style="display: flex; gap: 12px; font-size: 12px; color: #cbd5e1; font-family: monospace;">
+                        <span style="background: #0c0e12; padding: 4px 8px; border-radius: 4px; border: 1px solid #1f232c;">choco install ffmpeg</span>
+                        <span style="background: #0c0e12; padding: 4px 8px; border-radius: 4px; border: 1px solid #1f232c;">scoop install ffmpeg</span>
+                    </div>
+                </div>
+
+                <!-- Option 3: Manual Download -->
+                <div style="background: #12141a; border: 1px solid #232731; border-radius: 8px; padding: 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <div style="font-size: 11px; font-weight: 700; color: #94a3b8; letter-spacing: 0.5px; margin-bottom: 4px;">
+                                MANUAL DOWNLOAD
+                            </div>
+                            <div style="font-size: 11px; color: #64748b;">
+                                Download FFmpeg build and extract ffmpeg.exe into your system PATH or Scrim's install folder.
+                            </div>
+                        </div>
+                        <button class="scrim-btn-secondary" style="padding: 6px 12px; font-size: 11px; white-space: nowrap;" @onclick='() => OpenInBrowser("https://ffmpeg.org/download.html")'>
+                            ffmpeg.org ↗
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            @if (FFmpegCheckResult != null) {
+                <div style="margin-top: 14px; padding: 8px 12px; border-radius: 6px; font-size: 12px; @(FFmpegCheckResult.StartsWith("✓") ? "background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid #22c55e;" : "background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid #ef4444;")">
+                    @FFmpegCheckResult
+                </div>
+            }
+
+            <div style="margin-top: 20px; display: flex; justify-content: space-between; align-items: center;">
+                <button class="scrim-btn-primary" style="background: #10b981; border-color: #10b981; padding: 8px 18px; font-size: 12px; display: flex; align-items: center; gap: 6px;" @onclick="CheckFFmpegStatus">
+                    <span>🔍 Check Again</span>
+                </button>
+                <button class="scrim-btn-secondary" style="padding: 8px 16px; font-size: 12px;" @onclick="@(() => ShowFFmpegModal = false)">
+                    Dismiss
+                </button>
             </div>
         </div>
     </div>
@@ -577,6 +670,10 @@
         IsLive = Hub.IsBroadcasting;
         Hub.BroadcastingStateChanged += OnHubBroadcastingStateChanged;
 
+        if (!FFmpegService.IsInstalled) {
+            ShowFFmpegModal = true;
+        }
+
         if (p.BroadcastOnOpen && !IsLive) {
             StartBroadcast();
         }
@@ -807,6 +904,10 @@
         if (IsLive) {
             StopBroadcast();
         } else {
+            if (!FFmpegService.IsInstalled) {
+                ShowFFmpegModal = true;
+                return;
+            }
             StartBroadcast();
         }
     }
@@ -819,6 +920,10 @@
     }
 
     private void StartBroadcast() {
+        if (!FFmpegService.IsInstalled) {
+            ShowFFmpegModal = true;
+            return;
+        }
         if (IsLive) return;
 
         _broadcastCts = new CancellationTokenSource();
@@ -3168,5 +3273,49 @@
             }
             await InvokeAsync(StateHasChanged);
         });
+    }
+
+    private bool ShowFFmpegModal = false;
+    private bool CopiedWinget = false;
+    private string? FFmpegCheckResult = null;
+
+    private async Task CopyWingetCommand() {
+        try {
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", "winget install ffmpeg");
+            CopiedWinget = true;
+            StateHasChanged();
+            _ = Task.Delay(2000).ContinueWith(_ => {
+                CopiedWinget = false;
+                InvokeAsync(StateHasChanged);
+            });
+        } catch { }
+    }
+
+    private void LaunchPowerShellWinget() {
+        try {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
+                FileName = "powershell.exe",
+                Arguments = "-NoExit -Command \"Write-Host 'Installing FFmpeg for Scrim...' -ForegroundColor Cyan; winget install ffmpeg\"",
+                UseShellExecute = true
+            });
+        } catch { }
+    }
+
+    private void CheckFFmpegStatus() {
+        bool found = FFmpegService.CheckInstallation();
+        if (found) {
+            FFmpegCheckResult = "✓ FFmpeg successfully detected! Streaming encoders are ready.";
+            StateHasChanged();
+            _ = Task.Delay(1800).ContinueWith(_ => {
+                InvokeAsync(() => {
+                    ShowFFmpegModal = false;
+                    FFmpegCheckResult = null;
+                    StateHasChanged();
+                });
+            });
+        } else {
+            FFmpegCheckResult = "✕ FFmpeg still not found. If you just installed it, you may need to wait for the installer to finish.";
+            StateHasChanged();
+        }
     }
 }
