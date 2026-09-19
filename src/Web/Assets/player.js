@@ -2186,6 +2186,128 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
+    // =========================================================================
+    // Direct Audio Stream Modal & Copy Logic (For VLC, Games, External Players)
+    // =========================================================================
+    const directStreamModal = document.getElementById('directStreamModal');
+    const directStreamBtn = document.getElementById('directStreamBtn');
+    const directStreamPill = document.getElementById('directStreamPill');
+    const directStreamCloseBtn = document.getElementById('directStreamCloseBtn');
+    const directStreamDoneBtn = document.getElementById('directStreamDoneBtn');
+    const directStreamCopyBtn = document.getElementById('directStreamCopyBtn');
+    const directStreamCopyBtnText = document.getElementById('directStreamCopyBtnText');
+    const directStreamUrlInput = document.getElementById('directStreamUrlInput');
+    const directStreamOpenTabLink = document.getElementById('directStreamOpenTabLink');
+    const directStreamM3uLink = document.getElementById('directStreamM3uLink');
+    const directStreamMetaNote = document.getElementById('directStreamMetaNote');
+
+    function getAbsoluteStreamUrl() {
+        const mount = currentStreamEndpoint ? (currentStreamEndpoint.startsWith('/') ? currentStreamEndpoint : ('/' + currentStreamEndpoint)) : '/stream';
+        return window.location.origin + mount;
+    }
+
+    function openDirectStreamModal() {
+        if (!directStreamModal) return;
+        const absUrl = getAbsoluteStreamUrl();
+        if (directStreamUrlInput) {
+            directStreamUrlInput.value = absUrl;
+        }
+        if (directStreamOpenTabLink) {
+            directStreamOpenTabLink.href = absUrl;
+        }
+        if (directStreamM3uLink) {
+            directStreamM3uLink.href = '/listen.m3u';
+        }
+        if (directStreamMetaNote) {
+            const fmt = (streamFormat && streamFormat.textContent) ? streamFormat.textContent : 'MP3';
+            const br = (streamBitrate && streamBitrate.textContent) ? streamBitrate.textContent : '128 kbps';
+            directStreamMetaNote.textContent = `Broadcast: ${fmt} • ${br} • Real-time low-latency stream`;
+        }
+        directStreamModal.style.display = 'flex';
+        setTimeout(function () {
+            if (directStreamUrlInput) {
+                directStreamUrlInput.focus();
+                directStreamUrlInput.select();
+            }
+        }, 50);
+    }
+
+    function closeDirectStreamModal() {
+        if (directStreamModal) {
+            directStreamModal.style.display = 'none';
+        }
+    }
+
+    window.openDirectStreamModal = openDirectStreamModal;
+    window.closeDirectStreamModal = closeDirectStreamModal;
+
+    if (directStreamBtn) {
+        directStreamBtn.addEventListener('click', openDirectStreamModal);
+    }
+    if (directStreamPill) {
+        directStreamPill.addEventListener('click', openDirectStreamModal);
+    }
+    if (directStreamCloseBtn) {
+        directStreamCloseBtn.addEventListener('click', closeDirectStreamModal);
+    }
+    if (directStreamDoneBtn) {
+        directStreamDoneBtn.addEventListener('click', closeDirectStreamModal);
+    }
+    if (directStreamModal) {
+        directStreamModal.addEventListener('click', function (e) {
+            if (e.target === directStreamModal) {
+                closeDirectStreamModal();
+            }
+        });
+    }
+
+    if (directStreamUrlInput) {
+        directStreamUrlInput.addEventListener('click', function () {
+            this.select();
+        });
+    }
+
+    if (directStreamCopyBtn && directStreamUrlInput) {
+        directStreamCopyBtn.addEventListener('click', function () {
+            const urlToCopy = directStreamUrlInput.value || getAbsoluteStreamUrl();
+
+            function onCopied() {
+                directStreamCopyBtn.classList.add('copied');
+                if (directStreamCopyBtnText) {
+                    directStreamCopyBtnText.textContent = 'Copied! ✓';
+                }
+                setTimeout(function () {
+                    directStreamCopyBtn.classList.remove('copied');
+                    if (directStreamCopyBtnText) {
+                        directStreamCopyBtnText.textContent = 'Copy URL';
+                    }
+                }, 2200);
+            }
+
+            function fallbackCopy() {
+                try {
+                    directStreamUrlInput.select();
+                    const success = document.execCommand('copy');
+                    if (success) onCopied();
+                } catch (e) {
+                    console.warn('[Direct Stream] Copy failed:', e);
+                }
+            }
+
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(urlToCopy).then(onCopied).catch(fallbackCopy);
+            } else {
+                fallbackCopy();
+            }
+        });
+    }
+
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && directStreamModal && directStreamModal.style.display === 'flex') {
+            closeDirectStreamModal();
+        }
+    });
+
     // Progressive Web App (PWA) Support
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', function () {

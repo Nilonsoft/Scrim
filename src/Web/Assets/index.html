@@ -107,8 +107,21 @@
                                 <span class="quality-separator">•</span>
                                 <span class="quality-bitrate" id="streamBitrate">128 kbps</span>
                             </span>
+                            <button type="button" class="direct-stream-pill" id="directStreamPill" title="Get Direct Audio Stream URL for VLC, Games, External Players">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                                </svg>
+                                <span>Direct Stream</span>
+                            </button>
                         </div>
                         <div class="top-action-icons">
+                            <button class="action-icon-btn direct-stream-btn" id="directStreamBtn" title="Direct Stream URL (VLC, Games, Media Players)" aria-label="Direct Audio Stream URL">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                                </svg>
+                            </button>
                             <button class="action-icon-btn history-toggle-btn" id="historyToggleBtn" title="Recently Played Tracks" aria-label="View Recently Played Tracks">
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                     <circle cx="12" cy="12" r="10"></circle>
@@ -398,6 +411,88 @@
             <div class="chat-rules-actions">
                 <button type="button" class="chat-rules-agree-btn" id="chatRulesAgreeBtn">I Agree & Send</button>
                 <button type="button" class="chat-rules-cancel-btn" id="chatRulesCancelBtn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- DIRECT AUDIO STREAM MODAL (For VLC, Games, External Streamers) -->
+    <div class="direct-stream-modal-overlay" id="directStreamModal" style="display: none;">
+        <div class="direct-stream-card">
+            <div class="direct-stream-header">
+                <div class="direct-stream-header-top">
+                    <div class="direct-stream-badge">
+                        <span class="live-dot-pulse"></span>
+                        DIRECT AUDIO STREAM
+                    </div>
+                    <button type="button" class="direct-stream-close-btn" id="directStreamCloseBtn" title="Close modal" aria-label="Close">✕</button>
+                </div>
+                <h2 class="direct-stream-title">Direct Stream Link</h2>
+                <p class="direct-stream-subtitle">Stream our live audio directly into external media players, games, and streaming bots without keeping a browser open.</p>
+            </div>
+
+            <div class="direct-stream-url-box">
+                <label class="direct-stream-label" for="directStreamUrlInput">Direct Audio Stream URL</label>
+                <div class="direct-stream-input-group">
+                    <input type="text" class="direct-stream-input" id="directStreamUrlInput" readonly spellcheck="false" value="" />
+                    <button type="button" class="direct-stream-copy-btn" id="directStreamCopyBtn" title="Copy stream URL to clipboard">
+                        <svg class="copy-icon-svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                        </svg>
+                        <span id="directStreamCopyBtnText">Copy URL</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="direct-stream-links-row">
+                <a href="#" id="directStreamOpenTabLink" target="_blank" rel="noopener noreferrer" class="direct-stream-action-link" title="Open audio stream in browser tab">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                        <polyline points="15 3 21 3 21 9"></polyline>
+                        <line x1="10" y1="14" x2="21" y2="3"></line>
+                    </svg>
+                    Open in New Tab
+                </a>
+                <a href="/listen.m3u" id="directStreamM3uLink" download="scrim_live.m3u" class="direct-stream-action-link" title="Download .m3u playlist for VLC, Winamp, Foobar2000">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    Download .M3U Playlist
+                </a>
+            </div>
+
+            <div class="direct-stream-guide-section">
+                <div class="direct-stream-guide-title">QUICK APP SETUP GUIDE</div>
+                <div class="direct-stream-guide-grid">
+                    <div class="direct-stream-guide-card">
+                        <div class="guide-card-icon">📻</div>
+                        <div class="guide-card-content">
+                            <strong>VLC Media Player</strong>
+                            <p>Press <kbd>Ctrl</kbd>+<kbd>N</kbd> (<em>Media ➔ Open Network Stream</em>), paste the URL above, and press <strong>Play</strong>.</p>
+                        </div>
+                    </div>
+                    <div class="direct-stream-guide-card">
+                        <div class="guide-card-icon">🚚</div>
+                        <div class="guide-card-content">
+                            <strong>Euro Truck / ATS Radio</strong>
+                            <p>Paste into your <code>live_streams.sii</code> config file to listen to this live station inside the truck cabin.</p>
+                        </div>
+                    </div>
+                    <div class="direct-stream-guide-card">
+                        <div class="guide-card-icon">🎮</div>
+                        <div class="guide-card-content">
+                            <strong>Games & Discord Bots</strong>
+                            <p>Paste the direct stream link into GTA V custom radio, Discord music bots, or media players like Foobar2000 & Winamp.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="direct-stream-footer">
+                <span class="direct-stream-meta-note" id="directStreamMetaNote">Live Audio Feed • Real-time Low-Latency</span>
+                <button type="button" class="direct-stream-done-btn" id="directStreamDoneBtn">Done</button>
             </div>
         </div>
     </div>
