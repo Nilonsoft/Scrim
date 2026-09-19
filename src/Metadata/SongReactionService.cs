@@ -27,6 +27,8 @@ namespace Scrim.Metadata {
         string? GetUserReaction(string userId);
         void Reset();
         void ResetSong(string songKey);
+        IReadOnlyDictionary<string, SongReactionRecord> GetAllSongReactions();
+        ReactionCounts GetSongReactions(string? title, string? artist);
         event Action<string, ReactionCounts>? ReactionReceived;
         event Action<ReactionCounts>? CountsReset;
     }
@@ -213,9 +215,14 @@ namespace Scrim.Metadata {
         }
 
         public void ResetSong(string songKey) {
-            string key = NormalizeSongKey(songKey, null);
+            if (string.IsNullOrWhiteSpace(songKey)) {
+                Reset();
+                return;
+            }
+            string key = songKey.Trim();
+            string normalized = NormalizeSongKey(songKey, null);
             lock (_lock) {
-                if (_records.TryGetValue(key, out var record)) {
+                if (_records.TryGetValue(key, out var record) || _records.TryGetValue(normalized, out record)) {
                     record.ThumbsUp = 0;
                     record.ThumbsDown = 0;
                     record.Heart = 0;
@@ -223,8 +230,29 @@ namespace Scrim.Metadata {
                     SaveToDisk();
                 }
             }
-            if (string.Equals(_currentSongKey, key, StringComparison.OrdinalIgnoreCase)) {
+            if (string.Equals(_currentSongKey, key, StringComparison.OrdinalIgnoreCase) || 
+                string.Equals(_currentSongKey, normalized, StringComparison.OrdinalIgnoreCase)) {
                 CountsReset?.Invoke(CurrentCounts);
+            }
+        }
+
+        public IReadOnlyDictionary<string, SongReactionRecord> GetAllSongReactions() {
+            lock (_lock) {
+                return new Dictionary<string, SongReactionRecord>(_records, StringComparer.OrdinalIgnoreCase);
+            }
+        }
+
+        public ReactionCounts GetSongReactions(string? title, string? artist) {
+            string key = NormalizeSongKey(title, artist);
+            lock (_lock) {
+                if (_records.TryGetValue(key, out var rec)) {
+                    return new ReactionCounts {
+                        ThumbsUp = rec.ThumbsUp,
+                        ThumbsDown = rec.ThumbsDown,
+                        Heart = rec.Heart
+                    };
+                }
+                return new ReactionCounts();
             }
         }
 

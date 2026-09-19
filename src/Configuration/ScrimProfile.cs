@@ -23,6 +23,10 @@ namespace Scrim.Configuration {
         public bool EnableChat { get; set; } = true;
         public System.Collections.Generic.List<string> NicknameBlacklist { get; set; } = new();
 
+        // Song History Configuration
+        public bool EnableSongHistory { get; set; } = true;
+        public int SongHistoryLimit { get; set; } = 10;
+
         // Web Player Branding Customization
         public string StationName { get; set; } = "GLOBAL INDIE RADIO";
         public string PageTitle { get; set; } = "Global Indie Radio - Live Broadcast";

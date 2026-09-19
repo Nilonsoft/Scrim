@@ -39,6 +39,7 @@ namespace Scrim {
             services.AddSingleton<SongRequestController>();
             services.AddSingleton<ILiveChatService, LiveChatService>();
             services.AddSingleton<ISongReactionService, SongReactionService>();
+            services.AddSingleton<ISongHistoryService, SongHistoryService>();
 
             // Plugins
             services.AddSingleton<PluginLoader>();

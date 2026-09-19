@@ -33,6 +33,14 @@ document.addEventListener('DOMContentLoaded', function () {
     const countHeart = document.getElementById('countHeart');
     const countThumbsDown = document.getElementById('countThumbsDown');
 
+    // Recently Played History Elements
+    const historyToggleBtn = document.getElementById('historyToggleBtn');
+    const historyModal = document.getElementById('historyModal');
+    const historyCloseBtn = document.getElementById('historyCloseBtn');
+    const historyEmptyHint = document.getElementById('historyEmptyHint');
+    const historyItemsList = document.getElementById('historyItemsList');
+    const historyModalTitle = document.getElementById('historyModalTitle');
+
     let isPlaying = false;
     let isConnecting = false;
     let isUserPlaying = false;
@@ -1185,6 +1193,10 @@ document.addEventListener('DOMContentLoaded', function () {
                     updateReactionCounts(data.counts || { thumbsUp: 0, thumbsDown: 0, heart: 0 });
                     refreshReactionsState();
                 }
+
+                if (data.type === 'history_init' || data.type === 'history_update') {
+                    renderSongHistory(data.history || []);
+                }
             } catch (err) {
                 console.error("SSE parse error", err);
             }
@@ -1608,6 +1620,104 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Initial reactions & user vote fetch
     refreshReactionsState();
+
+    // Recently Played History Logic & Initial Fetch
+    if (historyToggleBtn && historyModal) {
+        historyToggleBtn.addEventListener('click', function () {
+            historyModal.style.display = 'flex';
+        });
+    }
+
+    if (historyCloseBtn && historyModal) {
+        historyCloseBtn.addEventListener('click', function () {
+            historyModal.style.display = 'none';
+        });
+    }
+
+    if (historyModal) {
+        historyModal.addEventListener('click', function (e) {
+            if (e.target === historyModal) {
+                historyModal.style.display = 'none';
+            }
+        });
+    }
+
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && historyModal && historyModal.style.display === 'flex') {
+            historyModal.style.display = 'none';
+        }
+    });
+
+    function renderSongHistory(items) {
+        if (!historyItemsList) return;
+        if (!Array.isArray(items) || items.length === 0) {
+            if (historyEmptyHint) historyEmptyHint.style.display = 'block';
+            historyItemsList.innerHTML = '';
+            if (historyModalTitle) historyModalTitle.textContent = 'RECENTLY PLAYED';
+            return;
+        }
+
+        if (historyEmptyHint) historyEmptyHint.style.display = 'none';
+        if (historyModalTitle) historyModalTitle.textContent = `RECENTLY PLAYED (${items.length})`;
+
+        historyItemsList.innerHTML = '';
+        items.forEach(function (track) {
+            const row = document.createElement('div');
+            row.className = 'history-row';
+
+            const thumb = document.createElement('div');
+            thumb.className = 'history-thumb';
+            if (track.hasArt && track.albumArtUrl) {
+                const img = document.createElement('img');
+                img.src = track.albumArtUrl;
+                img.alt = track.title || 'Track Art';
+                thumb.appendChild(img);
+            } else {
+                thumb.innerHTML = `
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M9 18V5l12-2v13"></path>
+                        <circle cx="6" cy="18" r="3"></circle>
+                        <circle cx="18" cy="16" r="3"></circle>
+                    </svg>
+                `;
+            }
+
+            const info = document.createElement('div');
+            info.className = 'history-track-info';
+
+            const titleEl = document.createElement('div');
+            titleEl.className = 'history-track-title';
+            titleEl.textContent = track.title || 'Unknown Track';
+
+            const artistEl = document.createElement('div');
+            artistEl.className = 'history-track-artist';
+            artistEl.textContent = track.artist || 'Live Broadcast';
+
+            info.appendChild(titleEl);
+            info.appendChild(artistEl);
+
+            const timeEl = document.createElement('div');
+            timeEl.className = 'history-track-time';
+            timeEl.textContent = track.playedAt || '';
+
+            row.appendChild(thumb);
+            row.appendChild(info);
+            row.appendChild(timeEl);
+
+            historyItemsList.appendChild(row);
+        });
+    }
+
+    fetch('/api/history')
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (Array.isArray(data)) {
+                renderSongHistory(data);
+            }
+        })
+        .catch(function (e) {
+            console.warn("Could not fetch initial history", e);
+        });
 
     // Progressive Web App (PWA) Support
     if ('serviceWorker' in navigator) {

@@ -20,11 +20,12 @@ namespace Scrim.Server {
         private readonly IThemeService _themeService;
         private readonly ILiveChatService _chatService;
         private readonly ISongReactionService _reactionService;
+        private readonly ISongHistoryService _historyService;
         private HttpListener? _listener;
         private TcpListener? _bridgeListener;
         private CancellationTokenSource? _cts;
 
-        public HttpStreamServer(BroadcastHub hub, IMetadataService metadataService, SongRequestController requestController, IProfileManager profileManager, INetworkDiscoveryService networkDiscovery, IThemeService? themeService = null, ILiveChatService? chatService = null, ISongReactionService? reactionService = null) {
+        public HttpStreamServer(BroadcastHub hub, IMetadataService metadataService, SongRequestController requestController, IProfileManager profileManager, INetworkDiscoveryService networkDiscovery, IThemeService? themeService = null, ILiveChatService? chatService = null, ISongReactionService? reactionService = null, ISongHistoryService? historyService = null) {
             _hub = hub;
             _metadataService = metadataService;
             _requestController = requestController;
@@ -33,6 +34,7 @@ namespace Scrim.Server {
             _themeService = themeService ?? new ThemeService();
             _chatService = chatService ?? new LiveChatService();
             _reactionService = reactionService ?? new SongReactionService(metadataService);
+            _historyService = historyService ?? new SongHistoryService(metadataService);
         }
 
         private string GetCustomThemeJson(string themeId) {
@@ -310,10 +312,16 @@ namespace Scrim.Server {
                     HandleChatPostRequest(context);
                 } else if (path == "/api/chat" && context.Request.HttpMethod == "GET") {
                     HandleChatGetRequest(context);
+                } else if (path == "/api/reactions/clear" && context.Request.HttpMethod == "POST") {
+                    HandleReactionClearRequest(context);
                 } else if (path == "/api/reactions" && context.Request.HttpMethod == "POST") {
                     HandleReactionPostRequest(context);
                 } else if (path == "/api/reactions" && context.Request.HttpMethod == "GET") {
                     HandleReactionGetRequest(context);
+                } else if (path == "/api/history/clear" && context.Request.HttpMethod == "POST") {
+                    HandleHistoryClearRequest(context);
+                } else if (path == "/api/history" && context.Request.HttpMethod == "GET") {
+                    HandleHistoryGetRequest(context);
                 } else if (path == "/api/status") {
                     HandleStatusRequest(context);
                 } else {
@@ -445,8 +453,13 @@ namespace Scrim.Server {
             };
 
             Action<ReactionCounts> onResetReactions = (counts) => {
-                string resetJson = $"{{\"type\":\"reaction_reset\",\"counts\":{{\"thumbsUp\":0,\"thumbsDown\":0,\"heart\":0}}}}";
+                string resetJson = $"{{\"type\":\"reaction_reset\",\"counts\":{{\"thumbsUp\":{counts.ThumbsUp},\"thumbsDown\":{counts.ThumbsDown},\"heart\":{counts.Heart}}}}}";
                 immediateChannel.Writer.TryWrite($"data: {resetJson}\n\n");
+            };
+
+            Action<IReadOnlyList<SongHistoryItem>> onHistoryChanged = (items) => {
+                string historyJson = FormatHistoryJson(items.Take(_profileManager.CurrentProfile.SongHistoryLimit).ToList());
+                immediateChannel.Writer.TryWrite($"data: {{\"type\":\"history_update\",\"history\":{historyJson}}}\n\n");
             };
 
             _chatService.MessagePosted += onMessage;
@@ -455,6 +468,7 @@ namespace Scrim.Server {
             _chatService.NicknameAssigned += onAssign;
             _reactionService.ReactionReceived += onReaction;
             _reactionService.CountsReset += onResetReactions;
+            _historyService.HistoryChanged += onHistoryChanged;
 
             try {
                 using var writer = new StreamWriter(response.OutputStream);
@@ -472,6 +486,10 @@ namespace Scrim.Server {
                 // Initial Reaction State Push
                 var initialCounts = _reactionService.CurrentCounts;
                 await SendEvent($"data: {{\"type\":\"reaction_init\",\"counts\":{{\"thumbsUp\":{initialCounts.ThumbsUp},\"thumbsDown\":{initialCounts.ThumbsDown},\"heart\":{initialCounts.Heart}}}}}\n\n");
+
+                // Initial Song History Push
+                var initialHistory = _historyService.GetHistory(_profileManager.CurrentProfile.SongHistoryLimit);
+                await SendEvent($"data: {{\"type\":\"history_init\",\"history\":{FormatHistoryJson(initialHistory)}}}\n\n");
 
                 // Initial Chat State Push
                 var recentChat = _chatService.GetRecentMessages().Select(m =>
@@ -530,6 +548,7 @@ namespace Scrim.Server {
                 _chatService.NicknameAssigned -= onAssign;
                 _reactionService.ReactionReceived -= onReaction;
                 _reactionService.CountsReset -= onResetReactions;
+                _historyService.HistoryChanged -= onHistoryChanged;
                 writeLock.Dispose();
                 response.Close();
             }
@@ -663,6 +682,74 @@ namespace Scrim.Server {
             } finally {
                 context.Response.Close();
             }
+        }
+
+        private void HandleReactionClearRequest(HttpListenerContext context) {
+            try {
+                using var reader = new StreamReader(context.Request.InputStream, System.Text.Encoding.UTF8);
+                string body = reader.ReadToEnd();
+                var keyMatch = System.Text.RegularExpressions.Regex.Match(body, "\"songKey\"\\s*:\\s*\"(.*?)\"");
+                string songKey = keyMatch.Success ? keyMatch.Groups[1].Value : (context.Request.QueryString["songKey"] ?? "");
+                if (!string.IsNullOrWhiteSpace(songKey)) {
+                    _reactionService.ResetSong(songKey);
+                } else {
+                    _reactionService.Reset();
+                }
+                context.Response.ContentType = "application/json; charset=utf-8";
+                context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+                context.Response.StatusCode = 200;
+                byte[] ok = System.Text.Encoding.UTF8.GetBytes("{\"success\":true}");
+                context.Response.OutputStream.Write(ok, 0, ok.Length);
+            } catch {
+                context.Response.StatusCode = 400;
+            } finally {
+                context.Response.Close();
+            }
+        }
+
+        private void HandleHistoryGetRequest(HttpListenerContext context) {
+            try {
+                var response = context.Response;
+                response.ContentType = "application/json; charset=utf-8";
+                response.Headers.Add("Access-Control-Allow-Origin", "*");
+                int limit = _profileManager.CurrentProfile.SongHistoryLimit;
+                if (int.TryParse(context.Request.QueryString["limit"], out int qLimit) && qLimit > 0) {
+                    limit = qLimit;
+                }
+                var items = _historyService.GetHistory(limit);
+                string json = FormatHistoryJson(items);
+                byte[] buffer = System.Text.Encoding.UTF8.GetBytes(json);
+                response.ContentLength64 = buffer.Length;
+                response.OutputStream.Write(buffer, 0, buffer.Length);
+            } catch {
+                context.Response.StatusCode = 500;
+            } finally {
+                context.Response.Close();
+            }
+        }
+
+        private void HandleHistoryClearRequest(HttpListenerContext context) {
+            try {
+                _historyService.Clear();
+                context.Response.ContentType = "application/json; charset=utf-8";
+                context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+                context.Response.StatusCode = 200;
+                byte[] ok = System.Text.Encoding.UTF8.GetBytes("{\"success\":true}");
+                context.Response.OutputStream.Write(ok, 0, ok.Length);
+            } catch {
+                context.Response.StatusCode = 400;
+            } finally {
+                context.Response.Close();
+            }
+        }
+
+        private string FormatHistoryJson(IReadOnlyList<SongHistoryItem> items) {
+            var elements = items.Select(item => {
+                string artUrl = !string.IsNullOrEmpty(item.AlbumArtUrl) ? item.AlbumArtUrl : "";
+                bool hasArt = !string.IsNullOrEmpty(artUrl) || (item.AlbumArt != null && item.AlbumArt.Length > 0);
+                return $"{{\"id\":\"{item.Id}\",\"title\":\"{EscapeJson(item.Title)}\",\"artist\":\"{EscapeJson(item.Artist)}\",\"album\":\"{EscapeJson(item.Album)}\",\"playedAt\":\"{EscapeJson(item.PlayedAtFormatted)}\",\"hasArt\":{(hasArt ? "true" : "false")},\"albumArtUrl\":\"{EscapeJson(artUrl)}\"}}";
+            });
+            return "[" + string.Join(",", elements) + "]";
         }
 
         private void HandleBrandingRequest(HttpListenerContext context) {

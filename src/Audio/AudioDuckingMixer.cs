@@ -141,10 +141,25 @@ namespace Scrim.Audio {
             }
         }
 
+        private readonly System.Collections.Concurrent.ConcurrentQueue<byte[]> _sfxQueue = new();
+        private readonly System.Collections.Generic.Queue<byte> _activeSfxQueue = new();
+
+        public void PlaySoundEffect(byte[] pcm16StereoBytes) {
+            if (pcm16StereoBytes != null && pcm16StereoBytes.Length > 0) {
+                _sfxQueue.Enqueue(pcm16StereoBytes);
+            }
+        }
+
         private void ProcessMix(byte[] appBuffer, byte[] micBuffer) {
             byte[] outBuffer = new byte[appBuffer.Length];
             bool micActive = IsMicLive;
             double targetGain = micActive ? _duckingGain : 1.0;
+
+            while (_sfxQueue.TryDequeue(out var sfxBytes)) {
+                for (int b = 0; b < sfxBytes.Length; b++) {
+                    _activeSfxQueue.Enqueue(sfxBytes[b]);
+                }
+            }
 
             float maxL = 0f;
             float maxR = 0f;
@@ -155,6 +170,17 @@ namespace Scrim.Audio {
 
                 short appSampleR = (i + 2 < appBuffer.Length) ? BitConverter.ToInt16(appBuffer, i + 2) : appSampleL;
                 short micSampleR = (micActive && i + 3 < micBuffer.Length) ? BitConverter.ToInt16(micBuffer, i + 2) : (short)0;
+
+                short sfxL = 0;
+                short sfxR = 0;
+                if (_activeSfxQueue.Count >= 4) {
+                    byte b0 = _activeSfxQueue.Dequeue();
+                    byte b1 = _activeSfxQueue.Dequeue();
+                    byte b2 = _activeSfxQueue.Dequeue();
+                    byte b3 = _activeSfxQueue.Dequeue();
+                    sfxL = (short)(b0 | (b1 << 8));
+                    sfxR = (short)(b2 | (b3 << 8));
+                }
 
                 // Smooth exponential gain transitions prevent clicking when ducking engages/disengages
                 if (_currentGain > targetGain) {
@@ -168,8 +194,8 @@ namespace Scrim.Audio {
                 double mixedAppR = appSampleR * _currentGain * AppVolume;
                 
                 // Sum 2-bus
-                double sumL = mixedAppL + micSampleL;
-                double sumR = mixedAppR + micSampleR;
+                double sumL = mixedAppL + micSampleL + sfxL;
+                double sumR = mixedAppR + micSampleR + sfxR;
 
                 // Clamping limiter
                 if (sumL > short.MaxValue) sumL = short.MaxValue;

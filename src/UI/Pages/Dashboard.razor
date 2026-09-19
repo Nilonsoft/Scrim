@@ -28,6 +28,7 @@
 @inject IThemeService ThemeService
 @inject ILiveChatService ChatService
 @inject ISongReactionService ReactionService
+@inject ISongHistoryService HistoryService
 
 <!-- Top Header Bar -->
 <header class="scrim-topbar">
@@ -464,6 +465,7 @@
         ChatService.ChatStatusChanged += OnChatStatusChanged;
         ReactionService.ReactionReceived += OnReactionReceived;
         ReactionService.CountsReset += OnReactionCountsReset;
+        HistoryService.HistoryChanged += OnHistoryChanged;
 
         if (!string.IsNullOrWhiteSpace(MetadataService.CurrentMetadata.Title)) {
             CurrentTrackTitle = MetadataService.CurrentMetadata.Title;
@@ -1367,6 +1369,7 @@
         ChatService.ChatStatusChanged -= OnChatStatusChanged;
         ReactionService.ReactionReceived -= OnReactionReceived;
         ReactionService.CountsReset -= OnReactionCountsReset;
+        HistoryService.HistoryChanged -= OnHistoryChanged;
         _dotNetRef?.Dispose();
         _refreshTimer?.Dispose();
         _vuTimer?.Dispose();
@@ -1516,14 +1519,25 @@
 
             <div style="max-height: 180px; overflow-y: auto; margin-bottom: 12px;">
                 @foreach (var track in PlaylistTracks) {
-                    <div class="playlist-row @(track.IsPlaying ? "active-track" : "")" style="cursor: pointer; display: flex; align-items: center; padding: 6px 4px;">
+                    var songCounts = ReactionService.GetSongReactions(track.Title, track.Artist);
+                    <div class="playlist-row @(track.IsPlaying ? "active-track" : "")" style="cursor: pointer; display: flex; align-items: center; padding: 6px 4px; gap: 6px;">
                         <span class="playlist-num" @onclick="@(() => PlayTrack(track))">@track.Number</span>
-                        <div class="playlist-info" @onclick="@(() => PlayTrack(track))">
-                            <div class="playlist-title" style="color: @(track.IsPlaying ? "#00d2ff" : "#fff"); font-size: 13px;">@track.Title</div>
-                            <div class="playlist-artist" style="font-size: 11px; color: #8e95a5;">@track.Artist</div>
+                        <div class="playlist-info" @onclick="@(() => PlayTrack(track))" style="flex: 1; min-width: 0;">
+                            <div class="playlist-title" style="color: @(track.IsPlaying ? "#00d2ff" : "#fff"); font-size: 13px; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">@track.Title</div>
+                            <div class="playlist-artist" style="font-size: 11px; color: #8e95a5; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">@track.Artist</div>
+                        </div>
+                        <div class="playlist-reactions" style="display: flex; gap: 4px; align-items: center; font-size: 10px; white-space: nowrap;">
+                            <span title="Reactions" style="background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 8px; display: inline-flex; align-items: center; gap: 3px;">
+                                <span style="color: #38bdf8;">👍@songCounts.ThumbsUp</span>
+                                <span style="color: #f43f5e;">❤️@songCounts.Heart</span>
+                                <span style="color: #94a3b8;">👎@songCounts.ThumbsDown</span>
+                            </span>
+                            @if (songCounts.ThumbsUp > 0 || songCounts.Heart > 0 || songCounts.ThumbsDown > 0) {
+                                <button class="scrim-dots-btn" style="color: #ef4444; font-size: 10px; padding: 1px 4px;" @onclick="@(() => ClearSongReactionsForTrack(track.Title, track.Artist))" title="Clear reactions for this song">🗑️</button>
+                            }
                         </div>
                         <div class="playlist-time" @onclick="@(() => PlayTrack(track))">@track.Duration</div>
-                        <button class="scrim-dots-btn" style="color: #6b7280; font-size: 11px; margin-left: 6px;" @onclick="@(() => RemovePlaylistTrack(track))">✕</button>
+                        <button class="scrim-dots-btn" style="color: #6b7280; font-size: 11px; margin-left: 2px;" @onclick="@(() => RemovePlaylistTrack(track))">✕</button>
                     </div>
                 }
             </div>
@@ -1863,8 +1877,69 @@
                         <span title="Thumbs Up" style="background: rgba(255,255,255,0.06); padding: 2px 8px; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px;">👍 <strong style="color: #38bdf8;">@ReactionService.CurrentCounts.ThumbsUp</strong></span>
                         <span title="Love" style="background: rgba(255,255,255,0.06); padding: 2px 8px; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px;">❤️ <strong style="color: #f43f5e;">@ReactionService.CurrentCounts.Heart</strong></span>
                         <span title="Thumbs Down" style="background: rgba(255,255,255,0.06); padding: 2px 8px; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px;">👎 <strong style="color: #94a3b8;">@ReactionService.CurrentCounts.ThumbsDown</strong></span>
-                        <button class="pill-option" style="padding: 1px 6px; font-size: 10px; background: transparent; border: 1px solid rgba(255,255,255,0.15); color: #94a3b8; border-radius: 10px;" @onclick="ResetCurrentSongReactions" title="Reset reactions for current track">Reset</button>
+                        <button class="pill-option" style="padding: 1px 8px; font-size: 10px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: #ef4444; border-radius: 10px;" @onclick="ResetCurrentSongReactions" title="Clear reactions for current track">Clear Current</button>
+                        <button class="pill-option" style="padding: 1px 8px; font-size: 10px; background: rgba(0, 210, 255, 0.1); border: 1px solid rgba(0, 210, 255, 0.3); color: #00d2ff; border-radius: 10px;" @onclick="ToggleSongReactionsManager" title="View & clear reactions per song">
+                            @(ShowAllSongReactions ? "Hide All Reactions" : $"All Songs ({ReactionService.GetAllSongReactions().Count})")
+                        </button>
+                        <button class="pill-option" style="padding: 1px 8px; font-size: 10px; background: rgba(168, 85, 247, 0.1); border: 1px solid rgba(168, 85, 247, 0.3); color: #c084fc; border-radius: 10px;" @onclick="ToggleSongHistoryManager" title="View & manage session song history">
+                            @(ShowSongHistory ? "Hide History" : $"History ({HistoryService.GetHistory(100).Count})")
+                        </button>
                     </div>
+
+                    @if (ShowSongHistory) {
+                        <div style="margin-top: 10px; background: rgba(0,0,0,0.3); border: 1px solid #232731; border-radius: 8px; padding: 8px; max-height: 200px; overflow-y: auto;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 11px; font-weight: 700; color: #94a3b8;">
+                                <span>SESSION SONG HISTORY</span>
+                                <div style="display: flex; gap: 8px; align-items: center;">
+                                    <span>@(HistoryService.GetHistory(100).Count) tracks</span>
+                                    @if (HistoryService.GetHistory(100).Count > 0) {
+                                        <button class="pill-option" style="padding: 1px 6px; font-size: 10px; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #ef4444; border-radius: 6px;" @onclick="ClearSessionHistory" title="Clear session song history">Clear All</button>
+                                    }
+                                </div>
+                            </div>
+                            @if (HistoryService.GetHistory(100).Count == 0) {
+                                <div style="font-size: 11px; color: #64748b; text-align: center; padding: 10px 0;">No songs played yet this session.</div>
+                            } else {
+                                @foreach (var item in HistoryService.GetHistory(100)) {
+                                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 6px; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 11px; gap: 8px;">
+                                        <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;">
+                                            <span style="color: #e2e8f0; font-weight: 500;">@item.Title</span>
+                                            @if (!string.IsNullOrEmpty(item.Artist)) {
+                                                <span style="color: #8e95a5; margin-left: 4px;">— @item.Artist</span>
+                                            }
+                                        </div>
+                                        <span style="color: #64748b; font-size: 10px; white-space: nowrap;">@item.PlayedAtFormatted</span>
+                                    </div>
+                                }
+                            }
+                        </div>
+                    }
+
+                    @if (ShowAllSongReactions) {
+                        <div style="margin-top: 10px; background: rgba(0,0,0,0.3); border: 1px solid #232731; border-radius: 8px; padding: 8px; max-height: 180px; overflow-y: auto;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 11px; font-weight: 700; color: #94a3b8;">
+                                <span>SONG REACTIONS PER TRACK</span>
+                                <span>@(ReactionService.GetAllSongReactions().Count) tracks</span>
+                            </div>
+                            @if (ReactionService.GetAllSongReactions().Count == 0) {
+                                <div style="font-size: 11px; color: #64748b; text-align: center; padding: 10px 0;">No reactions recorded yet.</div>
+                            } else {
+                                @foreach (var kvp in ReactionService.GetAllSongReactions()) {
+                                    var sKey = kvp.Key;
+                                    var rec = kvp.Value;
+                                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 6px; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 11px; gap: 8px;">
+                                        <span style="color: #e2e8f0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;" title="@sKey">@FormatSongKeyDisplay(sKey)</span>
+                                        <div style="display: flex; gap: 6px; align-items: center; white-space: nowrap;">
+                                            <span title="Thumbs Up" style="color: #38bdf8;">👍 @rec.ThumbsUp</span>
+                                            <span title="Love" style="color: #f43f5e;">❤️ @rec.Heart</span>
+                                            <span title="Thumbs Down" style="color: #94a3b8;">👎 @rec.ThumbsDown</span>
+                                            <button class="scrim-dots-btn" style="color: #ef4444; font-size: 11px; padding: 1px 4px;" @onclick="@(() => ClearSongReactions(sKey))" title="Clear reactions for @sKey">🗑️</button>
+                                        </div>
+                                    </div>
+                                }
+                            }
+                        </div>
+                    }
                 </div>
             </div>
 
@@ -2039,6 +2114,32 @@
                         <input type="text" class="scrim-input" style="flex: 1; padding: 6px 8px; font-size: 12px;" @bind="link.Label" placeholder="Label (e.g. Discord)" />
                         <input type="text" class="scrim-input" style="flex: 2; padding: 6px 8px; font-size: 12px;" @bind="link.Url" placeholder="URL (e.g. https://discord.gg/...)" />
                         <button class="scrim-dots-btn" style="color: #ef4444; font-size: 12px;" @onclick="@(() => RemoveNavLink(link))" title="Delete Link">✕</button>
+                    </div>
+                }
+            </div>
+
+            <!-- Recently Played Song History Configuration -->
+            <div style="margin-bottom: 14px; background: #12141a; border: 1px solid #232731; border-radius: 8px; padding: 12px 14px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <div>
+                        <div style="font-size: 12px; font-weight: 600; color: #fff;">Show Recently Played Songs</div>
+                        <div style="font-size: 11px; color: #64748b;">Allow web listeners to view songs played during this session</div>
+                    </div>
+                    <label class="scrim-switch">
+                        <input type="checkbox" checked="@ProfileManager.CurrentProfile.EnableSongHistory" @onchange="ToggleSongHistoryEnabled" />
+                        <span class="scrim-slider"></span>
+                    </label>
+                </div>
+                @if (ProfileManager.CurrentProfile.EnableSongHistory) {
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06);">
+                        <span style="font-size: 11px; color: #94a3b8;">Max tracks shown on web player:</span>
+                        <div style="display: flex; gap: 4px;">
+                            @foreach (var count in new[] { 5, 10, 15, 20, 25 }) {
+                                <button class="pill-option @(ProfileManager.CurrentProfile.SongHistoryLimit == count ? "active" : "")" style="padding: 2px 8px; font-size: 10px;" @onclick="@(() => SetSongHistoryLimit(count))">
+                                    @count
+                                </button>
+                            }
+                        </div>
                     </div>
                 }
             </div>
@@ -2452,6 +2553,55 @@
 
     private void OnReactionCountsReset(ReactionCounts counts) {
         InvokeAsync(StateHasChanged);
+    }
+
+    private void OnHistoryChanged(IReadOnlyList<SongHistoryItem> items) {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private bool ShowSongHistory = false;
+
+    private void ToggleSongHistoryManager() {
+        ShowSongHistory = !ShowSongHistory;
+    }
+
+    private void ClearSessionHistory() {
+        HistoryService.Clear();
+        StateHasChanged();
+    }
+
+    private void ToggleSongHistoryEnabled() {
+        ProfileManager.CurrentProfile.EnableSongHistory = !ProfileManager.CurrentProfile.EnableSongHistory;
+        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        StateHasChanged();
+    }
+
+    private void SetSongHistoryLimit(int limit) {
+        ProfileManager.CurrentProfile.SongHistoryLimit = limit;
+        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        StateHasChanged();
+    }
+
+    private bool ShowAllSongReactions = false;
+
+    private void ToggleSongReactionsManager() {
+        ShowAllSongReactions = !ShowAllSongReactions;
+    }
+
+    private void ClearSongReactions(string songKey) {
+        ReactionService.ResetSong(songKey);
+        StateHasChanged();
+    }
+
+    private void ClearSongReactionsForTrack(string? title, string? artist) {
+        string key = string.IsNullOrEmpty(artist) ? (title ?? "") : $"{artist} - {title}";
+        ReactionService.ResetSong(key);
+        StateHasChanged();
+    }
+
+    private static string FormatSongKeyDisplay(string key) {
+        if (string.Equals(key, "Default", StringComparison.OrdinalIgnoreCase)) return "General / Default";
+        return key;
     }
 
     private void ResetCurrentSongReactions() {

@@ -176,6 +176,47 @@ namespace Scrim.Tests {
             try { File.Delete(tempStorage); } catch { }
         }
 
+        [Fact]
+        public void PerSongReactions_GetAllAndResetSong_WorksCorrectly() {
+            var tempStorage = Path.Combine(Path.GetTempPath(), $"scrim_test_{Guid.NewGuid():N}.json");
+            var mockMeta = new MockMetadataService();
+            var service = new SongReactionService(mockMeta, storagePath: tempStorage);
+
+            // Song 1
+            mockMeta.TriggerTrackChange("Song Alpha", "Artist A");
+            service.AddOrSwitchReaction("u1", "thumbs_up", out _);
+            service.AddOrSwitchReaction("u2", "heart", out _);
+
+            // Song 2
+            mockMeta.TriggerTrackChange("Song Beta", "Artist B");
+            service.AddOrSwitchReaction("u3", "thumbs_down", out _);
+
+            // Verify GetAllSongReactions
+            var all = service.GetAllSongReactions();
+            Assert.True(all.Count >= 2);
+            var alphaReactions = service.GetSongReactions("Song Alpha", "Artist A");
+            Assert.Equal(1, alphaReactions.ThumbsUp);
+            Assert.Equal(1, alphaReactions.Heart);
+            Assert.Equal(0, alphaReactions.ThumbsDown);
+
+            var betaReactions = service.GetSongReactions("Song Beta", "Artist B");
+            Assert.Equal(0, betaReactions.ThumbsUp);
+            Assert.Equal(0, betaReactions.Heart);
+            Assert.Equal(1, betaReactions.ThumbsDown);
+
+            // Clear reactions on Song Alpha specifically
+            service.ResetSong("artist a - song alpha");
+            var alphaAfterReset = service.GetSongReactions("Song Alpha", "Artist A");
+            Assert.Equal(0, alphaAfterReset.ThumbsUp);
+            Assert.Equal(0, alphaAfterReset.Heart);
+
+            // Song Beta should be untouched
+            var betaAfterReset = service.GetSongReactions("Song Beta", "Artist B");
+            Assert.Equal(1, betaAfterReset.ThumbsDown);
+
+            try { File.Delete(tempStorage); } catch { }
+        }
+
         private class MockMetadataService : IMetadataService {
             public MediaMetadata CurrentMetadata { get; private set; } = new MediaMetadata { Title = "Initial Song", Artist = "Artist 1" };
             public event EventHandler<MediaMetadata>? MetadataChanged;
