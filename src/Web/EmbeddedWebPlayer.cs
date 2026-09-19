@@ -81,6 +81,9 @@ namespace Scrim.Web {
                 response.Headers.Add("Access-Control-Allow-Origin", "*");
                 if (relativePath.Equals("sw.js", StringComparison.OrdinalIgnoreCase)) {
                     response.Headers.Add("Service-Worker-Allowed", "/");
+                    response.Headers.Add("Cache-Control", "no-cache, no-store, must-revalidate");
+                } else if (ext == ".html" || ext == ".js") {
+                    response.Headers.Add("Cache-Control", "no-cache, must-revalidate");
                 }
 
                 response.ContentLength64 = data.Length;

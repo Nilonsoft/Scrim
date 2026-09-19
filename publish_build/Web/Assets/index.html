@@ -4,6 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title id="webTitle">Global Indie Radio - Live Broadcast</title>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" type="image/svg+xml" href="/assets/icon.svg">
+    <link rel="apple-touch-icon" href="/assets/icon-192.png">
+    <meta name="theme-color" content="#0d0f12">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Scrim">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -27,7 +34,7 @@
                     <circle cx="12" cy="12" r="10"></circle>
                     <polyline points="12 6 12 12 16 14"></polyline>
                 </svg>
-                <span id="clockTime">10:09 PM GMT</span>
+                <span id="clockTime">--:--:--</span>
             </div>
         </div>
 
@@ -39,6 +46,14 @@
                 <a href="#about" class="nav-link">About</a>
             </nav>
             <div class="header-icons">
+                <button class="icon-btn pwa-install-btn" id="pwaInstallBtn" title="Install Scrim as Desktop or Mobile App" style="display: none;">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    <span class="pwa-btn-text">Install App</span>
+                </button>
                 <button class="icon-btn" title="Listeners">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
@@ -94,12 +109,30 @@
                 <!-- Track & Show Metadata + Live Waveform -->
                 <div class="meta-and-waveform meta-loading" id="metaContainer">
                     <div class="meta-header-icons">
-                        <span class="genre-tag" id="trackGenre">Live Radio</span>
+                        <div class="meta-tags-group">
+                            <span class="genre-tag" id="trackGenre">Live Radio</span>
+                            <span class="stream-quality-pill" id="streamQualityPill" title="Broadcast Format & Bitrate">
+                                <span class="quality-format" id="streamFormat">MP3</span>
+                                <span class="quality-separator">•</span>
+                                <span class="quality-bitrate" id="streamBitrate">128 kbps</span>
+                            </span>
+                        </div>
                         <div class="top-action-icons">
-                            <button class="action-icon-btn" title="Live Radio Stream">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <button class="action-icon-btn history-toggle-btn" id="historyToggleBtn" title="Recently Played Tracks" aria-label="View Recently Played Tracks">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <polyline points="12 6 12 12 16 14"></polyline>
+                                </svg>
+                            </button>
+                            <button class="action-icon-btn top-speaker-btn" id="topSpeakerBtn" title="Mute / Unmute Audio (M)" aria-label="Mute or Unmute Stream">
+                                <svg class="icon-top-vol-on" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
                                     <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                                </svg>
+                                <svg class="icon-top-vol-mute" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: none;">
+                                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                                    <line x1="23" y1="9" x2="17" y2="15"></line>
+                                    <line x1="17" y1="9" x2="23" y2="15"></line>
                                 </svg>
                             </button>
                         </div>
@@ -108,6 +141,25 @@
                     <h1 class="track-title" id="trackTitle">Awaiting Track Info...</h1>
                     <h2 class="track-artist" id="trackArtist">LIVE BROADCAST</h2>
                     <div class="show-subtitle" id="showSubtitle">Live Studio Transmission</div>
+
+                    <!-- Live Song Reactions (Thumbs Up, Love, Thumbs Down) -->
+                    <div class="song-reactions-bar" id="songReactionsBar">
+                        <span class="reactions-label">React to Track:</span>
+                        <div class="reactions-buttons">
+                            <button class="reaction-btn" id="btnReactionThumbsUp" data-reaction="thumbs_up" title="Thumbs Up this song">
+                                <span class="reaction-emoji">👍</span>
+                                <span class="reaction-count" id="countThumbsUp">0</span>
+                            </button>
+                            <button class="reaction-btn reaction-love" id="btnReactionLove" data-reaction="heart" title="Love this song">
+                                <span class="reaction-emoji">❤️</span>
+                                <span class="reaction-count" id="countHeart">0</span>
+                            </button>
+                            <button class="reaction-btn" id="btnReactionThumbsDown" data-reaction="thumbs_down" title="Thumbs Down this song">
+                                <span class="reaction-emoji">👎</span>
+                                <span class="reaction-count" id="countThumbsDown">0</span>
+                            </button>
+                        </div>
+                    </div>
 
                     <!-- Live Visualizer & Multi-Mode Reaction Offers -->
                     <div class="visualizer-wrapper">
@@ -127,15 +179,16 @@
                 </div>
             </div>
 
-            <!-- Scrub / Progress Line -->
-            <div class="scrub-container">
-                <div class="scrub-track">
+            <!-- Song Tracker / Timeline Progress Bar -->
+            <div class="scrub-container" id="songTrackerContainer" title="Song Progress Tracker">
+                <div class="scrub-track" id="scrubTrack">
                     <div class="scrub-fill" id="scrubFill">
                         <div class="scrub-thumb"></div>
                     </div>
                 </div>
                 <div class="time-readout">
-                    <span id="currentTime">LIVE</span> / <span id="totalTime">STREAM</span>
+                    <span id="currentTime">0:00</span>
+                    <span id="totalTime">0:00</span>
                 </div>
             </div>
 
@@ -192,12 +245,70 @@
                 <h3 class="sidebar-title">REQUEST A SONG</h3>
                 <form id="requestForm" class="request-form">
                     <input type="text" id="requestInput" class="request-input" placeholder="Enter Song Title & Artist..." required autocomplete="off">
+                    <input type="text" id="dedicationInput" class="request-input request-dedication-input" placeholder="Dedicate to someone (e.g. Maria, Mom, Crew)..." autocomplete="off" maxlength="60">
                     <button type="submit" class="submit-request-btn">SUBMIT REQUEST</button>
                 </form>
-                <div id="requestSuccess" class="request-success-msg" style="display: none;">Request submitted to DJ!</div>
+                <div id="requestSuccess" class="request-success-msg" style="display: none;">Request & dedication submitted to DJ!</div>
             </div>
-        </aside>
+
+            <!-- LIVE STATION CHAT -->
+            <div class="sidebar-card chat-card" id="chatCard">
+                <div class="chat-card-header">
+                    <h3 class="sidebar-title" style="margin-bottom: 0;">LIVE STATION CHAT</h3>
+                    <span class="chat-status-pill" id="chatStatusPill">LIVE</span>
+                </div>
+                
+                <div class="chat-disabled-banner" id="chatDisabledBanner" style="display: none;">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
+                    </svg>
+                    <span>Chat paused by host</span>
+                </div>
+
+                <div class="chat-messages-container" id="chatMessagesContainer">
+                    <div class="chat-messages-list" id="chatMessagesList">
+                        <div class="chat-empty-hint" id="chatEmptyHint">Welcome! Say hello to the DJ and listeners.</div>
+                    </div>
+                </div>
+
+                <form id="chatForm" class="chat-form">
+                    <div class="chat-sender-row">
+                        <span class="chat-sender-label">Nickname:</span>
+                        <input type="text" id="chatNicknameInput" class="chat-nickname-input" placeholder="Anonymous" maxlength="24" title="Change your anonymous chat handle">
+                    </div>
+                    <div class="chat-input-row">
+                        <input type="text" id="chatMessageInput" class="chat-message-input" placeholder="Type a message..." maxlength="300" required autocomplete="off">
+                        <button type="submit" class="chat-send-btn" id="chatSendBtn" title="Send message" aria-label="Send message">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="22" y1="2" x2="11" y2="13"></line>
+                                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                            </svg>
+                        </button>
+                    </div>
+                </form>
+            </div>
     </main>
+
+    <!-- RECENTLY PLAYED MODAL / DRAWER -->
+    <div class="history-modal-backdrop" id="historyModal" style="display: none;">
+        <div class="history-modal-content">
+            <div class="history-modal-header">
+                <div class="history-header-title">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <polyline points="12 6 12 12 16 14"></polyline>
+                    </svg>
+                    <h3 id="historyModalTitle">RECENTLY PLAYED</h3>
+                </div>
+                <button class="history-close-btn" id="historyCloseBtn" title="Close">✕</button>
+            </div>
+            <div class="history-list-container" id="historyListContainer">
+                <div class="history-empty" id="historyEmptyHint">No recently played songs yet this session.</div>
+                <div class="history-items-list" id="historyItemsList"></div>
+            </div>
+        </div>
+    </div>
 
     <script src="/assets/player.js"></script>
 </body>

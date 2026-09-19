@@ -861,14 +861,21 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function updateLiveIndicator(isLive) {
         const onAirPill = document.getElementById('onAirPill');
+        const subtitleEl = document.getElementById('showSubtitle');
         if (!onAirPill) return;
         const pillText = onAirPill.querySelector('.pill-text');
         if (isLive) {
             onAirPill.classList.remove('offline');
             if (pillText) pillText.textContent = 'ON AIR';
+            if (subtitleEl && (subtitleEl.textContent.includes("Station") || subtitleEl.textContent.includes("Broadcaster"))) {
+                subtitleEl.textContent = defaultSubtitle;
+            }
         } else {
             onAirPill.classList.add('offline');
-            if (pillText) pillText.textContent = 'OFFLINE';
+            if (pillText) pillText.textContent = 'STANDBY';
+            if (subtitleEl && !isPlaying && !isConnecting) {
+                subtitleEl.textContent = "Station Standby — Broadcaster not live";
+            }
         }
     }
 
@@ -1115,6 +1122,14 @@ document.addEventListener('DOMContentLoaded', function () {
     // Connect to Server-Sent Events (SSE)
     try {
         const evtSource = new EventSource('/api/events');
+
+        evtSource.onopen = function () {
+            console.log('[SSE] Real-time connection established with Scrim app');
+        };
+
+        evtSource.onerror = function (e) {
+            console.warn('[SSE] Event stream connection paused, auto-reconnecting...', e);
+        };
 
         evtSource.onmessage = function (event) {
             try {
@@ -1781,6 +1796,7 @@ document.addEventListener('DOMContentLoaded', function () {
         window.addEventListener('load', function () {
             navigator.serviceWorker.register('/sw.js').then(function (reg) {
                 console.log('[PWA] ServiceWorker registered with scope:', reg.scope);
+                reg.update();
             }).catch(function (err) {
                 console.warn('[PWA] ServiceWorker registration:', err);
             });

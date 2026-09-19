@@ -81,7 +81,7 @@ namespace Scrim.Server {
                         addedNetworkPrefixes = true;
                     } catch { }
 
-                    foreach (var ip in _networkDiscovery.GetAllLocalIps()) {
+                    foreach (var ip in (_networkDiscovery.GetAllLocalIps() ?? Enumerable.Empty<string>())) {
                         try {
                             listener.Prefixes.Add($"http://{ip}:{targetPort}/");
                             addedNetworkPrefixes = true;
@@ -182,6 +182,8 @@ namespace Scrim.Server {
             try {
                 using (client)
                 using (var server = new TcpClient()) {
+                    client.NoDelay = true;
+                    server.NoDelay = true;
                     await server.ConnectAsync(IPAddress.Loopback, internalPort, token);
                     using var clientStream = client.GetStream();
                     using var serverStream = server.GetStream();
@@ -463,6 +465,42 @@ namespace Scrim.Server {
                 immediateChannel.Writer.TryWrite($"data: {{\"type\":\"history_update\",\"history\":{historyJson}}}\n\n");
             };
 
+            string BuildMetadataJson(MediaMetadata meta) {
+                bool hasArt = (meta.AlbumArt != null && meta.AlbumArt.Length > 0) || !string.IsNullOrEmpty(meta.AlbumArtUrl);
+                string artUrl = hasArt ? (string.IsNullOrEmpty(meta.AlbumArtUrl) ? "/api/albumart" : meta.AlbumArtUrl) : "";
+                double durationSec = meta.Duration.TotalSeconds;
+                double positionSec = meta.Position.TotalSeconds;
+                bool isPlaying = meta.IsPlaying;
+                return $"{{\"type\":\"metadata\",\"title\":\"{EscapeJson(meta.Title)}\",\"artist\":\"{EscapeJson(meta.Artist)}\",\"album\":\"{EscapeJson(meta.Album)}\",\"hasArt\":{(hasArt ? "true" : "false")},\"albumArtUrl\":\"{EscapeJson(artUrl)}\",\"duration\":{durationSec.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)},\"position\":{positionSec.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)},\"isPlaying\":{(isPlaying ? "true" : "false")}}}";
+            }
+
+            string BuildStatsJson(bool isLive) {
+                var profile = _profileManager.CurrentProfile;
+                string formatStr = profile.AudioFormat?.ToUpperInvariant() ?? "MP3";
+                int bitrateVal = profile.Bitrate;
+                return $"{{\"type\":\"stats\",\"listeners\":{_hub.ActiveClientCount},\"isLive\":{(isLive ? "true" : "false")},\"format\":\"{EscapeJson(formatStr)}\",\"bitrate\":{bitrateVal}}}";
+            }
+
+            string BuildQueueJson() {
+                var requests = _requestController.GetLiveQueue().Select(r => $"{{\"query\":\"{EscapeJson(r.Query)}\",\"dedication\":\"{EscapeJson(r.Dedication)}\",\"status\":\"{EscapeJson(r.Status)}\"}}");
+                return $"{{\"type\":\"queue\",\"requests\":[{string.Join(",", requests)}]}}";
+            }
+
+            string BuildBrandingJson() {
+                var profile = _profileManager.CurrentProfile;
+                var navLinksArray = string.Join(",", profile.CustomNavLinks.Select(l => $"{{\"label\":\"{EscapeJson(l.Label)}\",\"url\":\"{EscapeJson(l.Url)}\"}}"));
+                string customThemeJson = GetCustomThemeJson(profile.WebTheme ?? "dark");
+                return $"{{\"type\":\"branding\",\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(profile.WebTheme ?? "dark")}\",\"customThemeVariables\":{customThemeJson},\"logoUrl\":\"{EscapeJson(profile.LogoUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}]}}";
+            }
+
+            EventHandler<MediaMetadata> onMetadata = (_, meta) => {
+                immediateChannel.Writer.TryWrite($"data: {BuildMetadataJson(meta)}\n\n");
+            };
+
+            EventHandler<bool> onBroadcastChanged = (_, isLive) => {
+                immediateChannel.Writer.TryWrite($"data: {BuildStatsJson(isLive)}\n\n");
+            };
+
             _chatService.MessagePosted += onMessage;
             _chatService.ChatCleared += onClear;
             _chatService.ChatStatusChanged += onStatus;
@@ -470,6 +508,8 @@ namespace Scrim.Server {
             _reactionService.ReactionReceived += onReaction;
             _reactionService.CountsReset += onResetReactions;
             _historyService.HistoryChanged += onHistoryChanged;
+            _metadataService.MetadataChanged += onMetadata;
+            _hub.BroadcastingStateChanged += onBroadcastChanged;
 
             try {
                 using var writer = new StreamWriter(response.OutputStream);
@@ -498,7 +538,13 @@ namespace Scrim.Server {
                 );
                 await SendEvent($"data: {{\"type\":\"chat_init\",\"enabled\":{(_profileManager.CurrentProfile.EnableChat ? "true" : "false")},\"messages\":[{string.Join(",", recentChat)}]}}\n\n");
 
-                // Immediate Event Consumer (sub-millisecond latency for chat)
+                // Initial Instant Stats, Metadata, Queue, and Branding Push
+                await SendEvent($"data: {BuildStatsJson(_hub.IsBroadcasting)}\n\n");
+                await SendEvent($"data: {BuildMetadataJson(_metadataService.CurrentMetadata)}\n\n");
+                await SendEvent($"data: {BuildQueueJson()}\n\n");
+                await SendEvent($"data: {BuildBrandingJson()}\n\n");
+
+                // Immediate Event Consumer (sub-millisecond latency for chat, reactions, and live status changes)
                 var immediateTask = Task.Run(async () => {
                     try {
                         await foreach (var item in immediateChannel.Reader.ReadAllAsync(token)) {
@@ -512,30 +558,10 @@ namespace Scrim.Server {
                     try {
                         while (!token.IsCancellationRequested) {
                             await Task.Delay(2000, token);
-
-                            var meta = _metadataService.CurrentMetadata;
-                            bool hasArt = (meta.AlbumArt != null && meta.AlbumArt.Length > 0) || !string.IsNullOrEmpty(meta.AlbumArtUrl);
-                            string artUrl = hasArt ? (string.IsNullOrEmpty(meta.AlbumArtUrl) ? "/api/albumart" : meta.AlbumArtUrl) : "";
-                            double durationSec = meta.Duration.TotalSeconds;
-                            double positionSec = meta.Position.TotalSeconds;
-                            bool isPlaying = meta.IsPlaying;
-                            string metaJson = $"{{\"type\":\"metadata\",\"title\":\"{EscapeJson(meta.Title)}\",\"artist\":\"{EscapeJson(meta.Artist)}\",\"album\":\"{EscapeJson(meta.Album)}\",\"hasArt\":{(hasArt ? "true" : "false")},\"albumArtUrl\":\"{EscapeJson(artUrl)}\",\"duration\":{durationSec.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)},\"position\":{positionSec.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)},\"isPlaying\":{(isPlaying ? "true" : "false")}}}";
-                            await SendEvent($"data: {metaJson}\n\n");
-
-                            var profile = _profileManager.CurrentProfile;
-                            string formatStr = profile.AudioFormat?.ToUpperInvariant() ?? "MP3";
-                            int bitrateVal = profile.Bitrate;
-                            string statsJson = $"{{\"type\":\"stats\",\"listeners\":{_hub.ActiveClientCount},\"isLive\":{(_hub.IsBroadcasting ? "true" : "false")},\"format\":\"{EscapeJson(formatStr)}\",\"bitrate\":{bitrateVal}}}";
-                            await SendEvent($"data: {statsJson}\n\n");
-
-                            var requests = _requestController.GetLiveQueue().Select(r => $"{{\"query\":\"{EscapeJson(r.Query)}\",\"dedication\":\"{EscapeJson(r.Dedication)}\",\"status\":\"{EscapeJson(r.Status)}\"}}");
-                            string queueJson = $"{{\"type\":\"queue\",\"requests\":[{string.Join(",", requests)}]}}";
-                            await SendEvent($"data: {queueJson}\n\n");
-
-                            var navLinksArray = string.Join(",", profile.CustomNavLinks.Select(l => $"{{\"label\":\"{EscapeJson(l.Label)}\",\"url\":\"{EscapeJson(l.Url)}\"}}"));
-                            string customThemeJson = GetCustomThemeJson(profile.WebTheme ?? "dark");
-                            string brandingJson = $"{{\"type\":\"branding\",\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(profile.WebTheme ?? "dark")}\",\"customThemeVariables\":{customThemeJson},\"logoUrl\":\"{EscapeJson(profile.LogoUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}]}}";
-                            await SendEvent($"data: {brandingJson}\n\n");
+                            await SendEvent($"data: {BuildMetadataJson(_metadataService.CurrentMetadata)}\n\n");
+                            await SendEvent($"data: {BuildStatsJson(_hub.IsBroadcasting)}\n\n");
+                            await SendEvent($"data: {BuildQueueJson()}\n\n");
+                            await SendEvent($"data: {BuildBrandingJson()}\n\n");
                         }
                     } catch { }
                 }, token);
@@ -550,6 +576,8 @@ namespace Scrim.Server {
                 _reactionService.ReactionReceived -= onReaction;
                 _reactionService.CountsReset -= onResetReactions;
                 _historyService.HistoryChanged -= onHistoryChanged;
+                _metadataService.MetadataChanged -= onMetadata;
+                _hub.BroadcastingStateChanged -= onBroadcastChanged;
                 writeLock.Dispose();
                 response.Close();
             }

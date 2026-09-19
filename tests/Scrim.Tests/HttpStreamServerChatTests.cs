@@ -183,5 +183,65 @@ namespace Scrim.Tests {
                 server.Stop();
             }
         }
+
+        [Fact]
+        public async Task WebPlayer_ConnectsCleanly_WhenNetworkAccessEnabled() {
+            int testPort = 19445;
+            var hub = new BroadcastHub();
+            var metaMock = new Mock<IMetadataService>();
+            metaMock.Setup(m => m.CurrentMetadata).Returns(new MediaMetadata());
+
+            var profileManagerMock = new Mock<IProfileManager>();
+            var profile = new ScrimProfile {
+                Port = testPort,
+                EnableNetworkAccess = true,
+                EnableChat = true
+            };
+            profileManagerMock.Setup(p => p.CurrentProfile).Returns(profile);
+
+            var networkMock = new Mock<INetworkDiscoveryService>();
+            networkMock.Setup(n => n.GetAllLocalIps()).Returns(new List<string> { "192.168.1.100" });
+            var requestController = new SongRequestController();
+            var chatService = new LiveChatService();
+            var themeService = new ThemeService();
+            var reactionService = new SongReactionService();
+            var historyService = new SongHistoryService();
+
+            var server = new HttpStreamServer(hub, metaMock.Object, requestController, profileManagerMock.Object, networkMock.Object, themeService, chatService, reactionService, historyService);
+
+            try {
+                server.Start(testPort);
+
+                using var client = new HttpClient();
+                client.Timeout = TimeSpan.FromSeconds(5);
+
+                // 1. GET / (index.html)
+                var indexRes = await client.GetAsync($"http://localhost:{testPort}/");
+                Assert.Equal(HttpStatusCode.OK, indexRes.StatusCode);
+
+                // 2. GET /api/status
+                var statusRes = await client.GetAsync($"http://localhost:{testPort}/api/status");
+                Assert.Equal(HttpStatusCode.OK, statusRes.StatusCode);
+
+                // 3. GET /api/metadata
+                var metaRes = await client.GetAsync($"http://localhost:{testPort}/api/metadata");
+                Assert.Equal(HttpStatusCode.OK, metaRes.StatusCode);
+
+                // 4. SSE /api/events
+                using var sseRes = await client.GetAsync($"http://localhost:{testPort}/api/events", HttpCompletionOption.ResponseHeadersRead);
+                Assert.Equal(HttpStatusCode.OK, sseRes.StatusCode);
+                using var stream = await sseRes.Content.ReadAsStreamAsync();
+                using var reader = new System.IO.StreamReader(stream);
+
+                var lineTask = reader.ReadLineAsync();
+                var completed = await Task.WhenAny(lineTask, Task.Delay(3000));
+                Assert.Same(lineTask, completed);
+                var line = await lineTask;
+                Assert.NotNull(line);
+                Assert.StartsWith("data: ", line);
+            } finally {
+                server.Stop();
+            }
+        }
     }
 }

@@ -58,5 +58,35 @@ namespace Scrim.Tests {
             
             hub.StopBroadcasting();
         }
+
+        [Fact]
+        public async Task FullPipeline_TranscoderToHubToStream_DeliversMp3Frames() {
+            var hub = new BroadcastHub();
+            var transcoder = new Scrim.Encoding.MultiFormatTranscoder();
+            transcoder.SetFormat(Scrim.Encoding.AudioFormat.Mp3, 128);
+
+            var pcmChannel = Channel.CreateUnbounded<byte[]>();
+            transcoder.StartTranscoding(pcmChannel.Reader);
+            hub.StartBroadcasting(transcoder.OutputStream);
+
+            var client = hub.RegisterClient();
+
+            // Feed 1 second of 44.1kHz 16-bit stereo silence (44100 * 4 bytes = 176400 bytes)
+            byte[] pcmChunk = new byte[3528]; // 20ms
+            for (int i = 0; i < 20; i++) {
+                await pcmChannel.Writer.WriteAsync(pcmChunk);
+            }
+
+            // Wait for MP3 encoder to produce frames
+            var readTask = client.AudioChannel.Reader.ReadAsync().AsTask();
+            var completed = await Task.WhenAny(readTask, Task.Delay(3000));
+            Assert.Same(readTask, completed);
+            var mp3Frame = await readTask;
+            Assert.NotNull(mp3Frame);
+            Assert.True(mp3Frame.Length > 0);
+
+            transcoder.StopTranscoding();
+            hub.StopBroadcasting();
+        }
     }
 }

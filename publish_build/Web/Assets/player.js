@@ -9,6 +9,10 @@ document.addEventListener('DOMContentLoaded', function () {
     const volumeBtn = document.getElementById('volumeBtn');
     const volOnIcon = volumeBtn ? volumeBtn.querySelector('.icon-vol-on') : null;
     const volMuteIcon = volumeBtn ? volumeBtn.querySelector('.icon-vol-mute') : null;
+    const topSpeakerBtn = document.getElementById('topSpeakerBtn');
+    const topVolOnIcon = topSpeakerBtn ? topSpeakerBtn.querySelector('.icon-top-vol-on') : null;
+    const topVolMuteIcon = topSpeakerBtn ? topSpeakerBtn.querySelector('.icon-top-vol-mute') : null;
+    const pwaInstallBtn = document.getElementById('pwaInstallBtn');
     const trackTitle = document.getElementById('trackTitle');
     const trackArtist = document.getElementById('trackArtist');
     const bottomTrackName = document.getElementById('bottomTrackName');
@@ -16,16 +20,62 @@ document.addEventListener('DOMContentLoaded', function () {
     const clockTime = document.getElementById('clockTime');
     const requestForm = document.getElementById('requestForm');
     const requestInput = document.getElementById('requestInput');
+    const dedicationInput = document.getElementById('dedicationInput');
     const requestSuccess = document.getElementById('requestSuccess');
     const queueList = document.getElementById('queueList');
+
+    // Song Reaction Elements
+    const songReactionsBar = document.getElementById('songReactionsBar');
+    const btnReactionThumbsUp = document.getElementById('btnReactionThumbsUp');
+    const btnReactionLove = document.getElementById('btnReactionLove');
+    const btnReactionThumbsDown = document.getElementById('btnReactionThumbsDown');
+    const countThumbsUp = document.getElementById('countThumbsUp');
+    const countHeart = document.getElementById('countHeart');
+    const countThumbsDown = document.getElementById('countThumbsDown');
+
+    // Recently Played History Elements
+    const historyToggleBtn = document.getElementById('historyToggleBtn');
+    const historyModal = document.getElementById('historyModal');
+    const historyCloseBtn = document.getElementById('historyCloseBtn');
+    const historyEmptyHint = document.getElementById('historyEmptyHint');
+    const historyItemsList = document.getElementById('historyItemsList');
+    const historyModalTitle = document.getElementById('historyModalTitle');
 
     let isPlaying = false;
     let isConnecting = false;
     let isUserPlaying = false;
     let defaultSubtitle = "Live Broadcast";
 
+    // Live Clock (User's Local Time)
+    function updateLiveClock() {
+        if (!clockTime) return;
+        const now = new Date();
+        clockTime.textContent = now.toLocaleTimeString([], {
+            hour: 'numeric',
+            minute: '2-digit',
+            second: '2-digit'
+        });
+        if (clockTime.parentElement) {
+            clockTime.parentElement.title = now.toLocaleDateString([], {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            });
+        }
+    }
+    updateLiveClock();
+    setInterval(updateLiveClock, 1000);
+
     function updatePlayButtonUI() {
         if (!playBtn) return;
+        if (topSpeakerBtn) {
+            if (isPlaying) {
+                topSpeakerBtn.classList.add('playing');
+            } else {
+                topSpeakerBtn.classList.remove('playing');
+            }
+        }
         if (isPlaying) {
             if (playIcon) playIcon.style.display = 'none';
             if (pauseIcon) pauseIcon.style.display = 'block';
@@ -146,6 +196,19 @@ document.addEventListener('DOMContentLoaded', function () {
         const isMuted = currentVolume <= 0.001;
         if (volOnIcon) volOnIcon.style.display = isMuted ? 'none' : 'block';
         if (volMuteIcon) volMuteIcon.style.display = isMuted ? 'block' : 'none';
+
+        if (topVolOnIcon) topVolOnIcon.style.display = isMuted ? 'none' : 'block';
+        if (topVolMuteIcon) topVolMuteIcon.style.display = isMuted ? 'block' : 'none';
+
+        if (topSpeakerBtn) {
+            if (isMuted) {
+                topSpeakerBtn.classList.add('muted');
+                topSpeakerBtn.title = "Unmute Audio (M)";
+            } else {
+                topSpeakerBtn.classList.remove('muted');
+                topSpeakerBtn.title = "Mute Audio (M)";
+            }
+        }
     }
 
     if (volumeSlider) {
@@ -167,6 +230,32 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         });
     }
+
+    if (topSpeakerBtn) {
+        topSpeakerBtn.addEventListener('click', function () {
+            if (currentVolume > 0.001) {
+                lastUnmutedVolume = currentVolume;
+                setVolume(0);
+            } else {
+                setVolume(lastUnmutedVolume || 0.85);
+            }
+        });
+    }
+
+    // Keyboard shortcut 'M' to quickly mute/unmute audio from anywhere on the page
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'm' || e.key === 'M') {
+            if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+                return;
+            }
+            if (currentVolume > 0.001) {
+                lastUnmutedVolume = currentVolume;
+                setVolume(0);
+            } else {
+                setVolume(lastUnmutedVolume || 0.85);
+            }
+        }
+    });
 
     updateVolumeUI();
 
@@ -455,6 +544,52 @@ document.addEventListener('DOMContentLoaded', function () {
     animateWaveform();
 
     // Live Stream Play / Stop Controls (Strictly for Web User)
+    let userExplicitlyStopped = false;
+    let autoplayUnlocked = false;
+
+    function unlockAutoplay() {
+        if (autoplayUnlocked) {
+            return;
+        }
+        autoplayUnlocked = true;
+        document.removeEventListener('pointerdown', unlockAutoplay, true);
+        document.removeEventListener('click', unlockAutoplay, true);
+        document.removeEventListener('keydown', unlockAutoplay, true);
+        document.removeEventListener('touchstart', unlockAutoplay, true);
+        if (!userExplicitlyStopped && !isPlaying && !isConnecting) {
+            startStream(false);
+        }
+    }
+
+    let reconnectTimeout = null;
+
+    function scheduleStreamReconnect() {
+        if (reconnectTimeout || userExplicitlyStopped || !isUserPlaying) return;
+        reconnectTimeout = setTimeout(function () {
+            reconnectTimeout = null;
+            if (!userExplicitlyStopped && isUserPlaying) {
+                console.log("[Audio] Attempting automatic stream reconnect...");
+                startStream(true);
+            }
+        }, 1500);
+    }
+
+    function checkAutoplay(isLive) {
+        if (!isLive || userExplicitlyStopped) {
+            return;
+        }
+        if (!isPlaying && !isConnecting) {
+            startStream(true);
+        }
+    }
+
+    function attemptAutoplay() {
+        if (userExplicitlyStopped || isPlaying || isConnecting) {
+            return;
+        }
+        startStream(true);
+    }
+
     function stopStream() {
         isUserPlaying = false;
         isPlaying = false;
@@ -468,7 +603,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
-    function startStream() {
+    function startStream(isAutoplay) {
         isUserPlaying = true;
         isConnecting = true;
         updatePlayButtonUI();
@@ -479,7 +614,9 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         const subtitleEl = document.getElementById('showSubtitle');
-        if (subtitleEl) subtitleEl.textContent = "Connecting to live audio stream...";
+        if (subtitleEl) {
+            subtitleEl.textContent = "Connecting to live audio stream...";
+        }
 
         // Always load a fresh live connection with timestamp cache-buster so stream is real-time
         audio.src = '/stream?t=' + Date.now();
@@ -492,11 +629,29 @@ document.addEventListener('DOMContentLoaded', function () {
                     isPlaying = true;
                     isConnecting = false;
                     updatePlayButtonUI();
-                    if (subtitleEl) subtitleEl.textContent = defaultSubtitle;
+                    if (subtitleEl) {
+                        subtitleEl.textContent = defaultSubtitle;
+                    }
                 }
             }).catch(function (err) {
                 console.warn("Playback could not start:", err);
                 if (isUserPlaying) {
+                    if (err.name === 'NotAllowedError') {
+                        isUserPlaying = false;
+                        isPlaying = false;
+                        isConnecting = false;
+                        updatePlayButtonUI();
+                        audio.removeAttribute('src');
+                        if (subtitleEl) {
+                            subtitleEl.textContent = "Click anywhere to listen live";
+                        }
+                        document.addEventListener('pointerdown', unlockAutoplay, true);
+                        document.addEventListener('click', unlockAutoplay, true);
+                        document.addEventListener('keydown', unlockAutoplay, true);
+                        document.addEventListener('touchstart', unlockAutoplay, true);
+                        return;
+                    }
+
                     isUserPlaying = false;
                     isPlaying = false;
                     isConnecting = false;
@@ -513,15 +668,23 @@ document.addEventListener('DOMContentLoaded', function () {
     if (playBtn && audio) {
         playBtn.addEventListener('click', function () {
             if (isUserPlaying || isPlaying || isConnecting) {
+                userExplicitlyStopped = true;
                 stopStream();
                 const subtitleEl = document.getElementById('showSubtitle');
-                if (subtitleEl) subtitleEl.textContent = defaultSubtitle;
+                if (subtitleEl) {
+                    subtitleEl.textContent = defaultSubtitle;
+                }
             } else {
-                startStream();
+                userExplicitlyStopped = false;
+                startStream(false);
             }
         });
 
         audio.addEventListener('playing', function () {
+            if (reconnectTimeout) {
+                clearTimeout(reconnectTimeout);
+                reconnectTimeout = null;
+            }
             if (isUserPlaying) {
                 isPlaying = true;
                 isConnecting = false;
@@ -553,21 +716,44 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         });
 
+        audio.addEventListener('ended', function () {
+            if (isUserPlaying && !userExplicitlyStopped) {
+                isPlaying = false;
+                isConnecting = true;
+                updatePlayButtonUI();
+                const subtitleEl = document.getElementById('showSubtitle');
+                if (subtitleEl) subtitleEl.textContent = "Broadcast lapsed — auto-reconnecting...";
+                scheduleStreamReconnect();
+            }
+        });
+
+        audio.addEventListener('stalled', function () {
+            if (isUserPlaying && !userExplicitlyStopped && !isPlaying) {
+                scheduleStreamReconnect();
+            }
+        });
+
         audio.addEventListener('error', function (e) {
             // Ignore error events triggered when user intentionally stopped or src is cleared
             if (!isUserPlaying || !audio.getAttribute('src')) {
                 return;
             }
             console.warn("Audio element stream error or station offline:", e);
-            isUserPlaying = false;
-            isPlaying = false;
-            isConnecting = false;
-            updatePlayButtonUI();
-            audio.removeAttribute('src');
-
-            const subtitleEl = document.getElementById('showSubtitle');
-            if (subtitleEl) {
-                subtitleEl.textContent = "Station Offline — Broadcaster has not started transmission";
+            if (!userExplicitlyStopped) {
+                isPlaying = false;
+                isConnecting = true;
+                updatePlayButtonUI();
+                const subtitleEl = document.getElementById('showSubtitle');
+                if (subtitleEl) {
+                    subtitleEl.textContent = "Broadcast interrupted — waiting for DJ to resume...";
+                }
+                scheduleStreamReconnect();
+            } else {
+                isUserPlaying = false;
+                isPlaying = false;
+                isConnecting = false;
+                updatePlayButtonUI();
+                audio.removeAttribute('src');
             }
         });
     }
@@ -575,6 +761,18 @@ document.addEventListener('DOMContentLoaded', function () {
     // Dynamic Branding Function
     function applyBranding(branding) {
         if (!branding) return;
+
+        if (branding.theme) {
+            document.documentElement.setAttribute('data-theme', branding.theme);
+        }
+
+        if (branding.customThemeVariables && typeof branding.customThemeVariables === 'object') {
+            for (const [prop, val] of Object.entries(branding.customThemeVariables)) {
+                if (prop && val) {
+                    document.documentElement.style.setProperty(prop, val);
+                }
+            }
+        }
 
         if (branding.pageTitle) {
             document.title = branding.pageTitle;
@@ -603,8 +801,28 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         if (branding.accentColor) {
-            document.documentElement.style.setProperty('--on-air-red', branding.accentColor);
-            document.documentElement.style.setProperty('--on-air-glow', `0 0 20px ${branding.accentColor}88`);
+            const hex = branding.accentColor.trim();
+            if (/^#([0-9a-fA-F]{3}){1,2}$/.test(hex)) {
+                let r, g, b;
+                if (hex.length === 4) {
+                    r = parseInt(hex[1] + hex[1], 16);
+                    g = parseInt(hex[2] + hex[2], 16);
+                    b = parseInt(hex[3] + hex[3], 16);
+                } else {
+                    r = parseInt(hex.substring(1, 3), 16);
+                    g = parseInt(hex.substring(3, 5), 16);
+                    b = parseInt(hex.substring(5, 7), 16);
+                }
+                const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+                const contrast = luminance > 0.6 ? '#0b0d14' : '#ffffff';
+
+                document.documentElement.style.setProperty('--accent-color', hex);
+                document.documentElement.style.setProperty('--accent-contrast', contrast);
+                document.documentElement.style.setProperty('--accent-glow', `0 0 20px rgba(${r}, ${g}, ${b}, 0.55)`);
+                document.documentElement.style.setProperty('--accent-glow-subtle', `0 2px 8px rgba(${r}, ${g}, ${b}, 0.35)`);
+                document.documentElement.style.setProperty('--on-air-red', hex);
+                document.documentElement.style.setProperty('--on-air-glow', `0 0 20px rgba(${r}, ${g}, ${b}, 0.55)`);
+            }
         }
 
         if (branding.customNavLinks && Array.isArray(branding.customNavLinks) && branding.customNavLinks.length > 0) {
@@ -643,14 +861,53 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function updateLiveIndicator(isLive) {
         const onAirPill = document.getElementById('onAirPill');
+        const subtitleEl = document.getElementById('showSubtitle');
         if (!onAirPill) return;
         const pillText = onAirPill.querySelector('.pill-text');
         if (isLive) {
             onAirPill.classList.remove('offline');
             if (pillText) pillText.textContent = 'ON AIR';
+            if (subtitleEl && (subtitleEl.textContent.includes("Station") || subtitleEl.textContent.includes("Broadcaster"))) {
+                subtitleEl.textContent = defaultSubtitle;
+            }
         } else {
             onAirPill.classList.add('offline');
-            if (pillText) pillText.textContent = 'OFFLINE';
+            if (pillText) pillText.textContent = 'STANDBY';
+            if (subtitleEl && !isPlaying && !isConnecting) {
+                subtitleEl.textContent = "Station Standby — Broadcaster not live";
+            }
+        }
+    }
+
+    let lastQualityKey = '';
+    function updateStreamQuality(format, bitrate) {
+        const streamQualityPill = document.getElementById('streamQualityPill');
+        const streamFormatEl = document.getElementById('streamFormat');
+        const streamBitrateEl = document.getElementById('streamBitrate');
+        if (!streamFormatEl || !streamBitrateEl) return;
+
+        const fmt = (format || 'MP3').toString().toUpperCase();
+        let brText = '';
+        if (fmt === 'FLAC' || !bitrate || bitrate === 0) {
+            brText = 'LOSSLESS';
+        } else {
+            brText = `${bitrate} kbps`;
+        }
+
+        const currentKey = `${fmt}-${brText}`;
+        const hasChanged = lastQualityKey && lastQualityKey !== currentKey;
+        lastQualityKey = currentKey;
+
+        streamFormatEl.textContent = fmt;
+        streamBitrateEl.textContent = brText;
+
+        if (streamQualityPill && hasChanged) {
+            streamQualityPill.classList.remove('updated');
+            void streamQualityPill.offsetWidth;
+            streamQualityPill.classList.add('updated');
+            setTimeout(function () {
+                streamQualityPill.classList.remove('updated');
+            }, 1200);
         }
     }
 
@@ -663,27 +920,110 @@ document.addEventListener('DOMContentLoaded', function () {
     fetch('/api/status')
         .then(res => res.json())
         .then(function (data) {
-            if (data && data.isLive !== undefined) {
-                updateLiveIndicator(data.isLive);
+            if (data) {
+                if (data.isLive !== undefined) {
+                    updateLiveIndicator(data.isLive);
+                    if (data.isLive) {
+                        checkAutoplay(true);
+                    }
+                }
+                if (data.format !== undefined) {
+                    updateStreamQuality(data.format, data.bitrate);
+                }
             }
         })
+        .catch(e => console.warn("Could not fetch status", e));
+    // Live Song Tracker State
+    let currentDurationSec = 0;
+    let currentPositionSec = 0;
+    let lastPositionTimestamp = 0;
+    let isTrackPlaying = false;
+    let trackerTimer = null;
+    const scrubFill = document.getElementById('scrubFill');
+    const currentTimeEl = document.getElementById('currentTime');
+    const totalTimeEl = document.getElementById('totalTime');
+
+    function formatTime(seconds) {
+        if (!seconds || isNaN(seconds) || seconds < 0) return "0:00";
+        const totalSec = Math.floor(seconds);
+        const mins = Math.floor(totalSec / 60);
+        const secs = totalSec % 60;
+        if (mins >= 60) {
+            const hrs = Math.floor(mins / 60);
+            const remMins = mins % 60;
+            return hrs + ":" + (remMins < 10 ? "0" : "") + remMins + ":" + (secs < 10 ? "0" : "") + secs;
+        }
+        return mins + ":" + (secs < 10 ? "0" : "") + secs;
+    }
+
+    function updateSongTrackerUI() {
+        if (!scrubFill) return;
+
+        if (currentDurationSec > 0) {
+            let pos = currentPositionSec;
+            if (isTrackPlaying && lastPositionTimestamp > 0) {
+                const elapsed = (Date.now() - lastPositionTimestamp) / 1000;
+                pos = Math.min(currentDurationSec, currentPositionSec + elapsed);
+            }
+
+            const pct = Math.min(100, Math.max(0, (pos / currentDurationSec) * 100));
+            scrubFill.style.width = pct.toFixed(2) + '%';
+
+            if (currentTimeEl) {
+                currentTimeEl.textContent = formatTime(pos);
+            }
+            if (totalTimeEl) {
+                totalTimeEl.textContent = formatTime(currentDurationSec);
+            }
+        } else {
+            scrubFill.style.width = '100%';
+            if (currentTimeEl) {
+                currentTimeEl.textContent = 'LIVE';
+            }
+            if (totalTimeEl) {
+                totalTimeEl.textContent = 'STREAM';
+            }
+        }
+    }
+
+    if (!trackerTimer) {
+        trackerTimer = setInterval(function () {
+            if (currentDurationSec > 0 && isTrackPlaying) {
+                updateSongTrackerUI();
+            }
+        }, 250);
+    }
+
     // Initial Metadata Fetch
     fetch('/api/metadata')
         .then(function (r) { return r.json(); })
         .then(function (data) {
             if (data && data.title) {
-                updateTrackMetadata(data.title, data.artist, data.album, data.albumArtUrl, data.hasArt);
+                updateTrackMetadata(data.title, data.artist, data.album, data.albumArtUrl, data.hasArt, data.duration, data.position, data.isPlaying);
             }
         })
         .catch(function (e) { console.warn("Could not fetch initial metadata", e); });
 
-    function updateTrackMetadata(title, artist, album, albumArtUrl, hasArt) {
+    let lastTrackKey = "";
+    let lastTrackTitle = "";
+
+    function updateTrackMetadata(title, artist, album, albumArtUrl, hasArt, duration, position, isPlaying) {
         const albumArt = document.getElementById('albumArt');
         const metaContainer = document.getElementById('metaContainer');
         const albumBadge = document.getElementById('albumBadge');
         const albumSub = document.getElementById('albumSub');
 
         const cleanTitle = (title || "").trim();
+        const cleanArtist = (artist || "").trim();
+        const currentSongKey = cleanTitle + "::" + cleanArtist;
+        const trackChanged = (cleanTitle !== "" && currentSongKey !== lastTrackKey);
+        if (cleanTitle !== "") {
+            lastTrackKey = currentSongKey;
+            lastTrackTitle = cleanTitle;
+        }
+        if (trackChanged) {
+            refreshReactionsState();
+        }
         const hasRealTrack = cleanTitle !== "" && 
             cleanTitle !== "Awaiting Audio Source..." && 
             cleanTitle !== "Awaiting Track Info..." && 
@@ -739,18 +1079,64 @@ document.addEventListener('DOMContentLoaded', function () {
             if (albumBadge) albumBadge.textContent = "ON AIR";
             if (albumSub) albumSub.textContent = "LIVE BROADCAST";
         }
+
+        // Update Song Tracker Timing
+        if (duration !== undefined && duration !== null) {
+            const parsedDur = parseFloat(duration);
+            currentDurationSec = !isNaN(parsedDur) && parsedDur > 0 ? parsedDur : 0;
+        }
+        if (position !== undefined && position !== null) {
+            const parsedPos = parseFloat(position);
+            if (!isNaN(parsedPos) && parsedPos >= 0) {
+                if (trackChanged || lastPositionTimestamp === 0) {
+                    currentPositionSec = parsedPos;
+                    lastPositionTimestamp = Date.now();
+                } else {
+                    let estimatedCurrent = currentPositionSec;
+                    if (isTrackPlaying && lastPositionTimestamp > 0) {
+                        const elapsed = (Date.now() - lastPositionTimestamp) / 1000;
+                        estimatedCurrent = currentPositionSec + elapsed;
+                    }
+
+                    const diff = parsedPos - estimatedCurrent;
+                    if (Math.abs(diff) > 2.5 || diff > 0) {
+                        currentPositionSec = parsedPos;
+                        lastPositionTimestamp = Date.now();
+                    } else {
+                        // Smoothly advance without jumping backwards due to OS polling latency
+                        currentPositionSec = estimatedCurrent;
+                        lastPositionTimestamp = Date.now();
+                    }
+                }
+            }
+        }
+        if (isPlaying !== undefined && isPlaying !== null) {
+            isTrackPlaying = !!isPlaying;
+        } else {
+            isTrackPlaying = hasRealTrack;
+        }
+
+        updateSongTrackerUI();
     }
 
     // Connect to Server-Sent Events (SSE)
     try {
         const evtSource = new EventSource('/api/events');
 
+        evtSource.onopen = function () {
+            console.log('[SSE] Real-time connection established with Scrim app');
+        };
+
+        evtSource.onerror = function (e) {
+            console.warn('[SSE] Event stream connection paused, auto-reconnecting...', e);
+        };
+
         evtSource.onmessage = function (event) {
             try {
                 const data = JSON.parse(event.data);
 
                 if (data.type === 'metadata') {
-                    updateTrackMetadata(data.title, data.artist, data.album, data.albumArtUrl, data.hasArt);
+                    updateTrackMetadata(data.title, data.artist, data.album, data.albumArtUrl, data.hasArt, data.duration, data.position, data.isPlaying);
                 }
 
                 if (data.type === 'branding') {
@@ -761,11 +1147,74 @@ document.addEventListener('DOMContentLoaded', function () {
                     if (listenerCount) listenerCount.textContent = data.listeners || '1';
                     if (data.isLive !== undefined) {
                         updateLiveIndicator(data.isLive);
+                        if (data.isLive && (!isPlaying || !audio.src)) {
+                            checkAutoplay(true);
+                        }
+                    }
+                    if (data.format !== undefined) {
+                        updateStreamQuality(data.format, data.bitrate);
                     }
                 }
 
                 if (data.type === 'queue' && data.requests) {
                     updateQueue(data.requests);
+                }
+
+                if (data.type === 'chat_init') {
+                    if (data.enabled !== undefined) {
+                        setChatStatus(data.enabled);
+                    }
+                    if (Array.isArray(data.blacklist)) {
+                        currentBlacklist = data.blacklist;
+                    }
+                    if (Array.isArray(data.messages)) {
+                        data.messages.forEach(appendChatMessage);
+                    }
+                }
+
+                if (data.type === 'assign_nickname' && data.target && data.assigned) {
+                    handleNicknameAssignment(data.target, data.assigned);
+                }
+
+                if (data.type === 'chat') {
+                    const msg = (data.message && typeof data.message === 'object') ? data.message : data;
+                    if (msg && (msg.text !== undefined || msg.id)) {
+                        appendChatMessage(msg);
+                    }
+                }
+
+                if (data.type === 'chat_clear') {
+                    clearChatMessages();
+                }
+
+                if (data.type === 'chat_status' && data.enabled !== undefined) {
+                    setChatStatus(data.enabled);
+                }
+
+                if (data.type === 'reaction') {
+                    updateReactionCounts(data.counts);
+                    let targetBtn = null;
+                    if (data.reaction === 'thumbs_up' || data.reaction === 'thumbsup' || data.reaction === 'like') {
+                        targetBtn = btnReactionThumbsUp;
+                    } else if (data.reaction === 'heart' || data.reaction === 'love') {
+                        targetBtn = btnReactionLove;
+                    } else if (data.reaction === 'thumbs_down' || data.reaction === 'thumbsdown' || data.reaction === 'dislike') {
+                        targetBtn = btnReactionThumbsDown;
+                    }
+                    spawnFloatingReaction(data.reaction, targetBtn);
+                }
+
+                if (data.type === 'reaction_init' && data.counts) {
+                    updateReactionCounts(data.counts);
+                }
+
+                if (data.type === 'reaction_reset') {
+                    updateReactionCounts(data.counts || { thumbsUp: 0, thumbsDown: 0, heart: 0 });
+                    refreshReactionsState();
+                }
+
+                if (data.type === 'history_init' || data.type === 'history_update') {
+                    renderSongHistory(data.history || []);
                 }
             } catch (err) {
                 console.error("SSE parse error", err);
@@ -782,18 +1231,24 @@ document.addEventListener('DOMContentLoaded', function () {
             const text = requestInput.value.trim();
             if (!text) return;
 
+            const dedication = dedicationInput ? dedicationInput.value.trim() : '';
+
             fetch('/api/requests', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query: text })
+                body: JSON.stringify({ query: text, dedication: dedication })
             }).then(function (res) {
                 if (res.ok) {
                     requestInput.value = '';
+                    if (dedicationInput) dedicationInput.value = '';
                     if (requestSuccess) {
                         requestSuccess.style.display = 'block';
+                        requestSuccess.textContent = dedication
+                            ? `Request submitted & dedicated to ${dedication}!`
+                            : 'Request submitted to DJ!';
                         setTimeout(function () {
                             requestSuccess.style.display = 'none';
-                        }, 3500);
+                        }, 4000);
                     }
                 }
             }).catch(function (err) {
@@ -813,11 +1268,570 @@ document.addEventListener('DOMContentLoaded', function () {
         requests.forEach(function (req, index) {
             const li = document.createElement('li');
             li.className = 'queue-item';
+            const dedicationHtml = req.dedication ? `<span class="queue-dedication">❤️ Dedicated to: ${escapeHtml(req.dedication)}</span>` : '';
             li.innerHTML = `
-                <span class="queue-track">${index + 1}. ${req.query}</span>
-                <span class="queue-dur">(${req.status || 'Pending'})</span>
+                <div class="queue-info">
+                    <span class="queue-track">${index + 1}. ${escapeHtml(req.query)}</span>
+                    ${dedicationHtml}
+                </div>
+                <span class="queue-dur">(${escapeHtml(req.status || 'Pending')})</span>
             `;
             queueList.appendChild(li);
         });
     }
+
+    // ==========================================================================
+    // Live Station Chat Logic
+    // ==========================================================================
+    const chatStatusPill = document.getElementById('chatStatusPill');
+    const chatDisabledBanner = document.getElementById('chatDisabledBanner');
+    const chatMessagesContainer = document.getElementById('chatMessagesContainer');
+    const chatMessagesList = document.getElementById('chatMessagesList');
+    const chatEmptyHint = document.getElementById('chatEmptyHint');
+    const chatForm = document.getElementById('chatForm');
+    const chatNicknameInput = document.getElementById('chatNicknameInput');
+    const chatMessageInput = document.getElementById('chatMessageInput');
+    const chatSendBtn = document.getElementById('chatSendBtn');
+
+    let isChatEnabled = true;
+    const seenMessageIds = new Set();
+
+    // Anonymous Nickname management
+    function initNickname() {
+        if (!chatNicknameInput) return;
+        let nick = '';
+        try {
+            nick = localStorage.getItem('scrim_chat_nickname') || '';
+        } catch (e) {}
+
+        if (!nick) {
+            const randNum = Math.floor(100 + Math.random() * 900);
+            nick = 'Listener #' + randNum;
+            try {
+                localStorage.setItem('scrim_chat_nickname', nick);
+            } catch (e) {}
+        }
+        chatNicknameInput.value = nick;
+
+        chatNicknameInput.addEventListener('change', function () {
+            let val = chatNicknameInput.value.trim();
+            if (!val) {
+                val = 'Listener #' + Math.floor(100 + Math.random() * 900);
+                chatNicknameInput.value = val;
+            }
+            try {
+                localStorage.setItem('scrim_chat_nickname', val);
+            } catch (e) {}
+        });
+    }
+
+    initNickname();
+
+    function setChatStatus(enabled) {
+        isChatEnabled = !!enabled;
+        if (chatStatusPill) {
+            if (isChatEnabled) {
+                chatStatusPill.textContent = 'LIVE';
+                chatStatusPill.classList.remove('paused');
+            } else {
+                chatStatusPill.textContent = 'PAUSED';
+                chatStatusPill.classList.add('paused');
+            }
+        }
+        if (chatDisabledBanner) {
+            chatDisabledBanner.style.display = isChatEnabled ? 'none' : 'flex';
+        }
+        if (chatMessageInput) {
+            chatMessageInput.disabled = !isChatEnabled;
+            chatMessageInput.placeholder = isChatEnabled ? 'Type a message...' : 'Chat is currently paused by the host';
+        }
+        if (chatSendBtn) {
+            chatSendBtn.disabled = !isChatEnabled;
+        }
+    }
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function formatMessageTime(isoString) {
+        if (!isoString) return '';
+        try {
+            const d = new Date(isoString);
+            return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        } catch (e) {
+            return '';
+        }
+    }
+
+    function appendChatMessage(msg) {
+        if (!msg || !chatMessagesList) return;
+        if (msg.id && seenMessageIds.has(msg.id)) return;
+        if (msg.id) seenMessageIds.add(msg.id);
+
+        if (chatEmptyHint) {
+            chatEmptyHint.style.display = 'none';
+        }
+
+        const msgDiv = document.createElement('div');
+        msgDiv.className = 'chat-msg' + (msg.isHost ? ' host-msg' : '');
+        const timeStr = formatMessageTime(msg.timestamp);
+        const senderColor = msg.color || (msg.isHost ? '#ef4444' : '#00d2ff');
+
+        msgDiv.innerHTML = `
+            <div class="chat-msg-header">
+                <div class="chat-msg-sender-wrap">
+                    <strong class="chat-msg-sender" style="color: ${escapeHtml(senderColor)};">${escapeHtml(msg.sender || 'Anonymous')}</strong>
+                    ${msg.isHost ? '<span class="chat-host-badge">DJ</span>' : ''}
+                </div>
+                <span class="chat-msg-time">${timeStr}</span>
+            </div>
+            <div class="chat-msg-text">${escapeHtml(msg.text || '')}</div>
+        `;
+
+        chatMessagesList.appendChild(msgDiv);
+
+        // Auto-scroll to bottom smoothly
+        if (chatMessagesContainer) {
+            chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+        }
+    }
+
+    function clearChatMessages() {
+        seenMessageIds.clear();
+        if (!chatMessagesList) return;
+        chatMessagesList.innerHTML = '';
+        if (chatEmptyHint) {
+            chatEmptyHint.style.display = 'block';
+            chatMessagesList.appendChild(chatEmptyHint);
+        }
+    }
+
+    let currentBlacklist = [];
+
+    function isBlacklistedNickname(nick) {
+        if (!nick || !currentBlacklist.length) return false;
+        const lower = nick.toLowerCase();
+        return currentBlacklist.some(function (b) {
+            return b && lower.includes(b.toLowerCase());
+        });
+    }
+
+    function handleNicknameAssignment(target, assigned) {
+        if (!chatNicknameInput || !target || !assigned) return;
+        const current = chatNicknameInput.value.trim();
+        if (current.toLowerCase() === target.toLowerCase()) {
+            chatNicknameInput.value = assigned;
+            try {
+                localStorage.setItem('scrim_chat_nickname', assigned);
+            } catch (e) {}
+            if (chatMessageInput) {
+                const prevPh = chatMessageInput.placeholder;
+                chatMessageInput.placeholder = `DJ assigned you nickname "${assigned}"! (You can edit it anytime)`;
+                setTimeout(function () {
+                    chatMessageInput.placeholder = prevPh;
+                }, 6000);
+            }
+        }
+    }
+
+    // Fetch initial chat state & recent history
+    fetch('/api/chat')
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (data) {
+                if (data.enabled !== undefined) {
+                    setChatStatus(data.enabled);
+                }
+                if (Array.isArray(data.blacklist)) {
+                    currentBlacklist = data.blacklist;
+                }
+                if (Array.isArray(data.messages)) {
+                    data.messages.forEach(appendChatMessage);
+                }
+            }
+        })
+        .catch(function (err) {
+            console.warn("Could not load initial chat", err);
+        });
+
+    // Chat form submission
+    if (chatForm && chatMessageInput) {
+        chatForm.addEventListener('submit', function (e) {
+            e.preventDefault();
+            if (!isChatEnabled) return;
+            const text = chatMessageInput.value.trim();
+            if (!text) return;
+
+            const sender = (chatNicknameInput ? chatNicknameInput.value.trim() : '') || 'Anonymous';
+
+            if (chatSendBtn) chatSendBtn.disabled = true;
+
+            fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sender: sender, text: text })
+            }).then(function (res) {
+                if (chatSendBtn) chatSendBtn.disabled = !isChatEnabled;
+                if (res.ok) {
+                    chatMessageInput.value = '';
+                    chatMessageInput.focus();
+                } else if (res.status === 403) {
+                    setChatStatus(false);
+                }
+            }).catch(function (err) {
+                if (chatSendBtn) chatSendBtn.disabled = !isChatEnabled;
+                console.error("Failed to post chat message", err);
+            });
+        });
+    }
+
+    // Song Reactions System (Single-Vote Switcher & Per-Song Memory)
+    let anonClientId = localStorage.getItem('scrim_anon_uid');
+    if (!anonClientId) {
+        anonClientId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+            ? crypto.randomUUID()
+            : 'c_' + Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
+        try {
+            localStorage.setItem('scrim_anon_uid', anonClientId);
+        } catch (e) {}
+    }
+
+    let currentUserReaction = null;
+
+    function highlightUserReaction(reaction) {
+        currentUserReaction = reaction;
+        const allBtns = [btnReactionThumbsUp, btnReactionLove, btnReactionThumbsDown];
+        allBtns.forEach(function (b) {
+            if (b) b.classList.remove('active');
+        });
+
+        if (!reaction) return;
+        if (reaction === 'thumbs_up' || reaction === 'thumbsup' || reaction === 'like') {
+            if (btnReactionThumbsUp) btnReactionThumbsUp.classList.add('active');
+        } else if (reaction === 'heart' || reaction === 'love') {
+            if (btnReactionLove) btnReactionLove.classList.add('active');
+        } else if (reaction === 'thumbs_down' || reaction === 'thumbsdown' || reaction === 'dislike') {
+            if (btnReactionThumbsDown) btnReactionThumbsDown.classList.add('active');
+        }
+    }
+
+    function updateReactionCounts(counts) {
+        if (!counts) return;
+        if (countThumbsUp && counts.thumbsUp !== undefined) {
+            countThumbsUp.textContent = counts.thumbsUp;
+        }
+        if (countHeart && counts.heart !== undefined) {
+            countHeart.textContent = counts.heart;
+        }
+        if (countThumbsDown && counts.thumbsDown !== undefined) {
+            countThumbsDown.textContent = counts.thumbsDown;
+        }
+    }
+
+    function refreshReactionsState() {
+        fetch('/api/reactions?clientId=' + encodeURIComponent(anonClientId)).then(function (res) {
+            if (res.ok) return res.json();
+            return null;
+        }).then(function (data) {
+            if (data) {
+                if (data.counts) updateReactionCounts(data.counts);
+                highlightUserReaction(data.userReaction || null);
+            }
+        }).catch(function () {});
+    }
+
+    function spawnFloatingReaction(type, sourceEl) {
+        const emojiMap = {
+            'thumbs_up': '👍',
+            'thumbsup': '👍',
+            'like': '👍',
+            'heart': '❤️',
+            'love': '❤️',
+            'thumbs_down': '👎',
+            'thumbsdown': '👎',
+            'dislike': '👎'
+        };
+        const emoji = emojiMap[type] || '❤️';
+        const particle = document.createElement('span');
+        particle.className = 'floating-reaction-particle';
+        particle.textContent = emoji;
+
+        let startX = window.innerWidth / 2;
+        let startY = window.innerHeight / 2;
+
+        if (sourceEl) {
+            const rect = sourceEl.getBoundingClientRect();
+            startX = rect.left + rect.width / 2;
+            startY = rect.top + window.scrollY;
+        }
+
+        // Random horizontal drift (-15px to +15px)
+        const drift = (Math.random() - 0.5) * 30;
+        particle.style.left = (startX + drift) + 'px';
+        particle.style.top = startY + 'px';
+        particle.style.position = 'absolute';
+        particle.style.pointerEvents = 'none';
+        particle.style.zIndex = '9999';
+
+        document.body.appendChild(particle);
+
+        setTimeout(function () {
+            if (particle.parentNode) {
+                particle.parentNode.removeChild(particle);
+            }
+        }, 1250);
+    }
+
+    function sendReaction(type, btnEl) {
+        if (!type) return;
+        if (btnEl) {
+            btnEl.classList.add('pop');
+            setTimeout(function () {
+                btnEl.classList.remove('pop');
+            }, 300);
+        }
+
+        // Spawn particle only if we're selecting or switching to a new reaction
+        if (currentUserReaction !== type) {
+            spawnFloatingReaction(type, btnEl);
+        }
+
+        fetch('/api/reactions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: type, clientId: anonClientId })
+        }).then(function (res) {
+            return res.json();
+        }).then(function (data) {
+            if (data) {
+                if (data.counts) {
+                    updateReactionCounts(data.counts);
+                }
+                highlightUserReaction(data.userReaction || null);
+            }
+        }).catch(function (err) {
+            console.error("Failed to post reaction", err);
+        });
+    }
+
+    if (btnReactionThumbsUp) {
+        btnReactionThumbsUp.addEventListener('click', function () {
+            sendReaction('thumbs_up', btnReactionThumbsUp);
+        });
+    }
+    if (btnReactionLove) {
+        btnReactionLove.addEventListener('click', function () {
+            sendReaction('heart', btnReactionLove);
+        });
+    }
+    if (btnReactionThumbsDown) {
+        btnReactionThumbsDown.addEventListener('click', function () {
+            sendReaction('thumbs_down', btnReactionThumbsDown);
+        });
+    }
+
+    // Initial reactions & user vote fetch
+    refreshReactionsState();
+
+    // Recently Played History Logic & Initial Fetch
+    function fetchSongHistory() {
+        fetch('/api/history').then(function (res) {
+            if (res.ok) return res.json();
+            return null;
+        }).then(function (data) {
+            if (data && Array.isArray(data.history)) {
+                renderSongHistory(data.history);
+            }
+        }).catch(function () {});
+    }
+
+    if (historyToggleBtn && historyModal) {
+        historyToggleBtn.addEventListener('click', function () {
+            historyModal.style.display = 'flex';
+            fetchSongHistory();
+        });
+    }
+
+    if (historyCloseBtn && historyModal) {
+        historyCloseBtn.addEventListener('click', function () {
+            historyModal.style.display = 'none';
+        });
+    }
+
+    if (historyModal) {
+        historyModal.addEventListener('click', function (e) {
+            if (e.target === historyModal) {
+                historyModal.style.display = 'none';
+            }
+        });
+    }
+
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && historyModal && historyModal.style.display === 'flex') {
+            historyModal.style.display = 'none';
+        }
+    });
+
+    fetchSongHistory();
+
+    function renderSongHistory(items) {
+        if (!historyItemsList) return;
+        if (!Array.isArray(items) || items.length === 0) {
+            if (historyEmptyHint) historyEmptyHint.style.display = 'block';
+            historyItemsList.innerHTML = '';
+            if (historyModalTitle) historyModalTitle.textContent = 'RECENTLY PLAYED';
+            return;
+        }
+
+        if (historyEmptyHint) historyEmptyHint.style.display = 'none';
+        if (historyModalTitle) historyModalTitle.textContent = `RECENTLY PLAYED (${items.length})`;
+
+        historyItemsList.innerHTML = '';
+        items.forEach(function (track) {
+            const row = document.createElement('div');
+            row.className = 'history-row';
+
+            const thumb = document.createElement('div');
+            thumb.className = 'history-thumb';
+            if (track.hasArt && track.albumArtUrl) {
+                const img = document.createElement('img');
+                img.src = track.albumArtUrl;
+                img.alt = track.title || 'Track Art';
+                thumb.appendChild(img);
+            } else {
+                thumb.innerHTML = `
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M9 18V5l12-2v13"></path>
+                        <circle cx="6" cy="18" r="3"></circle>
+                        <circle cx="18" cy="16" r="3"></circle>
+                    </svg>
+                `;
+            }
+
+            const info = document.createElement('div');
+            info.className = 'history-track-info';
+
+            const titleEl = document.createElement('div');
+            titleEl.className = 'history-track-title';
+            titleEl.textContent = track.title || 'Unknown Track';
+
+            const artistEl = document.createElement('div');
+            artistEl.className = 'history-track-artist';
+            artistEl.textContent = track.artist || 'Live Broadcast';
+
+            info.appendChild(titleEl);
+            info.appendChild(artistEl);
+
+            const rightWrap = document.createElement('div');
+            rightWrap.style.display = 'flex';
+            rightWrap.style.alignItems = 'center';
+            rightWrap.style.gap = '8px';
+            rightWrap.style.whiteSpace = 'nowrap';
+
+            if ((track.thumbsUp || 0) > 0 || (track.heart || 0) > 0 || (track.thumbsDown || 0) > 0) {
+                const reactionsEl = document.createElement('div');
+                reactionsEl.className = 'history-track-reactions';
+                reactionsEl.style.display = 'flex';
+                reactionsEl.style.gap = '6px';
+                reactionsEl.style.alignItems = 'center';
+                reactionsEl.style.fontSize = '11px';
+
+                if ((track.thumbsUp || 0) > 0) {
+                    const upSpan = document.createElement('span');
+                    upSpan.style.color = '#38bdf8';
+                    upSpan.title = 'Thumbs Up';
+                    upSpan.textContent = `👍 ${track.thumbsUp}`;
+                    reactionsEl.appendChild(upSpan);
+                }
+                if ((track.heart || 0) > 0) {
+                    const heartSpan = document.createElement('span');
+                    heartSpan.style.color = '#f43f5e';
+                    heartSpan.title = 'Love';
+                    heartSpan.textContent = `❤️ ${track.heart}`;
+                    reactionsEl.appendChild(heartSpan);
+                }
+                if ((track.thumbsDown || 0) > 0) {
+                    const downSpan = document.createElement('span');
+                    downSpan.style.color = '#94a3b8';
+                    downSpan.title = 'Thumbs Down';
+                    downSpan.textContent = `👎 ${track.thumbsDown}`;
+                    reactionsEl.appendChild(downSpan);
+                }
+                rightWrap.appendChild(reactionsEl);
+            }
+
+            const timeEl = document.createElement('div');
+            timeEl.className = 'history-track-time';
+            timeEl.textContent = track.playedAt || '';
+            rightWrap.appendChild(timeEl);
+
+            row.appendChild(thumb);
+            row.appendChild(info);
+            row.appendChild(rightWrap);
+
+            historyItemsList.appendChild(row);
+        });
+    }
+
+    fetch('/api/history')
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (Array.isArray(data)) {
+                renderSongHistory(data);
+            }
+        })
+        .catch(function (e) {
+            console.warn("Could not fetch initial history", e);
+        });
+
+    // Progressive Web App (PWA) Support
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function () {
+            navigator.serviceWorker.register('/sw.js').then(function (reg) {
+                console.log('[PWA] ServiceWorker registered with scope:', reg.scope);
+                reg.update();
+            }).catch(function (err) {
+                console.warn('[PWA] ServiceWorker registration:', err);
+            });
+        });
+    }
+
+    let deferredPrompt = null;
+    window.addEventListener('beforeinstallprompt', function (e) {
+        e.preventDefault();
+        deferredPrompt = e;
+        if (pwaInstallBtn) {
+            pwaInstallBtn.style.display = 'inline-flex';
+        }
+    });
+
+    if (pwaInstallBtn) {
+        pwaInstallBtn.addEventListener('click', function () {
+            if (!deferredPrompt) {
+                return;
+            }
+            deferredPrompt.prompt();
+            deferredPrompt.userChoice.then(function (choiceResult) {
+                if (choiceResult.outcome === 'accepted') {
+                    console.log('[PWA] User accepted installation');
+                }
+                deferredPrompt = null;
+                pwaInstallBtn.style.display = 'none';
+            });
+        });
+    }
+
+    window.addEventListener('appinstalled', function () {
+        console.log('[PWA] App installed successfully');
+        if (pwaInstallBtn) {
+            pwaInstallBtn.style.display = 'none';
+        }
+    });
 });
