@@ -16,7 +16,7 @@
 - **1-Click Speaker Restoration**: Safely restores your physical speakers/headphones at any time with a single click.
 
 ### 🎚️ Modular Studio Console
-- **3-Column Drag & Drop Interface**: Customize your studio layout with 10 reorderable cards (Audio Routing, Network & Internet, Master VU, Voice FX, Song Queue, Encoding, Media Player, Soundboard, Website Branding, and Playlist).
+- **3-Column Drag & Drop Interface**: Customize your studio layout with 11 reorderable cards (Audio Routing, Network & Internet, Master VU, Voice FX, Song Queue, Live Station Chat, Encoding, Media Player, Soundboard, Website Branding, and Playlist).
 - **Proportional Column Layouts**: Toggle between **Studio** (Little-Big-Little) and **Equal** (1fr-1fr-1fr) sizing modes.
 - **Synchronized ON AIR & Transmitter (TX)**: Visual status badges and real-time audio transmission indicators keep you informed when sound is flowing.
 - **Calibrated Stereo dB VU Meters**: High-frequency analog-style response bars with precise numeric decibel readouts (`-40 dB` to `0.0 dB`).
@@ -38,10 +38,11 @@
 - **Custom Domain / Host Override**: Enter custom domain names or DDNS hostnames (e.g. `radio.mydomain.com:8080`) that propagate across all share links.
 - **Direct Media Player Endpoint**: Native `/stream` endpoint for direct listening in VLC, Winamp, foobar2000, and mobile streaming apps.
 
-### 🎨 Modern Responsive Web Player
+### 🎨 Modern Responsive Web Player & Live Chat
 - **Dark Glassmorphism Interface**: Real-time track metadata and album art synchronized via Windows System Media Transport Controls (SMTC).
+- **Anonymous Live Chat**: Real-time discussion between listeners and broadcaster without signups or accounts; verified `[HOST]` badges and broadcaster pause/clear controls.
 - **4 Selectable Visualizers**: Choose between Neon Frequency Spectrum, Dynamic Waveform, Glowing Retro VU Meter, or Pulsing Sound Bars.
-- **Listener Song Requests**: Remote listeners can submit song requests and notes directly to the DJ's on-air moderation queue.
+- **Listener Song Requests & Dedications**: Remote listeners can submit song requests with free-form dedications (e.g. for a friend, partner, or crew), visible in the live queue and the DJ's moderation card.
 
 ---
 
@@ -76,7 +77,7 @@
 
 Comprehensive guides, specifications, and architecture documents are located in the [`docs/`](docs/) directory:
 
-- 📖 **[User & Feature Guide](docs/user-guide.md)**: Complete walkthrough of all 10 console cards, virtual audio, mic controls, and web player options.
+- 📖 **[User & Feature Guide](docs/user-guide.md)**: Complete walkthrough of all 11 console cards, real-time live chat, virtual audio, mic controls, and web player options.
 - 🎨 **[Web Player Themes & Custom Theme Guide](docs/web-themes.md)**: Guide to built-in themes (Dark, Goth, Pink, Flowers, Light, Rock & Roll) and creating user JSON themes in `~/.scrim/themes/`.
 - 🌐 **[Network & Outside Broadcasting Guide](docs/network-broadcasting.md)**: Details on local LAN sharing, UPnP port forwarding, custom domain overrides, and media player endpoints.
 - 📐 **[Project Specification & Architecture](docs/spec.md)**: Deep technical dive into the WASAPI loopback capture, mixing pipelines, and transcoding engine.

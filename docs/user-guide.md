@@ -169,15 +169,34 @@ Listeners can switch between 4 live sound reaction modes using the visualizer st
 
 ---
 
-## 8. Interactive Song Requests Queue
+## 8. Real-Time Anonymous Web Chat & Broadcaster Controls
 
-- **Listener Submission**: Listeners can submit song title, artist, and a personal dedication note directly from the web player.
-- **DJ Moderation Queue**: Incoming requests appear in the **Song Requests Queue** card in the Scrim console.
-- **1-Click Queue Management**: The DJ can click **`✔ Accept`** to move songs into the on-air queue or **`✕ Reject`** to discard.
+Scrim features a built-in, low-latency anonymous live chat system connecting listeners and the broadcaster in real time without third-party services or logins.
+
+### Anonymous Web Chat
+- **No Sign-Up or Accounts Required**: Listeners can chat completely anonymously.
+- **Customizable Nicknames**: Automatic radio listener handles (e.g. `Listener #482`) are assigned on first visit and stored locally in browser storage. Listeners can change their nickname at any time.
+- **Sub-Millisecond SSE Push**: Real-time message broadcast pushed via HTTP Server-Sent Events (`/api/events`) immediately as messages are submitted (`POST /api/chat`).
+- **Auto-Scrolling & Responsive Bubbles**: Distinct bubble styling, timestamps, and custom avatar color coding for every participant.
+
+### Broadcaster Station Console Chat Card
+- **Live Monitoring**: Broadcaster sees all incoming listener messages live in the **Live Station Chat** card.
+- **Verified Host / DJ Messaging**: The broadcaster can type in the console input and send replies with a verified, glowing red **`[HOST]`** badge.
+- **Broadcaster Enable / Disable Switch**: The station owner can pause or resume chat at any time via the toggle switch in the console card. When paused, the web player immediately shows a "Chat paused by host" banner and disables input.
+- **Chat History Management**: Broadcasters can clear chat history at any time with the **`🗑️ Clear`** button.
 
 ---
 
-## 9. Studio Soundboard & Custom Sounds
+## 9. Interactive Song Requests Queue & Dedications
+
+- **Listener Song Requests**: Listeners can submit song title and artist directly from the web player.
+- **Free-Form Dedications**: Listeners can dedicate the song to anyone with a free-form name or shoutout (e.g. "For Maria", "Mom", "The Night Shift Crew").
+- **Live Queue Display**: Dedications are displayed with a heart badge in the web player's **UPCOMING: LIVE QUEUE** and in the broadcaster's **Song Requests** console card.
+- **DJ Moderation**: The DJ can click **`✔`** to accept or **`✗`** to decline requests in real time.
+
+---
+
+## 10. Studio Soundboard & Custom Sounds
 
 ### Built-In Studio SFX
 Synthesized in-memory 44.1kHz stereo audio effects:
@@ -194,10 +213,10 @@ Synthesized in-memory 44.1kHz stereo audio effects:
 
 ---
 
-## 10. Console Customization & Profile Persistence
+## 11. Console Customization & Profile Persistence
 
 ### Modular 3-Column Drag & Drop
-- Click **`+ Add / Manage Cards`** to show or hide any of the 10 available studio cards.
+- Click **`+ Add / Manage Cards`** to show or hide any of the 11 available studio cards.
 - Drag any card header to reorder cards within or across columns.
 - **Column Proportions**: Toggle between:
   - **📻 Studio (Little-Big-Little)**: 310px left column, flexible center master column, 340px right column.

@@ -20,6 +20,7 @@ namespace Scrim.Configuration {
         public int AppStreamVolume { get; set; } = 100;
         public string CaptureDeviceId { get; set; } = "";
         public string CustomPublicUrl { get; set; } = "";
+        public bool EnableChat { get; set; } = true;
 
         // Web Player Branding Customization
         public string StationName { get; set; } = "GLOBAL INDIE RADIO";
@@ -45,7 +46,7 @@ namespace Scrim.Configuration {
         public int CustomLeftWidth { get; set; } = 320;
         public int CustomRightWidth { get; set; } = 340;
         public System.Collections.Generic.List<string> LeftColumnCards { get; set; } = new() { "card-audio-routing", "card-web-branding" };
-        public System.Collections.Generic.List<string> CenterColumnCards { get; set; } = new() { "card-vu-talk", "card-voice-fx", "card-queue" };
+        public System.Collections.Generic.List<string> CenterColumnCards { get; set; } = new() { "card-vu-talk", "card-voice-fx", "card-queue", "card-chat" };
         public System.Collections.Generic.List<string> RightColumnCards { get; set; } = new() { "card-encoding", "card-media-player", "card-soundboard" };
 
         public System.Collections.Generic.List<CustomSoundItem> CustomSounds { get; set; } = new();

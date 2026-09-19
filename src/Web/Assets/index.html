@@ -34,7 +34,7 @@
                     <circle cx="12" cy="12" r="10"></circle>
                     <polyline points="12 6 12 12 16 14"></polyline>
                 </svg>
-                <span id="clockTime">10:09 PM GMT</span>
+                <span id="clockTime">--:--:--</span>
             </div>
         </div>
 
@@ -220,9 +220,48 @@
                 <h3 class="sidebar-title">REQUEST A SONG</h3>
                 <form id="requestForm" class="request-form">
                     <input type="text" id="requestInput" class="request-input" placeholder="Enter Song Title & Artist..." required autocomplete="off">
+                    <input type="text" id="dedicationInput" class="request-input request-dedication-input" placeholder="Dedicate to someone (e.g. Maria, Mom, Crew)..." autocomplete="off" maxlength="60">
                     <button type="submit" class="submit-request-btn">SUBMIT REQUEST</button>
                 </form>
-                <div id="requestSuccess" class="request-success-msg" style="display: none;">Request submitted to DJ!</div>
+                <div id="requestSuccess" class="request-success-msg" style="display: none;">Request & dedication submitted to DJ!</div>
+            </div>
+
+            <!-- LIVE STATION CHAT -->
+            <div class="sidebar-card chat-card" id="chatCard">
+                <div class="chat-card-header">
+                    <h3 class="sidebar-title" style="margin-bottom: 0;">LIVE STATION CHAT</h3>
+                    <span class="chat-status-pill" id="chatStatusPill">LIVE</span>
+                </div>
+                
+                <div class="chat-disabled-banner" id="chatDisabledBanner" style="display: none;">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
+                    </svg>
+                    <span>Chat paused by host</span>
+                </div>
+
+                <div class="chat-messages-container" id="chatMessagesContainer">
+                    <div class="chat-messages-list" id="chatMessagesList">
+                        <div class="chat-empty-hint" id="chatEmptyHint">Welcome! Say hello to the DJ and listeners.</div>
+                    </div>
+                </div>
+
+                <form id="chatForm" class="chat-form">
+                    <div class="chat-sender-row">
+                        <span class="chat-sender-label">Nickname:</span>
+                        <input type="text" id="chatNicknameInput" class="chat-nickname-input" placeholder="Anonymous" maxlength="24" title="Change your anonymous chat handle">
+                    </div>
+                    <div class="chat-input-row">
+                        <input type="text" id="chatMessageInput" class="chat-message-input" placeholder="Type a message..." maxlength="300" required autocomplete="off">
+                        <button type="submit" class="chat-send-btn" id="chatSendBtn" title="Send message" aria-label="Send message">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="22" y1="2" x2="11" y2="13"></line>
+                                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                            </svg>
+                        </button>
+                    </div>
+                </form>
             </div>
         </aside>
     </main>

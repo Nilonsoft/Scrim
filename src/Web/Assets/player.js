@@ -20,6 +20,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const clockTime = document.getElementById('clockTime');
     const requestForm = document.getElementById('requestForm');
     const requestInput = document.getElementById('requestInput');
+    const dedicationInput = document.getElementById('dedicationInput');
     const requestSuccess = document.getElementById('requestSuccess');
     const queueList = document.getElementById('queueList');
 
@@ -27,6 +28,27 @@ document.addEventListener('DOMContentLoaded', function () {
     let isConnecting = false;
     let isUserPlaying = false;
     let defaultSubtitle = "Live Broadcast";
+
+    // Live Clock (User's Local Time)
+    function updateLiveClock() {
+        if (!clockTime) return;
+        const now = new Date();
+        clockTime.textContent = now.toLocaleTimeString([], {
+            hour: 'numeric',
+            minute: '2-digit',
+            second: '2-digit'
+        });
+        if (clockTime.parentElement) {
+            clockTime.parentElement.title = now.toLocaleDateString([], {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            });
+        }
+    }
+    updateLiveClock();
+    setInterval(updateLiveClock, 1000);
 
     function updatePlayButtonUI() {
         if (!playBtn) return;
@@ -1056,6 +1078,18 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (data.type === 'queue' && data.requests) {
                     updateQueue(data.requests);
                 }
+
+                if (data.type === 'chat' && data.message) {
+                    appendChatMessage(data.message);
+                }
+
+                if (data.type === 'chat_clear') {
+                    clearChatMessages();
+                }
+
+                if (data.type === 'chat_status' && data.enabled !== undefined) {
+                    setChatStatus(data.enabled);
+                }
             } catch (err) {
                 console.error("SSE parse error", err);
             }
@@ -1071,13 +1105,16 @@ document.addEventListener('DOMContentLoaded', function () {
             const text = requestInput.value.trim();
             if (!text) return;
 
+            const dedication = dedicationInput ? dedicationInput.value.trim() : '';
+
             fetch('/api/requests', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query: text })
+                body: JSON.stringify({ query: text, dedication: dedication })
             }).then(function (res) {
                 if (res.ok) {
                     requestInput.value = '';
+                    if (dedicationInput) dedicationInput.value = '';
                     if (requestSuccess) {
                         requestSuccess.style.display = 'block';
                         setTimeout(function () {
@@ -1102,11 +1139,196 @@ document.addEventListener('DOMContentLoaded', function () {
         requests.forEach(function (req, index) {
             const li = document.createElement('li');
             li.className = 'queue-item';
+            const dedicationHtml = req.dedication ? `<span class="queue-dedication">❤️ For: ${escapeHtml(req.dedication)}</span>` : '';
             li.innerHTML = `
-                <span class="queue-track">${index + 1}. ${req.query}</span>
-                <span class="queue-dur">(${req.status || 'Pending'})</span>
+                <div class="queue-info">
+                    <span class="queue-track">${index + 1}. ${escapeHtml(req.query)}</span>
+                    ${dedicationHtml}
+                </div>
+                <span class="queue-dur">(${escapeHtml(req.status || 'Pending')})</span>
             `;
             queueList.appendChild(li);
+        });
+    }
+
+    // ==========================================================================
+    // Live Station Chat Logic
+    // ==========================================================================
+    const chatStatusPill = document.getElementById('chatStatusPill');
+    const chatDisabledBanner = document.getElementById('chatDisabledBanner');
+    const chatMessagesContainer = document.getElementById('chatMessagesContainer');
+    const chatMessagesList = document.getElementById('chatMessagesList');
+    const chatEmptyHint = document.getElementById('chatEmptyHint');
+    const chatForm = document.getElementById('chatForm');
+    const chatNicknameInput = document.getElementById('chatNicknameInput');
+    const chatMessageInput = document.getElementById('chatMessageInput');
+    const chatSendBtn = document.getElementById('chatSendBtn');
+
+    let isChatEnabled = true;
+    const seenMessageIds = new Set();
+
+    // Anonymous Nickname management
+    function initNickname() {
+        if (!chatNicknameInput) return;
+        let nick = '';
+        try {
+            nick = localStorage.getItem('scrim_chat_nickname') || '';
+        } catch (e) {}
+
+        if (!nick) {
+            const randNum = Math.floor(100 + Math.random() * 900);
+            nick = 'Listener #' + randNum;
+            try {
+                localStorage.setItem('scrim_chat_nickname', nick);
+            } catch (e) {}
+        }
+        chatNicknameInput.value = nick;
+
+        chatNicknameInput.addEventListener('change', function () {
+            let val = chatNicknameInput.value.trim();
+            if (!val) {
+                val = 'Listener #' + Math.floor(100 + Math.random() * 900);
+                chatNicknameInput.value = val;
+            }
+            try {
+                localStorage.setItem('scrim_chat_nickname', val);
+            } catch (e) {}
+        });
+    }
+
+    initNickname();
+
+    function setChatStatus(enabled) {
+        isChatEnabled = !!enabled;
+        if (chatStatusPill) {
+            if (isChatEnabled) {
+                chatStatusPill.textContent = 'LIVE';
+                chatStatusPill.classList.remove('paused');
+            } else {
+                chatStatusPill.textContent = 'PAUSED';
+                chatStatusPill.classList.add('paused');
+            }
+        }
+        if (chatDisabledBanner) {
+            chatDisabledBanner.style.display = isChatEnabled ? 'none' : 'flex';
+        }
+        if (chatMessageInput) {
+            chatMessageInput.disabled = !isChatEnabled;
+            chatMessageInput.placeholder = isChatEnabled ? 'Type a message...' : 'Chat is currently paused by the host';
+        }
+        if (chatSendBtn) {
+            chatSendBtn.disabled = !isChatEnabled;
+        }
+    }
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function formatMessageTime(isoString) {
+        if (!isoString) return '';
+        try {
+            const d = new Date(isoString);
+            return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        } catch (e) {
+            return '';
+        }
+    }
+
+    function appendChatMessage(msg) {
+        if (!msg || !chatMessagesList) return;
+        if (msg.id && seenMessageIds.has(msg.id)) return;
+        if (msg.id) seenMessageIds.add(msg.id);
+
+        if (chatEmptyHint) {
+            chatEmptyHint.style.display = 'none';
+        }
+
+        const msgDiv = document.createElement('div');
+        msgDiv.className = 'chat-msg' + (msg.isHost ? ' host-msg' : '');
+        const timeStr = formatMessageTime(msg.timestamp);
+        const senderColor = msg.color || (msg.isHost ? '#ef4444' : '#00d2ff');
+
+        msgDiv.innerHTML = `
+            <div class="chat-msg-header">
+                <div class="chat-msg-sender-wrap">
+                    <strong class="chat-msg-sender" style="color: ${escapeHtml(senderColor)};">${escapeHtml(msg.sender || 'Anonymous')}</strong>
+                    ${msg.isHost ? '<span class="chat-host-badge">HOST</span>' : ''}
+                </div>
+                <span class="chat-msg-time">${timeStr}</span>
+            </div>
+            <div class="chat-msg-text">${escapeHtml(msg.text || '')}</div>
+        `;
+
+        chatMessagesList.appendChild(msgDiv);
+
+        // Auto-scroll to bottom smoothly
+        if (chatMessagesContainer) {
+            chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+        }
+    }
+
+    function clearChatMessages() {
+        seenMessageIds.clear();
+        if (!chatMessagesList) return;
+        chatMessagesList.innerHTML = '';
+        if (chatEmptyHint) {
+            chatEmptyHint.style.display = 'block';
+            chatMessagesList.appendChild(chatEmptyHint);
+        }
+    }
+
+    // Fetch initial chat state & recent history
+    fetch('/api/chat')
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (data) {
+                if (data.enabled !== undefined) {
+                    setChatStatus(data.enabled);
+                }
+                if (Array.isArray(data.messages)) {
+                    data.messages.forEach(appendChatMessage);
+                }
+            }
+        })
+        .catch(function (err) {
+            console.warn("Could not load initial chat", err);
+        });
+
+    // Chat form submission
+    if (chatForm && chatMessageInput) {
+        chatForm.addEventListener('submit', function (e) {
+            e.preventDefault();
+            if (!isChatEnabled) return;
+            const text = chatMessageInput.value.trim();
+            if (!text) return;
+
+            const sender = (chatNicknameInput ? chatNicknameInput.value.trim() : '') || 'Anonymous';
+
+            if (chatSendBtn) chatSendBtn.disabled = true;
+
+            fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sender: sender, text: text })
+            }).then(function (res) {
+                if (chatSendBtn) chatSendBtn.disabled = !isChatEnabled;
+                if (res.ok) {
+                    chatMessageInput.value = '';
+                    chatMessageInput.focus();
+                } else if (res.status === 403) {
+                    setChatStatus(false);
+                }
+            }).catch(function (err) {
+                if (chatSendBtn) chatSendBtn.disabled = !isChatEnabled;
+                console.error("Failed to post chat message", err);
+            });
         });
     }
 

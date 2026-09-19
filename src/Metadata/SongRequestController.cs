@@ -7,6 +7,7 @@ namespace Scrim.Metadata {
     public class SongRequest {
         public string Id { get; } = Guid.NewGuid().ToString();
         public string Query { get; set; } = string.Empty;
+        public string Dedication { get; set; } = string.Empty;
         public string Status { get; set; } = "Pending";
         public DateTime RequestedAt { get; set; } = DateTime.UtcNow;
     }
@@ -14,8 +15,11 @@ namespace Scrim.Metadata {
     public class SongRequestController {
         private readonly ConcurrentDictionary<string, SongRequest> _queue = new();
 
-        public void SubmitRequest(string query) {
-            var req = new SongRequest { Query = query };
+        public void SubmitRequest(string query, string dedication = "") {
+            var req = new SongRequest { 
+                Query = query?.Trim() ?? string.Empty,
+                Dedication = dedication?.Trim() ?? string.Empty
+            };
             _queue.TryAdd(req.Id, req);
         }
 

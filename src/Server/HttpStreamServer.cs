@@ -18,17 +18,19 @@ namespace Scrim.Server {
         private readonly IProfileManager _profileManager;
         private readonly INetworkDiscoveryService _networkDiscovery;
         private readonly IThemeService _themeService;
+        private readonly ILiveChatService _chatService;
         private HttpListener? _listener;
         private TcpListener? _bridgeListener;
         private CancellationTokenSource? _cts;
 
-        public HttpStreamServer(BroadcastHub hub, IMetadataService metadataService, SongRequestController requestController, IProfileManager profileManager, INetworkDiscoveryService networkDiscovery, IThemeService? themeService = null) {
+        public HttpStreamServer(BroadcastHub hub, IMetadataService metadataService, SongRequestController requestController, IProfileManager profileManager, INetworkDiscoveryService networkDiscovery, IThemeService? themeService = null, ILiveChatService? chatService = null) {
             _hub = hub;
             _metadataService = metadataService;
             _requestController = requestController;
             _profileManager = profileManager;
             _networkDiscovery = networkDiscovery;
             _themeService = themeService ?? new ThemeService();
+            _chatService = chatService ?? new LiveChatService();
         }
 
         private string GetCustomThemeJson(string themeId) {
@@ -302,6 +304,10 @@ namespace Scrim.Server {
                     HandleBrandingRequest(context);
                 } else if (path == "/api/requests" && context.Request.HttpMethod == "POST") {
                     HandleSongRequest(context);
+                } else if (path == "/api/chat" && context.Request.HttpMethod == "POST") {
+                    HandleChatPostRequest(context);
+                } else if (path == "/api/chat" && context.Request.HttpMethod == "GET") {
+                    HandleChatGetRequest(context);
                 } else if (path == "/api/status") {
                     HandleStatusRequest(context);
                 } else {
@@ -406,40 +412,154 @@ namespace Scrim.Server {
             response.Headers.Add("Cache-Control", "no-cache");
             response.Headers.Add("Connection", "keep-alive");
 
+            var writeLock = new SemaphoreSlim(1, 1);
+            var immediateChannel = System.Threading.Channels.Channel.CreateUnbounded<string>();
+
+            Action<ChatMessage> onMessage = (msg) => {
+                string chatJson = $"{{\"type\":\"chat\",\"id\":\"{EscapeJson(msg.Id)}\",\"sender\":\"{EscapeJson(msg.Sender)}\",\"text\":\"{EscapeJson(msg.Text)}\",\"timestamp\":\"{msg.Timestamp:o}\",\"isHost\":{(msg.IsHost ? "true" : "false")},\"color\":\"{EscapeJson(msg.Color)}\"}}";
+                immediateChannel.Writer.TryWrite($"data: {chatJson}\n\n");
+            };
+
+            Action onClear = () => {
+                immediateChannel.Writer.TryWrite("data: {\"type\":\"chat_clear\"}\n\n");
+            };
+
+            Action<bool> onStatus = (enabled) => {
+                immediateChannel.Writer.TryWrite($"data: {{\"type\":\"chat_status\",\"enabled\":{(enabled ? "true" : "false")}}}\n\n");
+            };
+
+            _chatService.MessagePosted += onMessage;
+            _chatService.ChatCleared += onClear;
+            _chatService.ChatStatusChanged += onStatus;
+
             try {
                 using var writer = new StreamWriter(response.OutputStream);
-                while (!token.IsCancellationRequested) {
-                    await Task.Delay(2000, token);
-                    
-                    var meta = _metadataService.CurrentMetadata;
-                    bool hasArt = (meta.AlbumArt != null && meta.AlbumArt.Length > 0) || !string.IsNullOrEmpty(meta.AlbumArtUrl);
-                    string artUrl = hasArt ? (string.IsNullOrEmpty(meta.AlbumArtUrl) ? "/api/albumart" : meta.AlbumArtUrl) : "";
-                    double durationSec = meta.Duration.TotalSeconds;
-                    double positionSec = meta.Position.TotalSeconds;
-                    bool isPlaying = meta.IsPlaying;
-                    string metaJson = $"{{\"type\":\"metadata\",\"title\":\"{EscapeJson(meta.Title)}\",\"artist\":\"{EscapeJson(meta.Artist)}\",\"album\":\"{EscapeJson(meta.Album)}\",\"hasArt\":{(hasArt ? "true" : "false")},\"albumArtUrl\":\"{EscapeJson(artUrl)}\",\"duration\":{durationSec.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)},\"position\":{positionSec.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)},\"isPlaying\":{(isPlaying ? "true" : "false")}}}";
-                    await writer.WriteAsync($"data: {metaJson}\n\n");
 
-                    var profile = _profileManager.CurrentProfile;
-                    string formatStr = profile.AudioFormat?.ToUpperInvariant() ?? "MP3";
-                    int bitrateVal = profile.Bitrate;
-                    string statsJson = $"{{\"type\":\"stats\",\"listeners\":{_hub.ActiveClientCount},\"isLive\":{(_hub.IsBroadcasting ? "true" : "false")},\"format\":\"{EscapeJson(formatStr)}\",\"bitrate\":{bitrateVal}}}";
-                    await writer.WriteAsync($"data: {statsJson}\n\n");
-
-                    var requests = _requestController.GetLiveQueue().Select(r => $"{{\"query\":\"{EscapeJson(r.Query)}\",\"status\":\"{EscapeJson(r.Status)}\"}}");
-                    string queueJson = $"{{\"type\":\"queue\",\"requests\":[{string.Join(",", requests)}]}}";
-                    await writer.WriteAsync($"data: {queueJson}\n\n");
-
-                    var navLinksArray = string.Join(",", profile.CustomNavLinks.Select(l => $"{{\"label\":\"{EscapeJson(l.Label)}\",\"url\":\"{EscapeJson(l.Url)}\"}}"));
-                    string customThemeJson = GetCustomThemeJson(profile.WebTheme ?? "dark");
-                    string brandingJson = $"{{\"type\":\"branding\",\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(profile.WebTheme ?? "dark")}\",\"customThemeVariables\":{customThemeJson},\"logoUrl\":\"{EscapeJson(profile.LogoUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}]}}";
-                    await writer.WriteAsync($"data: {brandingJson}\n\n");
-
-                    await writer.FlushAsync();
+                async Task SendEvent(string eventData) {
+                    await writeLock.WaitAsync(token);
+                    try {
+                        await writer.WriteAsync(eventData);
+                        await writer.FlushAsync();
+                    } finally {
+                        writeLock.Release();
+                    }
                 }
+
+                // Initial Chat State Push
+                var recentChat = _chatService.GetRecentMessages().Select(m =>
+                    $"{{\"id\":\"{EscapeJson(m.Id)}\",\"sender\":\"{EscapeJson(m.Sender)}\",\"text\":\"{EscapeJson(m.Text)}\",\"timestamp\":\"{m.Timestamp:o}\",\"isHost\":{(m.IsHost ? "true" : "false")},\"color\":\"{EscapeJson(m.Color)}\"}}"
+                );
+                await SendEvent($"data: {{\"type\":\"chat_init\",\"enabled\":{(_profileManager.CurrentProfile.EnableChat ? "true" : "false")},\"messages\":[{string.Join(",", recentChat)}]}}\n\n");
+
+                // Immediate Event Consumer (sub-millisecond latency for chat)
+                var immediateTask = Task.Run(async () => {
+                    try {
+                        await foreach (var item in immediateChannel.Reader.ReadAllAsync(token)) {
+                            await SendEvent(item);
+                        }
+                    } catch { }
+                }, token);
+
+                // Periodic Heartbeat & Metadata Broadcast (every 2 seconds)
+                var periodicTask = Task.Run(async () => {
+                    try {
+                        while (!token.IsCancellationRequested) {
+                            await Task.Delay(2000, token);
+
+                            var meta = _metadataService.CurrentMetadata;
+                            bool hasArt = (meta.AlbumArt != null && meta.AlbumArt.Length > 0) || !string.IsNullOrEmpty(meta.AlbumArtUrl);
+                            string artUrl = hasArt ? (string.IsNullOrEmpty(meta.AlbumArtUrl) ? "/api/albumart" : meta.AlbumArtUrl) : "";
+                            double durationSec = meta.Duration.TotalSeconds;
+                            double positionSec = meta.Position.TotalSeconds;
+                            bool isPlaying = meta.IsPlaying;
+                            string metaJson = $"{{\"type\":\"metadata\",\"title\":\"{EscapeJson(meta.Title)}\",\"artist\":\"{EscapeJson(meta.Artist)}\",\"album\":\"{EscapeJson(meta.Album)}\",\"hasArt\":{(hasArt ? "true" : "false")},\"albumArtUrl\":\"{EscapeJson(artUrl)}\",\"duration\":{durationSec.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)},\"position\":{positionSec.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)},\"isPlaying\":{(isPlaying ? "true" : "false")}}}";
+                            await SendEvent($"data: {metaJson}\n\n");
+
+                            var profile = _profileManager.CurrentProfile;
+                            string formatStr = profile.AudioFormat?.ToUpperInvariant() ?? "MP3";
+                            int bitrateVal = profile.Bitrate;
+                            string statsJson = $"{{\"type\":\"stats\",\"listeners\":{_hub.ActiveClientCount},\"isLive\":{(_hub.IsBroadcasting ? "true" : "false")},\"format\":\"{EscapeJson(formatStr)}\",\"bitrate\":{bitrateVal}}}";
+                            await SendEvent($"data: {statsJson}\n\n");
+
+                            var requests = _requestController.GetLiveQueue().Select(r => $"{{\"query\":\"{EscapeJson(r.Query)}\",\"dedication\":\"{EscapeJson(r.Dedication)}\",\"status\":\"{EscapeJson(r.Status)}\"}}");
+                            string queueJson = $"{{\"type\":\"queue\",\"requests\":[{string.Join(",", requests)}]}}";
+                            await SendEvent($"data: {queueJson}\n\n");
+
+                            var navLinksArray = string.Join(",", profile.CustomNavLinks.Select(l => $"{{\"label\":\"{EscapeJson(l.Label)}\",\"url\":\"{EscapeJson(l.Url)}\"}}"));
+                            string customThemeJson = GetCustomThemeJson(profile.WebTheme ?? "dark");
+                            string brandingJson = $"{{\"type\":\"branding\",\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(profile.WebTheme ?? "dark")}\",\"customThemeVariables\":{customThemeJson},\"logoUrl\":\"{EscapeJson(profile.LogoUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}]}}";
+                            await SendEvent($"data: {brandingJson}\n\n");
+                        }
+                    } catch { }
+                }, token);
+
+                await Task.WhenAny(immediateTask, periodicTask);
             } catch {
             } finally {
+                _chatService.MessagePosted -= onMessage;
+                _chatService.ChatCleared -= onClear;
+                _chatService.ChatStatusChanged -= onStatus;
+                writeLock.Dispose();
                 response.Close();
+            }
+        }
+
+        private void HandleChatGetRequest(HttpListenerContext context) {
+            try {
+                var response = context.Response;
+                response.ContentType = "application/json; charset=utf-8";
+                response.Headers.Add("Access-Control-Allow-Origin", "*");
+                bool isEnabled = _profileManager.CurrentProfile.EnableChat;
+                var messages = _chatService.GetRecentMessages().Select(m => 
+                    $"{{\"id\":\"{EscapeJson(m.Id)}\",\"sender\":\"{EscapeJson(m.Sender)}\",\"text\":\"{EscapeJson(m.Text)}\",\"timestamp\":\"{m.Timestamp:o}\",\"isHost\":{(m.IsHost ? "true" : "false")},\"color\":\"{EscapeJson(m.Color)}\"}}"
+                );
+                string json = $"{{\"enabled\":{(isEnabled ? "true" : "false")},\"messages\":[{string.Join(",", messages)}]}}";
+                byte[] buffer = System.Text.Encoding.UTF8.GetBytes(json);
+                response.ContentLength64 = buffer.Length;
+                response.OutputStream.Write(buffer, 0, buffer.Length);
+            } catch {
+                context.Response.StatusCode = 500;
+            } finally {
+                context.Response.Close();
+            }
+        }
+
+        private void HandleChatPostRequest(HttpListenerContext context) {
+            try {
+                if (!_profileManager.CurrentProfile.EnableChat) {
+                    context.Response.StatusCode = 403;
+                    byte[] err = System.Text.Encoding.UTF8.GetBytes("{\"error\":\"Chat is currently disabled\"}");
+                    context.Response.ContentType = "application/json; charset=utf-8";
+                    context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+                    context.Response.OutputStream.Write(err, 0, err.Length);
+                    context.Response.Close();
+                    return;
+                }
+
+                using var reader = new StreamReader(context.Request.InputStream, System.Text.Encoding.UTF8);
+                string body = reader.ReadToEnd();
+                var textMatch = System.Text.RegularExpressions.Regex.Match(body, "\"text\"\\s*:\\s*\"(.*?)\"");
+                var senderMatch = System.Text.RegularExpressions.Regex.Match(body, "\"sender\"\\s*:\\s*\"(.*?)\"");
+
+                string text = textMatch.Success ? textMatch.Groups[1].Value : "";
+                string sender = senderMatch.Success ? senderMatch.Groups[1].Value : "Anonymous";
+
+                text = System.Text.RegularExpressions.Regex.Unescape(text);
+                sender = System.Text.RegularExpressions.Regex.Unescape(sender);
+
+                if (!string.IsNullOrWhiteSpace(text)) {
+                    _chatService.AddMessage(sender, text, isHost: false);
+                }
+
+                context.Response.ContentType = "application/json; charset=utf-8";
+                context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+                context.Response.StatusCode = 200;
+                byte[] ok = System.Text.Encoding.UTF8.GetBytes("{\"success\":true}");
+                context.Response.OutputStream.Write(ok, 0, ok.Length);
+            } catch {
+                context.Response.StatusCode = 400;
+            } finally {
+                context.Response.Close();
             }
         }
 
@@ -463,12 +583,19 @@ namespace Scrim.Server {
 
         private void HandleSongRequest(HttpListenerContext context) {
             try {
-                using var reader = new StreamReader(context.Request.InputStream);
+                using var reader = new StreamReader(context.Request.InputStream, System.Text.Encoding.UTF8);
                 string body = reader.ReadToEnd();
-                // Simple JSON extraction: {"query":"Artist - Song"}
-                var match = System.Text.RegularExpressions.Regex.Match(body, "\"query\"\\s*:\\s*\"(.*?)\"");
-                if (match.Success) {
-                    _requestController.SubmitRequest(match.Groups[1].Value);
+                var queryMatch = System.Text.RegularExpressions.Regex.Match(body, "\"query\"\\s*:\\s*\"(.*?)\"");
+                var dedicationMatch = System.Text.RegularExpressions.Regex.Match(body, "\"dedication\"\\s*:\\s*\"(.*?)\"");
+
+                string query = queryMatch.Success ? queryMatch.Groups[1].Value : "";
+                string dedication = dedicationMatch.Success ? dedicationMatch.Groups[1].Value : "";
+
+                query = System.Text.RegularExpressions.Regex.Unescape(query);
+                dedication = System.Text.RegularExpressions.Regex.Unescape(dedication);
+
+                if (!string.IsNullOrWhiteSpace(query)) {
+                    _requestController.SubmitRequest(query, dedication);
                 }
                 context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
                 context.Response.StatusCode = 200;

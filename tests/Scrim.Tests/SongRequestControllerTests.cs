@@ -52,5 +52,16 @@ namespace Scrim.Tests {
             Assert.Equal("Song A", queue[0].Query);
             Assert.Equal("Song B", queue[1].Query);
         }
+
+        [Fact]
+        public void SubmitRequest_WithDedication_StoresDedication() {
+            var controller = new SongRequestController();
+            controller.SubmitRequest("Bohemian Rhapsody", "For Sarah on her birthday!");
+
+            var queue = controller.GetLiveQueue().ToList();
+            Assert.Single(queue);
+            Assert.Equal("Bohemian Rhapsody", queue[0].Query);
+            Assert.Equal("For Sarah on her birthday!", queue[0].Dedication);
+        }
     }
 }

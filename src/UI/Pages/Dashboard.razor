@@ -26,6 +26,7 @@
 @inject INetworkDiscoveryService NetworkDiscovery
 @inject VirtualAudioDeviceService VirtualDeviceService
 @inject IThemeService ThemeService
+@inject ILiveChatService ChatService
 
 <!-- Top Header Bar -->
 <header class="scrim-topbar">
@@ -354,6 +355,7 @@
         { "card-vu-talk", "Master VU & Microphone" },
         { "card-voice-fx", "Phone-In Line & Voice FX" },
         { "card-queue", "Song Requests Queue" },
+        { "card-chat", "Live Station Chat" },
         { "card-encoding", "Encoding & Broadcast" },
         { "card-media-player", "Media Player" },
         { "card-soundboard", "Soundboard" },
@@ -443,7 +445,7 @@
         if (p.CenterColumnCards?.Any() == true) {
             CenterColumn = new List<string>(p.CenterColumnCards);
         } else {
-            CenterColumn = new() { "card-vu-talk", "card-voice-fx", "card-queue" };
+            CenterColumn = new() { "card-vu-talk", "card-voice-fx", "card-queue", "card-chat" };
         }
 
         if (p.RightColumnCards?.Any() == true) {
@@ -454,6 +456,11 @@
 
         // Subscribe to live Windows system media changes
         MetadataService.MetadataChanged += OnMetadataReceived;
+
+        ConsoleChatMessages = ChatService.GetRecentMessages().ToList();
+        ChatService.MessagePosted += OnChatMessageReceived;
+        ChatService.ChatCleared += OnChatCleared;
+        ChatService.ChatStatusChanged += OnChatStatusChanged;
 
         if (!string.IsNullOrWhiteSpace(MetadataService.CurrentMetadata.Title)) {
             CurrentTrackTitle = MetadataService.CurrentMetadata.Title;
@@ -674,7 +681,7 @@
 
     private void ResetLayoutToDefault() {
         LeftColumn = new() { "card-audio-routing", "card-network-access", "card-web-branding" };
-        CenterColumn = new() { "card-vu-talk", "card-voice-fx", "card-queue" };
+        CenterColumn = new() { "card-vu-talk", "card-voice-fx", "card-queue", "card-chat" };
         RightColumn = new() { "card-encoding", "card-media-player", "card-soundboard" };
         SaveCardLayout();
         _ = ReinitDragDropAsync();
@@ -1349,6 +1356,9 @@
     public void Dispose() {
         Hub.BroadcastingStateChanged -= OnHubBroadcastingStateChanged;
         MetadataService.MetadataChanged -= OnMetadataReceived;
+        ChatService.MessagePosted -= OnChatMessageReceived;
+        ChatService.ChatCleared -= OnChatCleared;
+        ChatService.ChatStatusChanged -= OnChatStatusChanged;
         _dotNetRef?.Dispose();
         _refreshTimer?.Dispose();
         _vuTimer?.Dispose();
@@ -1713,13 +1723,18 @@
             } else {
                 @foreach (var req in liveQueue) {
                     <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #22252c;">
-                        <div>
+                        <div style="flex: 1; padding-right: 10px;">
                             <div style="font-weight: 600; font-size: 13px; color: #fff;">@req.Query</div>
-                            <div style="font-size: 11px; color: #727988;">@req.RequestedAt.ToLocalTime().ToString("t")</div>
+                            @if (!string.IsNullOrWhiteSpace(req.Dedication)) {
+                                <div style="font-size: 11px; color: #f43f5e; display: flex; align-items: center; gap: 4px; margin-top: 2px;">
+                                    <span>❤️ Dedicated to: <strong>@req.Dedication</strong></span>
+                                </div>
+                            }
+                            <div style="font-size: 11px; color: #727988; margin-top: 2px;">@req.RequestedAt.ToLocalTime().ToString("t") • Status: @req.Status</div>
                         </div>
                         <div style="display: flex; gap: 6px;">
-                            <button class="scrim-btn-secondary" style="padding: 4px 8px; font-size: 11px; color: #22c55e;" @onclick="@(() => RequestController.UpdateStatus(req.Id, "Accepted"))">✓</button>
-                            <button class="scrim-btn-secondary" style="padding: 4px 8px; font-size: 11px; color: #ef4444;" @onclick="@(() => RequestController.UpdateStatus(req.Id, "Declined"))">✗</button>
+                            <button class="scrim-btn-secondary" style="padding: 4px 8px; font-size: 11px; color: #22c55e;" @onclick="@(() => RequestController.UpdateStatus(req.Id, "Accepted"))" title="Accept Request">✓</button>
+                            <button class="scrim-btn-secondary" style="padding: 4px 8px; font-size: 11px; color: #ef4444;" @onclick="@(() => RequestController.UpdateStatus(req.Id, "Declined"))" title="Decline Request">✗</button>
                         </div>
                     </div>
                 }
@@ -2204,8 +2219,129 @@
             </div>
         </div>,
 
+        "card-chat" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <h3 class="scrim-card-title">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                    Live Station Chat
+                    @if (ProfileManager.CurrentProfile.EnableChat) {
+                        <span style="display: inline-block; margin-left: 8px; padding: 2px 6px; font-size: 9px; font-weight: 700; color: #10b981; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); border-radius: 4px;">ACTIVE</span>
+                    } else {
+                        <span style="display: inline-block; margin-left: 8px; padding: 2px 6px; font-size: 9px; font-weight: 700; color: #ef4444; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 4px;">PAUSED</span>
+                    }
+                </h3>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <button class="pill-option" style="padding: 2px 8px; font-size: 10px; color: #f43f5e;" @onclick="ClearChat" title="Clear all chat history">🗑️ Clear</button>
+                    <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
+                </div>
+            </div>
+
+            <!-- Chat Broadcaster Controls -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; background: #12141a; border: 1px solid #232731; border-radius: 8px; padding: 8px 12px;">
+                <div>
+                    <div style="font-size: 12px; font-weight: 600; color: #fff;">Enable Listener Chat</div>
+                    <div style="font-size: 10px; color: #64748b;">Allow web player listeners to chat anonymously in real time</div>
+                </div>
+                <label class="scrim-switch">
+                    <input type="checkbox" checked="@ProfileManager.CurrentProfile.EnableChat" @onchange="ToggleChatEnabled" />
+                    <span class="scrim-slider"></span>
+                </label>
+            </div>
+
+            <!-- Message Stream Viewport -->
+            <div style="height: 260px; overflow-y: auto; background: #0c0e12; border: 1px solid #1f232c; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px;" id="consoleChatContainer">
+                @if (ConsoleChatMessages.Count == 0) {
+                    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #64748b; font-size: 11px; text-align: center; padding: 16px;">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#334155" stroke-width="1.5" style="margin-bottom: 6px;">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                        </svg>
+                        <span>No chat messages yet.</span>
+                        <span style="font-size: 10px; color: #475569; margin-top: 2px;">Messages from web listeners and your host replies will appear here in real time.</span>
+                    </div>
+                } else {
+                    @foreach (var msg in ConsoleChatMessages) {
+                        <div style="background: @(msg.IsHost ? "rgba(239, 68, 68, 0.08)" : "#14171d"); border: 1px solid @(msg.IsHost ? "rgba(239, 68, 68, 0.3)" : "#232731"); border-radius: 6px; padding: 6px 10px; font-size: 11px; line-height: 1.4;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+                                <div style="display: flex; align-items: center; gap: 6px;">
+                                    <strong style="color: @(msg.IsHost ? "#ef4444" : msg.Color);">@msg.Sender</strong>
+                                    @if (msg.IsHost) {
+                                        <span style="font-size: 9px; font-weight: 700; color: #fff; background: #ef4444; border-radius: 3px; padding: 1px 4px; letter-spacing: 0.5px;">HOST</span>
+                                    }
+                                </div>
+                                <span style="font-size: 9px; color: #64748b; font-family: monospace;">@msg.Timestamp.ToLocalTime().ToString("HH:mm:ss")</span>
+                            </div>
+                            <div style="color: #e2e8f0; word-break: break-word;">@msg.Text</div>
+                        </div>
+                    }
+                }
+            </div>
+
+            <!-- Broadcaster Message Input -->
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="text" class="scrim-input" style="flex: 1; font-size: 12px; padding: 8px 10px; background: #12141a; border-color: #2b303c;" 
+                       placeholder="Reply to chat as Host..." 
+                       value="@HostChatMessage" 
+                       @oninput="@((ChangeEventArgs e) => HostChatMessage = e.Value?.ToString() ?? "")"
+                       @onkeydown="@((KeyboardEventArgs e) => { if (e.Key == "Enter") SendHostMessage(); })" />
+                <button class="scrim-btn-primary" style="padding: 8px 14px; font-size: 12px; white-space: nowrap; background: #ef4444; border-color: #ef4444;" @onclick="SendHostMessage">
+                    Send 🎙️
+                </button>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px; font-size: 10px; color: #64748b;">
+                <span>Sending as verified <strong>@(string.IsNullOrWhiteSpace(ProfileManager.CurrentProfile.HostName) ? "Host" : ProfileManager.CurrentProfile.HostName)</strong></span>
+                <span>Press Enter to send</span>
+            </div>
+        </div>,
+
         _ => @<div></div>
     };
+
+    private string HostChatMessage = "";
+    private List<ChatMessage> ConsoleChatMessages = new();
+
+    private void OnChatMessageReceived(ChatMessage msg) {
+        InvokeAsync(() => {
+            if (!ConsoleChatMessages.Any(m => m.Id == msg.Id)) {
+                ConsoleChatMessages.Add(msg);
+                if (ConsoleChatMessages.Count > 100) {
+                    ConsoleChatMessages.RemoveAt(0);
+                }
+                StateHasChanged();
+            }
+        });
+    }
+
+    private void OnChatCleared() {
+        InvokeAsync(() => {
+            ConsoleChatMessages.Clear();
+            StateHasChanged();
+        });
+    }
+
+    private void OnChatStatusChanged(bool enabled) {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void SendHostMessage() {
+        if (string.IsNullOrWhiteSpace(HostChatMessage)) return;
+        string text = HostChatMessage.Trim();
+        HostChatMessage = "";
+        string hostName = string.IsNullOrWhiteSpace(ProfileManager.CurrentProfile.HostName) ? "Host / Broadcaster" : ProfileManager.CurrentProfile.HostName;
+        ChatService.AddMessage(hostName, text, isHost: true, color: "#ef4444");
+    }
+
+    private void ClearChat() {
+        ChatService.Clear();
+    }
+
+    private void ToggleChatEnabled() {
+        ProfileManager.CurrentProfile.EnableChat = !ProfileManager.CurrentProfile.EnableChat;
+        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        ChatService.NotifyStatusChanged(ProfileManager.CurrentProfile.EnableChat);
+        StateHasChanged();
+    }
 
     private string GetLocalNetworkUrl() => NetworkDiscovery.GetLocalShareUrl(ProfileManager.CurrentProfile.Port);
 

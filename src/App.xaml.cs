@@ -37,6 +37,7 @@ namespace Scrim {
             services.AddSingleton<HttpStreamServer>();
             services.AddSingleton<IMetadataService, WindowsMediaMetadataService>();
             services.AddSingleton<SongRequestController>();
+            services.AddSingleton<ILiveChatService, LiveChatService>();
 
             // Plugins
             services.AddSingleton<PluginLoader>();
