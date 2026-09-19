@@ -1079,8 +1079,20 @@ document.addEventListener('DOMContentLoaded', function () {
                     updateQueue(data.requests);
                 }
 
-                if (data.type === 'chat' && data.message) {
-                    appendChatMessage(data.message);
+                if (data.type === 'chat_init') {
+                    if (data.enabled !== undefined) {
+                        setChatStatus(data.enabled);
+                    }
+                    if (Array.isArray(data.messages)) {
+                        data.messages.forEach(appendChatMessage);
+                    }
+                }
+
+                if (data.type === 'chat') {
+                    const msg = (data.message && typeof data.message === 'object') ? data.message : data;
+                    if (msg && (msg.text !== undefined || msg.id)) {
+                        appendChatMessage(msg);
+                    }
                 }
 
                 if (data.type === 'chat_clear') {
