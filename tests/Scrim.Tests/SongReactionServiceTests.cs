@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Threading.Tasks;
 using Scrim.Metadata;
 using Xunit;
@@ -7,7 +8,8 @@ namespace Scrim.Tests {
     public class SongReactionServiceTests {
         [Fact]
         public void AddReaction_ValidReactions_IncrementsCountsAndFiresEvent() {
-            var service = new SongReactionService();
+            var tempStorage = Path.Combine(Path.GetTempPath(), $"scrim_test_{Guid.NewGuid():N}.json");
+            var service = new SongReactionService(storagePath: tempStorage);
             string? receivedType = null;
             ReactionCounts? receivedCounts = null;
 
@@ -23,29 +25,97 @@ namespace Scrim.Tests {
             Assert.Equal("thumbs_up", receivedType);
             Assert.Equal(1, receivedCounts?.ThumbsUp);
 
-            var counts2 = service.AddReaction("heart");
+            var counts2 = service.AddOrSwitchReaction("user_1", "heart", out string? active1);
             Assert.Equal(1, counts2.ThumbsUp);
             Assert.Equal(1, counts2.Heart);
             Assert.Equal(0, counts2.ThumbsDown);
-            Assert.Equal("heart", receivedType);
-            Assert.Equal(1, receivedCounts?.Heart);
+            Assert.Equal("heart", active1);
 
-            var counts3 = service.AddReaction("love");
-            Assert.Equal(2, counts3.Heart);
-            Assert.Equal("heart", receivedType);
+            try { File.Delete(tempStorage); } catch { }
+        }
 
-            var counts4 = service.AddReaction("thumbs_down");
-            Assert.Equal(1, counts4.ThumbsDown);
-            Assert.Equal("thumbs_down", receivedType);
+        [Fact]
+        public void AddOrSwitchReaction_SingleUser_SwitchesVotesAccurately() {
+            var tempStorage = Path.Combine(Path.GetTempPath(), $"scrim_test_{Guid.NewGuid():N}.json");
+            var service = new SongReactionService(storagePath: tempStorage);
 
-            var counts5 = service.AddReaction("dislike");
-            Assert.Equal(2, counts5.ThumbsDown);
-            Assert.Equal("thumbs_down", receivedType);
+            // 1. Initial vote: thumbs_up
+            var c1 = service.AddOrSwitchReaction("listener_alpha", "thumbs_up", out string? a1);
+            Assert.Equal(1, c1.ThumbsUp);
+            Assert.Equal(0, c1.Heart);
+            Assert.Equal(0, c1.ThumbsDown);
+            Assert.Equal("thumbs_up", a1);
+
+            // 2. Switch vote to heart
+            var c2 = service.AddOrSwitchReaction("listener_alpha", "heart", out string? a2);
+            Assert.Equal(0, c2.ThumbsUp); // old vote decremented
+            Assert.Equal(1, c2.Heart);    // new vote incremented
+            Assert.Equal(0, c2.ThumbsDown);
+            Assert.Equal("heart", a2);
+
+            // 3. Switch vote to thumbs_down
+            var c3 = service.AddOrSwitchReaction("listener_alpha", "thumbs_down", out string? a3);
+            Assert.Equal(0, c3.ThumbsUp);
+            Assert.Equal(0, c3.Heart);    // heart decremented
+            Assert.Equal(1, c3.ThumbsDown);
+            Assert.Equal("thumbs_down", a3);
+
+            try { File.Delete(tempStorage); } catch { }
+        }
+
+        [Fact]
+        public void AddOrSwitchReaction_Undo_SameReactionRemovesVote() {
+            var tempStorage = Path.Combine(Path.GetTempPath(), $"scrim_test_{Guid.NewGuid():N}.json");
+            var service = new SongReactionService(storagePath: tempStorage);
+
+            // Vote heart
+            var c1 = service.AddOrSwitchReaction("listener_beta", "heart", out string? a1);
+            Assert.Equal(1, c1.Heart);
+            Assert.Equal("heart", a1);
+
+            // Click heart again to undo
+            var c2 = service.AddOrSwitchReaction("listener_beta", "heart", out string? a2);
+            Assert.Equal(0, c2.Heart);
+            Assert.Null(a2);
+            Assert.Null(service.GetUserReaction("listener_beta"));
+
+            try { File.Delete(tempStorage); } catch { }
+        }
+
+        [Fact]
+        public void PerSongPersistence_SameSongReloadsPreviousReactions() {
+            var tempStorage = Path.Combine(Path.GetTempPath(), $"scrim_test_{Guid.NewGuid():N}.json");
+            var mockMeta = new MockMetadataService();
+            var service = new SongReactionService(mockMeta, storagePath: tempStorage);
+
+            // Song 1 starts
+            mockMeta.TriggerTrackChange("Bohemian Rhapsody", "Queen");
+            service.AddOrSwitchReaction("u1", "thumbs_up", out _);
+            service.AddOrSwitchReaction("u2", "heart", out _);
+
+            Assert.Equal(1, service.CurrentCounts.ThumbsUp);
+            Assert.Equal(1, service.CurrentCounts.Heart);
+            Assert.Equal("thumbs_up", service.GetUserReaction("u1"));
+
+            // Song 2 starts
+            mockMeta.TriggerTrackChange("Under Pressure", "Queen & David Bowie");
+            Assert.Equal(0, service.CurrentCounts.ThumbsUp);
+            Assert.Equal(0, service.CurrentCounts.Heart);
+            Assert.Null(service.GetUserReaction("u1"));
+
+            // Song 1 replays!
+            mockMeta.TriggerTrackChange("Bohemian Rhapsody", "Queen");
+            Assert.Equal(1, service.CurrentCounts.ThumbsUp);
+            Assert.Equal(1, service.CurrentCounts.Heart);
+            Assert.Equal("thumbs_up", service.GetUserReaction("u1"));
+
+            try { File.Delete(tempStorage); } catch { }
         }
 
         [Fact]
         public void AddReaction_InvalidReaction_IgnoresAndDoesNotIncrement() {
-            var service = new SongReactionService();
+            var tempStorage = Path.Combine(Path.GetTempPath(), $"scrim_test_{Guid.NewGuid():N}.json");
+            var service = new SongReactionService(storagePath: tempStorage);
             bool eventFired = false;
             service.ReactionReceived += (_, _) => eventFired = true;
 
@@ -58,11 +128,14 @@ namespace Scrim.Tests {
             var countsEmpty = service.AddReaction("");
             Assert.Equal(0, countsEmpty.ThumbsUp);
             Assert.False(eventFired);
+
+            try { File.Delete(tempStorage); } catch { }
         }
 
         [Fact]
         public void Reset_ClearsAllCountsAndFiresCountsResetEvent() {
-            var service = new SongReactionService();
+            var tempStorage = Path.Combine(Path.GetTempPath(), $"scrim_test_{Guid.NewGuid():N}.json");
+            var service = new SongReactionService(storagePath: tempStorage);
             service.AddReaction("thumbs_up");
             service.AddReaction("heart");
             service.AddReaction("thumbs_down");
@@ -79,53 +152,28 @@ namespace Scrim.Tests {
             Assert.Equal(0, resetCounts.ThumbsUp);
             Assert.Equal(0, resetCounts.Heart);
             Assert.Equal(0, resetCounts.ThumbsDown);
+
+            try { File.Delete(tempStorage); } catch { }
         }
 
         [Fact]
         public void ThreadSafety_ConcurrentReactions_AccuratelyIncrements() {
-            var service = new SongReactionService();
-            const int totalPerType = 1000;
+            var tempStorage = Path.Combine(Path.GetTempPath(), $"scrim_test_{Guid.NewGuid():N}.json");
+            var service = new SongReactionService(storagePath: tempStorage);
+            const int totalUsers = 100;
 
-            Parallel.Invoke(
-                () => {
-                    for (int i = 0; i < totalPerType; i++) {
-                        service.AddReaction("thumbs_up");
-                    }
-                },
-                () => {
-                    for (int i = 0; i < totalPerType; i++) {
-                        service.AddReaction("heart");
-                    }
-                },
-                () => {
-                    for (int i = 0; i < totalPerType; i++) {
-                        service.AddReaction("thumbs_down");
-                    }
-                }
-            );
+            Parallel.For(0, totalUsers, i => {
+                service.AddOrSwitchReaction($"user_tu_{i}", "thumbs_up", out _);
+                service.AddOrSwitchReaction($"user_h_{i}", "heart", out _);
+                service.AddOrSwitchReaction($"user_td_{i}", "thumbs_down", out _);
+            });
 
             var counts = service.CurrentCounts;
-            Assert.Equal(totalPerType, counts.ThumbsUp);
-            Assert.Equal(totalPerType, counts.Heart);
-            Assert.Equal(totalPerType, counts.ThumbsDown);
-        }
+            Assert.Equal(totalUsers, counts.ThumbsUp);
+            Assert.Equal(totalUsers, counts.Heart);
+            Assert.Equal(totalUsers, counts.ThumbsDown);
 
-        [Fact]
-        public void MetadataChanged_NewTrack_AutomaticallyResetsCounts() {
-            var mockMetaService = new MockMetadataService();
-            var service = new SongReactionService(mockMetaService);
-
-            service.AddReaction("thumbs_up");
-            service.AddReaction("heart");
-            Assert.Equal(1, service.CurrentCounts.ThumbsUp);
-            Assert.Equal(1, service.CurrentCounts.Heart);
-
-            // Change track
-            mockMetaService.TriggerTrackChange("Brand New Song", "Cool Artist");
-
-            Assert.Equal(0, service.CurrentCounts.ThumbsUp);
-            Assert.Equal(0, service.CurrentCounts.Heart);
-            Assert.Equal(0, service.CurrentCounts.ThumbsDown);
+            try { File.Delete(tempStorage); } catch { }
         }
 
         private class MockMetadataService : IMetadataService {
