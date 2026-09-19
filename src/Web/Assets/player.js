@@ -24,6 +24,15 @@ document.addEventListener('DOMContentLoaded', function () {
     const requestSuccess = document.getElementById('requestSuccess');
     const queueList = document.getElementById('queueList');
 
+    // Song Reaction Elements
+    const songReactionsBar = document.getElementById('songReactionsBar');
+    const btnReactionThumbsUp = document.getElementById('btnReactionThumbsUp');
+    const btnReactionLove = document.getElementById('btnReactionLove');
+    const btnReactionThumbsDown = document.getElementById('btnReactionThumbsDown');
+    const countThumbsUp = document.getElementById('countThumbsUp');
+    const countHeart = document.getElementById('countHeart');
+    const countThumbsDown = document.getElementById('countThumbsDown');
+
     let isPlaying = false;
     let isConnecting = false;
     let isUserPlaying = false;
@@ -1151,6 +1160,27 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (data.type === 'chat_status' && data.enabled !== undefined) {
                     setChatStatus(data.enabled);
                 }
+
+                if (data.type === 'reaction') {
+                    updateReactionCounts(data.counts);
+                    let targetBtn = null;
+                    if (data.reaction === 'thumbs_up' || data.reaction === 'thumbsup' || data.reaction === 'like') {
+                        targetBtn = btnReactionThumbsUp;
+                    } else if (data.reaction === 'heart' || data.reaction === 'love') {
+                        targetBtn = btnReactionLove;
+                    } else if (data.reaction === 'thumbs_down' || data.reaction === 'thumbsdown' || data.reaction === 'dislike') {
+                        targetBtn = btnReactionThumbsDown;
+                    }
+                    spawnFloatingReaction(data.reaction, targetBtn);
+                }
+
+                if (data.type === 'reaction_init' && data.counts) {
+                    updateReactionCounts(data.counts);
+                }
+
+                if (data.type === 'reaction_reset') {
+                    updateReactionCounts(data.counts || { thumbsUp: 0, thumbsDown: 0, heart: 0 });
+                }
             } catch (err) {
                 console.error("SSE parse error", err);
             }
@@ -1426,6 +1456,112 @@ document.addEventListener('DOMContentLoaded', function () {
             });
         });
     }
+
+    // Song Reactions System
+    function updateReactionCounts(counts) {
+        if (!counts) return;
+        if (countThumbsUp && counts.thumbsUp !== undefined) {
+            countThumbsUp.textContent = counts.thumbsUp;
+        }
+        if (countHeart && counts.heart !== undefined) {
+            countHeart.textContent = counts.heart;
+        }
+        if (countThumbsDown && counts.thumbsDown !== undefined) {
+            countThumbsDown.textContent = counts.thumbsDown;
+        }
+    }
+
+    function spawnFloatingReaction(type, sourceEl) {
+        const emojiMap = {
+            'thumbs_up': '👍',
+            'thumbsup': '👍',
+            'like': '👍',
+            'heart': '❤️',
+            'love': '❤️',
+            'thumbs_down': '👎',
+            'thumbsdown': '👎',
+            'dislike': '👎'
+        };
+        const emoji = emojiMap[type] || '❤️';
+        const particle = document.createElement('span');
+        particle.className = 'floating-reaction-particle';
+        particle.textContent = emoji;
+
+        let startX = window.innerWidth / 2;
+        let startY = window.innerHeight / 2;
+
+        if (sourceEl) {
+            const rect = sourceEl.getBoundingClientRect();
+            startX = rect.left + rect.width / 2;
+            startY = rect.top + window.scrollY;
+        }
+
+        // Random horizontal drift (-15px to +15px)
+        const drift = (Math.random() - 0.5) * 30;
+        particle.style.left = (startX + drift) + 'px';
+        particle.style.top = startY + 'px';
+        particle.style.position = 'absolute';
+        particle.style.pointerEvents = 'none';
+        particle.style.zIndex = '9999';
+
+        document.body.appendChild(particle);
+
+        setTimeout(function () {
+            if (particle.parentNode) {
+                particle.parentNode.removeChild(particle);
+            }
+        }, 1250);
+    }
+
+    function sendReaction(type, btnEl) {
+        if (!type) return;
+        if (btnEl) {
+            btnEl.classList.add('pop');
+            setTimeout(function () {
+                btnEl.classList.remove('pop');
+            }, 300);
+        }
+
+        spawnFloatingReaction(type, btnEl);
+
+        fetch('/api/reactions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: type })
+        }).then(function (res) {
+            return res.json();
+        }).then(function (data) {
+            if (data && data.counts) {
+                updateReactionCounts(data.counts);
+            }
+        }).catch(function (err) {
+            console.error("Failed to post reaction", err);
+        });
+    }
+
+    if (btnReactionThumbsUp) {
+        btnReactionThumbsUp.addEventListener('click', function () {
+            sendReaction('thumbs_up', btnReactionThumbsUp);
+        });
+    }
+    if (btnReactionLove) {
+        btnReactionLove.addEventListener('click', function () {
+            sendReaction('heart', btnReactionLove);
+        });
+    }
+    if (btnReactionThumbsDown) {
+        btnReactionThumbsDown.addEventListener('click', function () {
+            sendReaction('thumbs_down', btnReactionThumbsDown);
+        });
+    }
+
+    // Initial reactions fetch
+    fetch('/api/reactions').then(function (res) {
+        if (res.ok) return res.json();
+        return null;
+    }).then(function (data) {
+        if (data) updateReactionCounts(data);
+    }).catch(function () {});
 
     // Progressive Web App (PWA) Support
     if ('serviceWorker' in navigator) {

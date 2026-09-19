@@ -19,11 +19,12 @@ namespace Scrim.Server {
         private readonly INetworkDiscoveryService _networkDiscovery;
         private readonly IThemeService _themeService;
         private readonly ILiveChatService _chatService;
+        private readonly ISongReactionService _reactionService;
         private HttpListener? _listener;
         private TcpListener? _bridgeListener;
         private CancellationTokenSource? _cts;
 
-        public HttpStreamServer(BroadcastHub hub, IMetadataService metadataService, SongRequestController requestController, IProfileManager profileManager, INetworkDiscoveryService networkDiscovery, IThemeService? themeService = null, ILiveChatService? chatService = null) {
+        public HttpStreamServer(BroadcastHub hub, IMetadataService metadataService, SongRequestController requestController, IProfileManager profileManager, INetworkDiscoveryService networkDiscovery, IThemeService? themeService = null, ILiveChatService? chatService = null, ISongReactionService? reactionService = null) {
             _hub = hub;
             _metadataService = metadataService;
             _requestController = requestController;
@@ -31,6 +32,7 @@ namespace Scrim.Server {
             _networkDiscovery = networkDiscovery;
             _themeService = themeService ?? new ThemeService();
             _chatService = chatService ?? new LiveChatService();
+            _reactionService = reactionService ?? new SongReactionService(metadataService);
         }
 
         private string GetCustomThemeJson(string themeId) {
@@ -308,6 +310,10 @@ namespace Scrim.Server {
                     HandleChatPostRequest(context);
                 } else if (path == "/api/chat" && context.Request.HttpMethod == "GET") {
                     HandleChatGetRequest(context);
+                } else if (path == "/api/reactions" && context.Request.HttpMethod == "POST") {
+                    HandleReactionPostRequest(context);
+                } else if (path == "/api/reactions" && context.Request.HttpMethod == "GET") {
+                    HandleReactionGetRequest(context);
                 } else if (path == "/api/status") {
                     HandleStatusRequest(context);
                 } else {
@@ -433,10 +439,22 @@ namespace Scrim.Server {
                 immediateChannel.Writer.TryWrite($"data: {assignJson}\n\n");
             };
 
+            Action<string, ReactionCounts> onReaction = (type, counts) => {
+                string reactionJson = $"{{\"type\":\"reaction\",\"reaction\":\"{EscapeJson(type)}\",\"counts\":{{\"thumbsUp\":{counts.ThumbsUp},\"thumbsDown\":{counts.ThumbsDown},\"heart\":{counts.Heart}}}}}";
+                immediateChannel.Writer.TryWrite($"data: {reactionJson}\n\n");
+            };
+
+            Action<ReactionCounts> onResetReactions = (counts) => {
+                string resetJson = $"{{\"type\":\"reaction_reset\",\"counts\":{{\"thumbsUp\":0,\"thumbsDown\":0,\"heart\":0}}}}";
+                immediateChannel.Writer.TryWrite($"data: {resetJson}\n\n");
+            };
+
             _chatService.MessagePosted += onMessage;
             _chatService.ChatCleared += onClear;
             _chatService.ChatStatusChanged += onStatus;
             _chatService.NicknameAssigned += onAssign;
+            _reactionService.ReactionReceived += onReaction;
+            _reactionService.CountsReset += onResetReactions;
 
             try {
                 using var writer = new StreamWriter(response.OutputStream);
@@ -450,6 +468,10 @@ namespace Scrim.Server {
                         writeLock.Release();
                     }
                 }
+
+                // Initial Reaction State Push
+                var initialCounts = _reactionService.CurrentCounts;
+                await SendEvent($"data: {{\"type\":\"reaction_init\",\"counts\":{{\"thumbsUp\":{initialCounts.ThumbsUp},\"thumbsDown\":{initialCounts.ThumbsDown},\"heart\":{initialCounts.Heart}}}}}\n\n");
 
                 // Initial Chat State Push
                 var recentChat = _chatService.GetRecentMessages().Select(m =>
@@ -506,6 +528,8 @@ namespace Scrim.Server {
                 _chatService.ChatCleared -= onClear;
                 _chatService.ChatStatusChanged -= onStatus;
                 _chatService.NicknameAssigned -= onAssign;
+                _reactionService.ReactionReceived -= onReaction;
+                _reactionService.CountsReset -= onResetReactions;
                 writeLock.Dispose();
                 response.Close();
             }
@@ -574,6 +598,45 @@ namespace Scrim.Server {
                 context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
                 context.Response.StatusCode = 200;
                 byte[] ok = System.Text.Encoding.UTF8.GetBytes("{\"success\":true}");
+                context.Response.OutputStream.Write(ok, 0, ok.Length);
+            } catch {
+                context.Response.StatusCode = 400;
+            } finally {
+                context.Response.Close();
+            }
+        }
+
+        private void HandleReactionGetRequest(HttpListenerContext context) {
+            try {
+                var response = context.Response;
+                response.ContentType = "application/json; charset=utf-8";
+                response.Headers.Add("Access-Control-Allow-Origin", "*");
+                var counts = _reactionService.CurrentCounts;
+                string json = $"{{\"thumbsUp\":{counts.ThumbsUp},\"thumbsDown\":{counts.ThumbsDown},\"heart\":{counts.Heart}}}";
+                byte[] buffer = System.Text.Encoding.UTF8.GetBytes(json);
+                response.ContentLength64 = buffer.Length;
+                response.OutputStream.Write(buffer, 0, buffer.Length);
+            } catch {
+                context.Response.StatusCode = 500;
+            } finally {
+                context.Response.Close();
+            }
+        }
+
+        private void HandleReactionPostRequest(HttpListenerContext context) {
+            try {
+                using var reader = new StreamReader(context.Request.InputStream, System.Text.Encoding.UTF8);
+                string body = reader.ReadToEnd();
+                var typeMatch = System.Text.RegularExpressions.Regex.Match(body, "\"type\"\\s*:\\s*\"(.*?)\"");
+                string reactionType = typeMatch.Success ? typeMatch.Groups[1].Value : (context.Request.QueryString["type"] ?? "");
+
+                var counts = _reactionService.AddReaction(reactionType);
+
+                context.Response.ContentType = "application/json; charset=utf-8";
+                context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+                context.Response.StatusCode = 200;
+                string json = $"{{\"success\":true,\"reaction\":\"{EscapeJson(reactionType)}\",\"counts\":{{\"thumbsUp\":{counts.ThumbsUp},\"thumbsDown\":{counts.ThumbsDown},\"heart\":{counts.Heart}}}}}";
+                byte[] ok = System.Text.Encoding.UTF8.GetBytes(json);
                 context.Response.OutputStream.Write(ok, 0, ok.Length);
             } catch {
                 context.Response.StatusCode = 400;

@@ -136,6 +136,25 @@
                     <h2 class="track-artist" id="trackArtist">LIVE BROADCAST</h2>
                     <div class="show-subtitle" id="showSubtitle">Live Studio Transmission</div>
 
+                    <!-- Live Song Reactions (Thumbs Up, Love, Thumbs Down) -->
+                    <div class="song-reactions-bar" id="songReactionsBar">
+                        <span class="reactions-label">React to Track:</span>
+                        <div class="reactions-buttons">
+                            <button class="reaction-btn" id="btnReactionThumbsUp" data-reaction="thumbs_up" title="Thumbs Up this song">
+                                <span class="reaction-emoji">👍</span>
+                                <span class="reaction-count" id="countThumbsUp">0</span>
+                            </button>
+                            <button class="reaction-btn reaction-love" id="btnReactionLove" data-reaction="heart" title="Love this song">
+                                <span class="reaction-emoji">❤️</span>
+                                <span class="reaction-count" id="countHeart">0</span>
+                            </button>
+                            <button class="reaction-btn" id="btnReactionThumbsDown" data-reaction="thumbs_down" title="Thumbs Down this song">
+                                <span class="reaction-emoji">👎</span>
+                                <span class="reaction-count" id="countThumbsDown">0</span>
+                            </button>
+                        </div>
+                    </div>
+
                     <!-- Live Visualizer & Multi-Mode Reaction Offers -->
                     <div class="visualizer-wrapper">
                         <div class="visualizer-toolbar">
