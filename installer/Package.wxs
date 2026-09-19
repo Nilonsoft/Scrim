@@ -1,0 +1,50 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Scrim"
+           Manufacturer="Scrim Studio"
+           Version="$(var.Version)"
+           UpgradeCode="4C7016BC-8356-4228-BCEE-B5E3C5FD83EA"
+           Scope="perMachine">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed."
+                  Schedule="afterInstallInitialize" />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Scrim" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="Scrim" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="DesktopFolder" />
+
+    <ComponentGroup Id="ProductFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.PublishDir)\**" />
+    </ComponentGroup>
+
+    <ComponentGroup Id="AppShortcuts" Directory="ApplicationProgramsFolder">
+      <Component Id="AppShortcutComponent" Guid="418C61F5-42E1-4BF9-97C5-C5ED3944F3F9">
+        <Shortcut Id="ApplicationStartMenuShortcut"
+                  Name="Scrim"
+                  Description="Low-Latency Live Audio Streaming Station"
+                  Target="[INSTALLFOLDER]Scrim.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <Shortcut Id="ApplicationDesktopShortcut"
+                  Directory="DesktopFolder"
+                  Name="Scrim"
+                  Description="Low-Latency Live Audio Streaming Station"
+                  Target="[INSTALLFOLDER]Scrim.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="CleanUpProgramMenuFolder" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\ScrimStudio\Scrim" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="MainFeature" Title="Scrim" Level="1">
+      <ComponentGroupRef Id="ProductFiles" />
+      <ComponentGroupRef Id="AppShortcuts" />
+    </Feature>
+  </Package>
+</Wix>

@@ -3,6 +3,8 @@ namespace Scrim.Audio {
         Normal,
         Robot,
         Radio,
-        Alien
+        Alien,
+        Woman,
+        Man
     }
 }

@@ -6,6 +6,11 @@ namespace Scrim.Metadata {
         public string Artist { get; set; } = string.Empty;
         public string Album { get; set; } = string.Empty;
         public byte[]? AlbumArt { get; set; }
+        public string? AlbumArtUrl { get; set; }
+
+        public string? AlbumArtBase64 => AlbumArt != null && AlbumArt.Length > 0 
+            ? $"data:image/jpeg;base64,{Convert.ToBase64String(AlbumArt)}" 
+            : null;
     }
 
     public interface IMetadataService : IDisposable {

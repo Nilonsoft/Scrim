@@ -77,5 +77,43 @@ namespace Scrim.Tests {
             
             Assert.NotEqual(original, buffer);
         }
+
+        [Fact]
+        public void Process_Woman_AltersBuffer() {
+            var processor = new VoiceChangerProcessor();
+            
+            byte[] buffer = new byte[8820]; // 100ms stereo / mono
+            for (int i = 0; i < buffer.Length; i += 2) {
+                var bytes = BitConverter.GetBytes((short)10000);
+                buffer[i] = bytes[0];
+                buffer[i + 1] = bytes[1];
+            }
+            
+            byte[] original = new byte[8820];
+            Array.Copy(buffer, original, 8820);
+            
+            processor.Process(buffer, VoiceEffect.Woman);
+            
+            Assert.NotEqual(original, buffer);
+        }
+
+        [Fact]
+        public void Process_Man_AltersBuffer() {
+            var processor = new VoiceChangerProcessor();
+            
+            byte[] buffer = new byte[8820]; // 100ms stereo / mono
+            for (int i = 0; i < buffer.Length; i += 2) {
+                var bytes = BitConverter.GetBytes((short)10000);
+                buffer[i] = bytes[0];
+                buffer[i + 1] = bytes[1];
+            }
+            
+            byte[] original = new byte[8820];
+            Array.Copy(buffer, original, 8820);
+            
+            processor.Process(buffer, VoiceEffect.Man);
+            
+            Assert.NotEqual(original, buffer);
+        }
     }
 }

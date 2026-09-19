@@ -12,8 +12,9 @@ namespace Scrim.Encoding {
         public ChannelReader<byte[]> OutputStream => _transcodedOutput.Reader;
 
         public MultiFormatTranscoder() {
-            _transcodedOutput = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(100) {
-                FullMode = BoundedChannelFullMode.DropOldest
+            _transcodedOutput = Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions {
+                SingleReader = false,
+                SingleWriter = true
             });
         }
 
@@ -29,6 +30,7 @@ namespace Scrim.Encoding {
         }
 
         public void StartTranscoding(ChannelReader<byte[]> duckedPcmStream) {
+            StopTranscoding();
             _cts = new CancellationTokenSource();
             var token = _cts.Token;
 

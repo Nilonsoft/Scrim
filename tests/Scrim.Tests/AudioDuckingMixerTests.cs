@@ -109,5 +109,55 @@ namespace Scrim.Tests {
             mixer.PushToTalkActive = true;
             Assert.True(mixer.IsMicLive);
         }
+
+        [Fact]
+        public async Task StartMixing_WithAppVolumeZero_MutesAppOnStream() {
+            var mixer = new AudioDuckingMixer { AppVolume = 0.0f };
+            var appChannel = Channel.CreateUnbounded<byte[]>();
+            var micChannel = Channel.CreateUnbounded<byte[]>();
+            var cts = new CancellationTokenSource();
+
+            mixer.StartMixing(appChannel.Reader, micChannel.Reader, cts.Token);
+
+            byte[] appFrame = new byte[3528];
+            for (int i = 0; i < appFrame.Length; i += 2) {
+                var bytes = BitConverter.GetBytes((short)10000);
+                appFrame[i] = bytes[0];
+                appFrame[i + 1] = bytes[1];
+            }
+
+            await appChannel.Writer.WriteAsync(appFrame);
+            var mixedFrame = await mixer.MixedStream.ReadAsync();
+
+            short sample = BitConverter.ToInt16(mixedFrame, 100);
+            Assert.Equal(0, sample);
+
+            cts.Cancel();
+        }
+
+        [Fact]
+        public async Task StartMixing_WithAppVolumeFiftyPercent_ScalesAppAudioOnStream() {
+            var mixer = new AudioDuckingMixer { AppVolume = 0.5f };
+            var appChannel = Channel.CreateUnbounded<byte[]>();
+            var micChannel = Channel.CreateUnbounded<byte[]>();
+            var cts = new CancellationTokenSource();
+
+            mixer.StartMixing(appChannel.Reader, micChannel.Reader, cts.Token);
+
+            byte[] appFrame = new byte[3528];
+            for (int i = 0; i < appFrame.Length; i += 2) {
+                var bytes = BitConverter.GetBytes((short)10000);
+                appFrame[i] = bytes[0];
+                appFrame[i + 1] = bytes[1];
+            }
+
+            await appChannel.Writer.WriteAsync(appFrame);
+            var mixedFrame = await mixer.MixedStream.ReadAsync();
+
+            short sample = BitConverter.ToInt16(mixedFrame, 100);
+            Assert.InRange(sample, 4800, 5200);
+
+            cts.Cancel();
+        }
     }
 }

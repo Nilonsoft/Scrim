@@ -8,11 +8,17 @@ namespace Scrim.Audio {
         private readonly Channel<byte[]> _channel;
 #pragma warning disable CS0618 // Type or member is obsolete
         private WasapiCapture? _capture;
+        private WasapiOut? _monitorOut;
 #pragma warning restore CS0618 // Type or member is obsolete
         private readonly VoiceEffectLoader _effectLoader;
+        private BufferedWaveProvider? _monitorBuffer;
+        private readonly object _monitorLock = new();
         
         public ChannelReader<byte[]> MicrophoneStream => _channel.Reader;
         public string CurrentEffect { get; set; } = "normal";
+        public bool IsMonitoring { get; set; } = false;
+        public bool IsMicTestMode { get; set; } = false;
+        public float InputLevel { get; private set; } = 0f;
 
         public MicrophoneCaptureService(VoiceEffectLoader effectLoader) {
             _effectLoader = effectLoader;
@@ -54,15 +60,64 @@ namespace Scrim.Audio {
                     
                     var provider = _effectLoader.GetProvider(CurrentEffect);
                     provider?.Process(buffer);
-                    
-                    _channel.Writer.TryWrite(buffer);
+
+                    // Track real-time input peak level for microphone gauge
+                    float maxSample = 0f;
+                    for (int i = 0; i < a.BytesRecorded; i += 2) {
+                        short sample = BitConverter.ToInt16(buffer, i);
+                        float abs = Math.Abs(sample) / 32768.0f;
+                        if (abs > maxSample) maxSample = abs;
+                    }
+                    InputLevel = Math.Max(maxSample, InputLevel * 0.82f);
+
+                    // Sidetone / Headphone monitoring
+                    if (IsMonitoring || IsMicTestMode) {
+                        EnsureMonitorPlayback();
+                        _monitorBuffer?.AddSamples(buffer, 0, buffer.Length);
+                    }
+
+                    // Only send to mixer and live broadcast stream when NOT in private test mode
+                    if (!IsMicTestMode) {
+                        _channel.Writer.TryWrite(buffer);
+                    }
                 }
             };
 
             _capture.StartRecording();
         }
 
+        private void EnsureMonitorPlayback() {
+            lock (_monitorLock) {
+                if (_monitorOut == null) {
+                    try {
+                        _monitorBuffer = new BufferedWaveProvider(new WaveFormat(44100, 16, 2), TimeSpan.FromMilliseconds(200)) {
+                            DiscardOnBufferOverflow = true
+                        };
+#pragma warning disable CS0618 // Type or member is obsolete
+                        _monitorOut = new WasapiOut(AudioClientShareMode.Shared, 25);
+#pragma warning restore CS0618 // Type or member is obsolete
+                        _monitorOut.Init(_monitorBuffer);
+                        _monitorOut.Play();
+                    } catch { }
+                }
+            }
+        }
+
+        public void StopMonitoringPlayback() {
+            lock (_monitorLock) {
+                if (_monitorOut != null) {
+                    try {
+                        _monitorOut.Stop();
+                        _monitorOut.Dispose();
+                    } catch { }
+                    _monitorOut = null;
+                    _monitorBuffer = null;
+                }
+            }
+        }
+
         public void StopCapture() {
+            StopMonitoringPlayback();
             if (_capture != null) {
                 _capture.StopRecording();
                 _capture.Dispose();

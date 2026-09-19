@@ -4,10 +4,19 @@ namespace Scrim.Configuration {
     public class ScrimProfile {
         public string ProfileName { get; set; } = "Default";
         public int TargetProcessId { get; set; }
+        public string TargetProcessName { get; set; } = "";
+        public string SelectedMicrophoneId { get; set; } = "";
+        public string SelectedVoiceEffect { get; set; } = "normal";
+        public string MicControlMode { get; set; } = "PushToTalk";
+        public bool MicMonitoring { get; set; } = false;
         public string AudioFormat { get; set; } = "Mp3";
         public int Bitrate { get; set; } = 128;
         public int Port { get; set; } = 4242;
+        public bool EnableNetworkAccess { get; set; } = true;
+        public bool EnableUpnpPortForwarding { get; set; } = true;
         public CloseToTrayMode CloseMode { get; set; } = CloseToTrayMode.Ask;
+        public bool MuteAppLocally { get; set; } = false;
+        public int AppStreamVolume { get; set; } = 100;
 
         // Web Player Branding Customization
         public string StationName { get; set; } = "GLOBAL INDIE RADIO";
@@ -27,10 +36,20 @@ namespace Scrim.Configuration {
             new WebNavLink { Label = "About", Url = "#about" }
         };
 
-        // Layout Customization & Card Arrangement
-        public System.Collections.Generic.List<string> LeftColumnCards { get; set; } = new() { "card-audio-routing", "card-playlist", "card-web-branding" };
+        // Layout Customization & Column Sizing Proportions
+        public string ColumnLayoutMode { get; set; } = "Studio";
+        public int CustomLeftWidth { get; set; } = 320;
+        public int CustomRightWidth { get; set; } = 340;
+        public System.Collections.Generic.List<string> LeftColumnCards { get; set; } = new() { "card-audio-routing", "card-web-branding" };
         public System.Collections.Generic.List<string> CenterColumnCards { get; set; } = new() { "card-vu-talk", "card-voice-fx", "card-queue" };
         public System.Collections.Generic.List<string> RightColumnCards { get; set; } = new() { "card-encoding", "card-media-player", "card-soundboard" };
+
+        public System.Collections.Generic.List<CustomSoundItem> CustomSounds { get; set; } = new();
+    }
+
+    public class CustomSoundItem {
+        public string Name { get; set; } = "";
+        public string FilePath { get; set; } = "";
     }
 
     public class WebNavLink {

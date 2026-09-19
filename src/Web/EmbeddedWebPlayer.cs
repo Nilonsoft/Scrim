@@ -36,8 +36,35 @@ namespace Scrim.Web {
                 filePath = Path.Combine(baseDir, "..", "..", "..", "src", "Web", "Assets", relativePath);
             }
 
+            byte[]? data = null;
             if (File.Exists(filePath)) {
-                string ext = Path.GetExtension(filePath).ToLower();
+                data = File.ReadAllBytes(filePath);
+            } else {
+                // Fallback: Read from embedded assembly manifest resource
+                var assembly = Assembly.GetExecutingAssembly();
+                string resourceName = $"Scrim.Web.Assets.{relativePath.Replace('/', '.').Replace('\\', '.')}";
+                using var stream = assembly.GetManifestResourceStream(resourceName);
+                if (stream != null) {
+                    using var ms = new MemoryStream();
+                    stream.CopyTo(ms);
+                    data = ms.ToArray();
+                } else {
+                    var allResources = assembly.GetManifestResourceNames();
+                    string targetSuffix = relativePath.Replace('/', '.').Replace('\\', '.');
+                    string? match = Array.Find(allResources, r => r.EndsWith(targetSuffix, StringComparison.OrdinalIgnoreCase));
+                    if (match != null) {
+                        using var matchStream = assembly.GetManifestResourceStream(match);
+                        if (matchStream != null) {
+                            using var ms = new MemoryStream();
+                            matchStream.CopyTo(ms);
+                            data = ms.ToArray();
+                        }
+                    }
+                }
+            }
+
+            if (data != null) {
+                string ext = Path.GetExtension(relativePath).ToLower();
                 response.ContentType = ext switch {
                     ".html" => "text/html",
                     ".css" => "text/css",
@@ -48,14 +75,10 @@ namespace Scrim.Web {
                     _ => "text/plain"
                 };
 
-                byte[] buffer = File.ReadAllBytes(filePath);
-                response.ContentLength64 = buffer.Length;
-                response.OutputStream.Write(buffer, 0, buffer.Length);
+                response.ContentLength64 = data.Length;
+                response.OutputStream.Write(data, 0, data.Length);
             } else {
                 response.StatusCode = 404;
-                
-                // For debugging
-                Console.WriteLine($"404 Not Found: {filePath}");
                 byte[] buffer = System.Text.Encoding.UTF8.GetBytes($"404 Not Found: {path}");
                 response.OutputStream.Write(buffer, 0, buffer.Length);
             }

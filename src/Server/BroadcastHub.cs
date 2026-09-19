@@ -11,10 +11,13 @@ namespace Scrim.Server {
         private CancellationTokenSource? _cts;
 
         public int ActiveClientCount => _clients.Count;
+        public bool IsBroadcasting { get; private set; } = false;
 
         public void StartBroadcasting(ChannelReader<byte[]> encodedStream) {
+            StopBroadcasting();
             _cts = new CancellationTokenSource();
             var token = _cts.Token;
+            IsBroadcasting = true;
 
             Task.Run(async () => {
                 while (!token.IsCancellationRequested) {
@@ -47,6 +50,7 @@ namespace Scrim.Server {
         }
 
         public void StopBroadcasting() {
+            IsBroadcasting = false;
             _cts?.Cancel();
             foreach (var client in _clients.Values) {
                 client.Dispose();

@@ -15,15 +15,26 @@ namespace Scrim.Audio {
         private uint _processId;
         private nint _pActivationParams = nint.Zero;
 
+        [DllImport("winmm.dll", EntryPoint = "timeBeginPeriod")]
+        private static extern uint TimeBeginPeriod(uint uMilliseconds);
+
+        [DllImport("winmm.dll", EntryPoint = "timeEndPeriod")]
+        private static extern uint TimeEndPeriod(uint uMilliseconds);
+
         public ChannelReader<byte[]> AudioStream => _channel.Reader;
 
         public ProcessLoopbackCapture() {
-            _channel = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(100) {
-                FullMode = BoundedChannelFullMode.DropOldest
+            _channel = Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions {
+                SingleReader = true,
+                SingleWriter = true
             });
         }
 
         public void StartCapture(uint processId) {
+            if (_processId == processId && _captureTask != null && !_captureTask.IsCompleted) {
+                return;
+            }
+            StopCapture();
             _processId = processId;
             _cts = new CancellationTokenSource();
 
@@ -94,25 +105,43 @@ namespace Scrim.Audio {
         }
 
         private void CaptureLoop(CancellationToken token) {
-            while (!token.IsCancellationRequested) {
-                Thread.Sleep(10);
-                
-                if (_captureClient == null) continue;
-
-                _captureClient.GetNextPacketSize(out uint packetLength);
-                while (packetLength > 0 && !token.IsCancellationRequested) {
-                    _captureClient.GetBuffer(out nint pData, out uint numFramesToRead, out uint flags, out ulong devicePosition, out ulong qpcPosition);
-
-                    if (numFramesToRead > 0) {
-                        int bytesToRead = (int)(numFramesToRead * 4);
-                        byte[] buffer = new byte[bytesToRead];
-                        Marshal.Copy(pData, buffer, 0, bytesToRead);
-                        _channel.Writer.TryWrite(buffer);
+            TimeBeginPeriod(1);
+            try {
+                while (!token.IsCancellationRequested) {
+                    if (_captureClient == null) {
+                        Thread.Sleep(5);
+                        continue;
                     }
 
-                    _captureClient.ReleaseBuffer(numFramesToRead);
-                    _captureClient.GetNextPacketSize(out packetLength);
+                    _captureClient.GetNextPacketSize(out uint packetLength);
+                    if (packetLength == 0) {
+                        Thread.Sleep(2);
+                        continue;
+                    }
+
+                    while (packetLength > 0 && !token.IsCancellationRequested) {
+                        _captureClient.GetBuffer(out nint pData, out uint numFramesToRead, out uint flags, out ulong devicePosition, out ulong qpcPosition);
+
+                        if (numFramesToRead > 0) {
+                            int bytesToRead = (int)(numFramesToRead * 4);
+                            byte[] buffer = new byte[bytesToRead];
+
+                            // Flag 0x2 is AUDCLNT_BUFFERFLAGS_SILENT
+                            if ((flags & 2) != 0 || pData == nint.Zero) {
+                                Array.Clear(buffer, 0, bytesToRead);
+                            } else {
+                                Marshal.Copy(pData, buffer, 0, bytesToRead);
+                            }
+
+                            _channel.Writer.TryWrite(buffer);
+                        }
+
+                        _captureClient.ReleaseBuffer(numFramesToRead);
+                        _captureClient.GetNextPacketSize(out packetLength);
+                    }
                 }
+            } finally {
+                TimeEndPeriod(1);
             }
         }
 

@@ -16,6 +16,34 @@ namespace Scrim.Configuration {
             if (!Directory.Exists(_configDir)) {
                 Directory.CreateDirectory(_configDir);
             }
+            LoadActiveOrInitialProfile();
+        }
+
+        private void LoadActiveOrInitialProfile() {
+            string activeFile = Path.Combine(_configDir, "active_profile.txt");
+            string profileToLoad = "Default";
+
+            if (File.Exists(activeFile)) {
+                try {
+                    string activeName = File.ReadAllText(activeFile).Trim();
+                    if (!string.IsNullOrEmpty(activeName) && File.Exists(Path.Combine(_configDir, $"{activeName}.json"))) {
+                        profileToLoad = activeName;
+                    }
+                } catch { }
+            }
+
+            string targetJson = Path.Combine(_configDir, $"{profileToLoad}.json");
+            if (File.Exists(targetJson)) {
+                try {
+                    string json = File.ReadAllText(targetJson);
+                    CurrentProfile = JsonSerializer.Deserialize<ScrimProfile>(json) ?? new ScrimProfile();
+                } catch {
+                    CurrentProfile = new ScrimProfile();
+                }
+            } else {
+                CurrentProfile = new ScrimProfile();
+                SaveProfile(CurrentProfile);
+            }
         }
 
         public void SaveProfile(ScrimProfile profile) {
@@ -23,6 +51,10 @@ namespace Scrim.Configuration {
             string json = JsonSerializer.Serialize(profile, new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(file, json);
             CurrentProfile = profile;
+
+            try {
+                File.WriteAllText(Path.Combine(_configDir, "active_profile.txt"), profile.ProfileName);
+            } catch { }
         }
 
         public IEnumerable<string> GetAvailableProfiles() {
@@ -39,6 +71,9 @@ namespace Scrim.Configuration {
             if (File.Exists(file)) {
                 string json = File.ReadAllText(file);
                 CurrentProfile = JsonSerializer.Deserialize<ScrimProfile>(json) ?? new ScrimProfile();
+                try {
+                    File.WriteAllText(Path.Combine(_configDir, "active_profile.txt"), name);
+                } catch { }
             }
         }
     }

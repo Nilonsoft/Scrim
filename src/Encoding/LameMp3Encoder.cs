@@ -17,8 +17,9 @@ namespace Scrim.Encoding {
 
         public LameMp3Encoder(int bitrate = 128) {
             Bitrate = bitrate;
-            _outputChannel = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(500) {
-                FullMode = BoundedChannelFullMode.DropOldest
+            _outputChannel = Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions {
+                SingleReader = false,
+                SingleWriter = true
             });
         }
 
@@ -26,10 +27,10 @@ namespace Scrim.Encoding {
             _cts = new CancellationTokenSource();
             var token = _cts.Token;
 
-            // Spawn FFmpeg: Read raw 16-bit 44.1kHz stereo PCM from stdin, output mp3 to stdout
+            // Spawn FFmpeg: Read raw 16-bit 44.1kHz stereo PCM from stdin, output mp3 to stdout with immediate packet flush
             var psi = new ProcessStartInfo {
                 FileName = "ffmpeg",
-                Arguments = $"-f s16le -ar 44100 -ac 2 -i pipe:0 -c:a libmp3lame -b:a {Bitrate}k -f mp3 pipe:1",
+                Arguments = $"-f s16le -ar 44100 -ac 2 -i pipe:0 -c:a libmp3lame -b:a {Bitrate}k -flush_packets 1 -f mp3 pipe:1",
                 RedirectStandardInput = true,
                 RedirectStandardOutput = true,
                 UseShellExecute = false,
@@ -45,6 +46,7 @@ namespace Scrim.Encoding {
                     while (!token.IsCancellationRequested) {
                         var pcmBuffer = await pcmStream.ReadAsync(token);
                         await stdin.WriteAsync(pcmBuffer, token);
+                        await stdin.FlushAsync(token);
                     }
                 }, token);
 

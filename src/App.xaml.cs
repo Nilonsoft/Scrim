@@ -27,8 +27,10 @@ namespace Scrim {
             services.AddSingleton<AudioDuckingMixer>();
             services.AddTransient<ProcessLoopbackCapture>();
             services.AddTransient<MicrophoneCaptureService>();
+            services.AddSingleton<LocalAudioRoutingService>();
 
             // Server & Metadata
+            services.AddSingleton<INetworkDiscoveryService, NetworkDiscoveryService>();
             services.AddSingleton<BroadcastHub>();
             services.AddSingleton<HttpStreamServer>();
             services.AddSingleton<IMetadataService, WindowsMediaMetadataService>();
@@ -61,6 +63,14 @@ namespace Scrim {
 
             var streamServer = Services.GetRequiredService<HttpStreamServer>();
             streamServer.Stop();
+
+            var profileManager = Services.GetService<IProfileManager>();
+            if (profileManager?.CurrentProfile != null) {
+                profileManager.SaveProfile(profileManager.CurrentProfile);
+            }
+
+            var localAudioRouting = Services.GetService<LocalAudioRoutingService>();
+            localAudioRouting?.RestoreAllMuted();
 
             base.OnExit(e);
         }
