@@ -206,5 +206,63 @@ namespace Scrim.Tests {
             var msg = service.AddMessage("User", "Check this out :O <3 :fire:");
             Assert.Equal("Check this out 😮 ❤️ 🔥", msg.Text);
         }
+
+        [Fact]
+        public void TryClaimNickname_FirstUserClaimsName_Succeeds() {
+            var service = new LiveChatService();
+            bool claimed = service.TryClaimNickname("Sonic", "user_1", isHost: false, out string error);
+            Assert.True(claimed);
+            Assert.Empty(error);
+            Assert.True(service.IsNicknameAvailable("Sonic", "user_1"));
+        }
+
+        [Fact]
+        public void TryClaimNickname_SameUserReclaimsName_Succeeds() {
+            var service = new LiveChatService();
+            service.TryClaimNickname("Tails", "user_1", isHost: false, out _);
+            bool secondAttempt = service.TryClaimNickname("Tails", "user_1", isHost: false, out string error);
+            Assert.True(secondAttempt);
+            Assert.Empty(error);
+        }
+
+        [Fact]
+        public void TryClaimNickname_DifferentUserClaimsSameName_FailsCaseInsensitive() {
+            var service = new LiveChatService();
+            service.TryClaimNickname("Knuckles", "user_1", isHost: false, out _);
+
+            bool user2Attempt = service.TryClaimNickname("knuckles", "user_2", isHost: false, out string error);
+            Assert.False(user2Attempt);
+            Assert.Contains("already in use", error, StringComparison.OrdinalIgnoreCase);
+            Assert.False(service.IsNicknameAvailable("KNUCKLES", "user_2"));
+        }
+
+        [Fact]
+        public void TryClaimNickname_ReservedHostName_FailsForListener() {
+            var service = new LiveChatService();
+            service.ReserveHostNickname("DJ Nilon");
+
+            bool claimedDj = service.TryClaimNickname("DJ", "user_1", isHost: false, out string err1);
+            Assert.False(claimedDj);
+            Assert.Contains("reserved", err1, StringComparison.OrdinalIgnoreCase);
+
+            bool claimedHost = service.TryClaimNickname("DJ Nilon", "user_1", isHost: false, out string err2);
+            Assert.False(claimedHost);
+            Assert.Contains("reserved", err2, StringComparison.OrdinalIgnoreCase);
+
+            // Host can claim it
+            bool hostClaim = service.TryClaimNickname("DJ Nilon", "host_id", isHost: true, out string err3);
+            Assert.True(hostClaim);
+            Assert.Empty(err3);
+        }
+
+        [Fact]
+        public void AddMessage_DifferentUserWithDuplicateName_AutoSuffixesNameToEnsureUniqueness() {
+            var service = new LiveChatService();
+            var msg1 = service.AddMessage("Shadow", "First message", isHost: false, userId: "user_1");
+            var msg2 = service.AddMessage("Shadow", "Second message", isHost: false, userId: "user_2");
+
+            Assert.Equal("Shadow", msg1.Sender);
+            Assert.Equal("Shadow #2", msg2.Sender);
+        }
     }
 }

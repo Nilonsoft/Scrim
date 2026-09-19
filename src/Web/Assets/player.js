@@ -1419,6 +1419,24 @@ document.addEventListener('DOMContentLoaded', function () {
     const seenMessageIds = new Set();
 
     // Anonymous Nickname management
+    let currentTakenNicknames = new Set();
+
+    function isNicknameAvailableLocally(name) {
+        if (!name) return false;
+        return !currentTakenNicknames.has(name.trim().toLowerCase());
+    }
+
+    function generateUniqueNickname() {
+        for (let i = 0; i < 100; i++) {
+            const randNum = Math.floor(100 + Math.random() * 900);
+            const candidate = 'Listener #' + randNum;
+            if (isNicknameAvailableLocally(candidate)) {
+                return candidate;
+            }
+        }
+        return 'Listener #' + Date.now().toString().slice(-4);
+    }
+
     function initNickname() {
         if (!chatNicknameInput) return;
         let nick = '';
@@ -1427,8 +1445,7 @@ document.addEventListener('DOMContentLoaded', function () {
         } catch (e) {}
 
         if (!nick) {
-            const randNum = Math.floor(100 + Math.random() * 900);
-            nick = 'Listener #' + randNum;
+            nick = generateUniqueNickname();
             try {
                 localStorage.setItem('scrim_chat_nickname', nick);
             } catch (e) {}
@@ -1438,12 +1455,26 @@ document.addEventListener('DOMContentLoaded', function () {
         chatNicknameInput.addEventListener('change', function () {
             let val = chatNicknameInput.value.trim();
             if (!val) {
-                val = 'Listener #' + Math.floor(100 + Math.random() * 900);
+                val = generateUniqueNickname();
                 chatNicknameInput.value = val;
             }
-            try {
-                localStorage.setItem('scrim_chat_nickname', val);
-            } catch (e) {}
+            if (currentTakenNicknames.has(val.toLowerCase())) {
+                chatNicknameInput.style.borderColor = '#ef4444';
+                chatNicknameInput.title = 'This nickname is already in use by another listener this session.';
+                if (chatMessageInput) {
+                    const origPh = chatMessageInput.placeholder;
+                    chatMessageInput.placeholder = '⚠️ Nickname already taken! Please choose another.';
+                    setTimeout(function () {
+                        chatMessageInput.placeholder = origPh;
+                    }, 4000);
+                }
+            } else {
+                chatNicknameInput.style.borderColor = '';
+                chatNicknameInput.title = 'Change your anonymous chat handle';
+                try {
+                    localStorage.setItem('scrim_chat_nickname', val);
+                } catch (e) {}
+            }
         });
     }
 
@@ -1658,6 +1689,19 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (Array.isArray(data.blacklist)) {
                     currentBlacklist = data.blacklist;
                 }
+                if (Array.isArray(data.takenNicknames)) {
+                    currentTakenNicknames = new Set(data.takenNicknames.map(function (n) { return (n || '').trim().toLowerCase(); }));
+                    if (chatNicknameInput) {
+                        const cur = chatNicknameInput.value.trim();
+                        if (cur && currentTakenNicknames.has(cur.toLowerCase())) {
+                            const newNick = generateUniqueNickname();
+                            chatNicknameInput.value = newNick;
+                            try {
+                                localStorage.setItem('scrim_chat_nickname', newNick);
+                            } catch (e) {}
+                        }
+                    }
+                }
                 if (Array.isArray(data.messages)) {
                     data.messages.forEach(appendChatMessage);
                 }
@@ -1678,6 +1722,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }).then(function (res) {
             if (chatSendBtn) chatSendBtn.disabled = !isChatEnabled || isUserBanned;
             if (res.ok) {
+                if (chatNicknameInput) chatNicknameInput.style.borderColor = '';
                 chatMessageInput.value = '';
                 chatMessageInput.focus();
                 return res.json().then(function (data) {
@@ -1698,6 +1743,13 @@ document.addEventListener('DOMContentLoaded', function () {
             } else if (res.status === 400) {
                 return res.json().then(function (errData) {
                     const errMsg = (errData && errData.error) ? errData.error : "Message could not be sent.";
+                    if (errData && errData.nameTaken) {
+                        if (chatNicknameInput) {
+                            chatNicknameInput.style.borderColor = '#ef4444';
+                            chatNicknameInput.focus();
+                            chatNicknameInput.select();
+                        }
+                    }
                     if (chatMessageInput) {
                         const originalPh = chatMessageInput.placeholder;
                         chatMessageInput.placeholder = `⚠️ ${errMsg}`;

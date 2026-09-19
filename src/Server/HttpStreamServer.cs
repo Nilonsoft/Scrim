@@ -771,10 +771,20 @@ namespace Scrim.Server {
                 bool isEnabled = _profileManager.CurrentProfile.EnableChat;
                 var blacklist = _profileManager.CurrentProfile.NicknameBlacklist;
                 string blacklistJson = string.Join(",", blacklist.Select(b => $"\"{EscapeJson(b)}\""));
+
+                string hostName = _profileManager.CurrentProfile.HostName;
+                if (!string.IsNullOrWhiteSpace(hostName)) {
+                    _chatService.ReserveHostNickname(hostName);
+                }
+
+                // Return taken nicknames for other users so the client can ensure uniqueness
+                var taken = _chatService.GetClaimedNicknames(excludeUserId: userHash);
+                string takenJson = string.Join(",", taken.Select(n => $"\"{EscapeJson(n)}\""));
+
                 var messages = _chatService.GetRecentMessages().Select(m => 
                     $"{{\"id\":\"{EscapeJson(m.Id)}\",\"sender\":\"{EscapeJson(m.Sender)}\",\"text\":\"{EscapeJson(m.Text)}\",\"timestamp\":\"{m.Timestamp:o}\",\"isHost\":{(m.IsHost ? "true" : "false")},\"color\":\"{EscapeJson(m.Color)}\"}}"
                 );
-                string json = $"{{\"enabled\":{(isEnabled ? "true" : "false")},\"isBanned\":{(isBanned ? "true" : "false")},\"blacklist\":[{blacklistJson}],\"messages\":[{string.Join(",", messages)}]}}";
+                string json = $"{{\"enabled\":{(isEnabled ? "true" : "false")},\"isBanned\":{(isBanned ? "true" : "false")},\"blacklist\":[{blacklistJson}],\"takenNicknames\":[{takenJson}],\"messages\":[{string.Join(",", messages)}]}}";
                 byte[] buffer = System.Text.Encoding.UTF8.GetBytes(json);
                 response.ContentLength64 = buffer.Length;
                 response.OutputStream.Write(buffer, 0, buffer.Length);
@@ -844,6 +854,20 @@ namespace Scrim.Server {
                 if (!_chatService.IsNicknameAllowed(sender, _profileManager.CurrentProfile.NicknameBlacklist)) {
                     context.Response.StatusCode = 400;
                     byte[] err = System.Text.Encoding.UTF8.GetBytes("{\"error\":\"This nickname is not permitted on this station\"}");
+                    context.Response.ContentType = "application/json; charset=utf-8";
+                    context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+                    context.Response.OutputStream.Write(err, 0, err.Length);
+                    return;
+                }
+
+                string hostName = _profileManager.CurrentProfile.HostName;
+                if (!string.IsNullOrWhiteSpace(hostName)) {
+                    _chatService.ReserveHostNickname(hostName);
+                }
+
+                if (!_chatService.TryClaimNickname(sender, userHash, isHost: false, out string claimError)) {
+                    context.Response.StatusCode = 400;
+                    byte[] err = System.Text.Encoding.UTF8.GetBytes($"{{\"error\":\"{EscapeJson(claimError)}\",\"nameTaken\":true}}");
                     context.Response.ContentType = "application/json; charset=utf-8";
                     context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
                     context.Response.OutputStream.Write(err, 0, err.Length);

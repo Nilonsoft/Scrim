@@ -18,6 +18,11 @@ namespace Scrim.Metadata {
         IReadOnlyList<BannedChatUser> GetBannedUsers();
         void SyncBannedUsers(IEnumerable<BannedChatUser> bannedUsers);
         bool RemoveMessage(string messageId);
+        bool IsNicknameAvailable(string nickname, string? userId, bool isHost = false);
+        bool TryClaimNickname(string nickname, string? userId, bool isHost, out string error);
+        IReadOnlyList<string> GetClaimedNicknames(string? excludeUserId = null);
+        void ReserveHostNickname(string hostName);
+        void ClearSessionNicknames();
         event Action<ChatMessage>? MessagePosted;
         event Action<string>? MessageRemoved;
         event Action? ChatCleared;
@@ -38,6 +43,9 @@ namespace Scrim.Metadata {
             "#fb923c", "#f43f5e", "#ec4899", "#a855f7", "#818cf8"
         };
 
+        private readonly Dictionary<string, string> _claimedNicknames = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _reservedHostNames = new(StringComparer.OrdinalIgnoreCase) { "DJ", "Host", "Broadcaster", "Admin" };
+
         public event Action<ChatMessage>? MessagePosted;
         public event Action<string>? MessageRemoved;
         public event Action? ChatCleared;
@@ -46,10 +54,109 @@ namespace Scrim.Metadata {
         public event Action<string>? UserBanned;
         public event Action<string>? UserUnbanned;
 
+        public void ReserveHostNickname(string hostName) {
+            if (string.IsNullOrWhiteSpace(hostName)) return;
+            string clean = hostName.Trim();
+            lock (_lock) {
+                _reservedHostNames.Add(clean);
+                _claimedNicknames[clean] = "host";
+            }
+        }
+
+        public bool IsNicknameAvailable(string nickname, string? userId, bool isHost = false) {
+            if (string.IsNullOrWhiteSpace(nickname)) return false;
+            string clean = nickname.Trim();
+            if (clean.Length > 32) clean = clean.Substring(0, 32);
+
+            lock (_lock) {
+                if (isHost) return true;
+
+                if (_reservedHostNames.Contains(clean)) {
+                    return false;
+                }
+
+                if (_claimedNicknames.TryGetValue(clean, out var ownerId)) {
+                    if (!string.IsNullOrWhiteSpace(userId) && ownerId.Equals(userId.Trim(), StringComparison.OrdinalIgnoreCase)) {
+                        return true;
+                    }
+                    return false;
+                }
+
+                return true;
+            }
+        }
+
+        public bool TryClaimNickname(string nickname, string? userId, bool isHost, out string error) {
+            if (string.IsNullOrWhiteSpace(nickname)) {
+                error = "Nickname cannot be empty.";
+                return false;
+            }
+
+            string clean = nickname.Trim();
+            if (clean.Length > 32) clean = clean.Substring(0, 32);
+
+            lock (_lock) {
+                if (isHost) {
+                    _claimedNicknames[clean] = "host";
+                    _reservedHostNames.Add(clean);
+                    error = string.Empty;
+                    return true;
+                }
+
+                if (_reservedHostNames.Contains(clean)) {
+                    error = "This nickname is reserved for the station host.";
+                    return false;
+                }
+
+                if (_claimedNicknames.TryGetValue(clean, out var ownerId)) {
+                    if (!string.IsNullOrWhiteSpace(userId) && ownerId.Equals(userId.Trim(), StringComparison.OrdinalIgnoreCase)) {
+                        error = string.Empty;
+                        return true;
+                    }
+                    error = "This nickname is already in use by another listener this session.";
+                    return false;
+                }
+
+                if (!string.IsNullOrWhiteSpace(userId)) {
+                    _claimedNicknames[clean] = userId.Trim();
+                }
+
+                error = string.Empty;
+                return true;
+            }
+        }
+
+        public IReadOnlyList<string> GetClaimedNicknames(string? excludeUserId = null) {
+            lock (_lock) {
+                if (string.IsNullOrWhiteSpace(excludeUserId)) {
+                    return _claimedNicknames.Keys.ToList();
+                }
+                string cleanExclude = excludeUserId.Trim();
+                return _claimedNicknames
+                    .Where(kv => !kv.Value.Equals(cleanExclude, StringComparison.OrdinalIgnoreCase))
+                    .Select(kv => kv.Key)
+                    .ToList();
+            }
+        }
+
+        public void ClearSessionNicknames() {
+            lock (_lock) {
+                _claimedNicknames.Clear();
+                foreach (var h in _reservedHostNames) {
+                    _claimedNicknames[h] = "host";
+                }
+            }
+        }
+
         public void AssignNickname(string targetName, string assignedName) {
             string cleanTarget = targetName?.Trim() ?? string.Empty;
             string cleanAssigned = assignedName?.Trim() ?? string.Empty;
             if (!string.IsNullOrEmpty(cleanTarget) && !string.IsNullOrEmpty(cleanAssigned)) {
+                lock (_lock) {
+                    var targetMsg = _messages.LastOrDefault(m => m.Sender.Equals(cleanTarget, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(m.UserId));
+                    string targetId = targetMsg?.UserId ?? cleanTarget;
+                    _claimedNicknames[cleanAssigned] = targetId;
+                }
                 NicknameAssigned?.Invoke(cleanTarget, cleanAssigned);
             }
         }
@@ -129,6 +236,25 @@ namespace Scrim.Metadata {
             string cleanSender = string.IsNullOrWhiteSpace(sender) ? "Anonymous Listener" : sender.Trim();
             if (cleanSender.Length > 32) {
                 cleanSender = cleanSender.Substring(0, 32);
+            }
+
+            lock (_lock) {
+                if (!isHost && !string.IsNullOrWhiteSpace(userId)) {
+                    string uId = userId.Trim();
+                    if (!TryClaimNickname(cleanSender, uId, isHost: false, out _)) {
+                        int counter = 2;
+                        string candidate = $"{cleanSender} #{counter}";
+                        while (_claimedNicknames.TryGetValue(candidate, out var existingOwner) && !existingOwner.Equals(uId, StringComparison.OrdinalIgnoreCase)) {
+                            counter++;
+                            candidate = $"{cleanSender} #{counter}";
+                        }
+                        cleanSender = candidate;
+                        _claimedNicknames[cleanSender] = uId;
+                    }
+                } else if (isHost) {
+                    _claimedNicknames[cleanSender] = "host";
+                    _reservedHostNames.Add(cleanSender);
+                }
             }
 
             string cleanText = string.IsNullOrWhiteSpace(text) ? "" : text.Trim();
