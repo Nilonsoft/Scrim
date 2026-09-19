@@ -1,6 +1,6 @@
 # Scrim Plugin Development Guide
 
-The Scrim Plugin API allows developers to create custom logic and Blazor components that are dynamically loaded into the Scrim dashboard as draggable UI cards. These plugins can tap into the underlying broadcast pipeline to visualize audio, control streams, or interface with external APIs.
+The Scrim Plugin API allows developers to create custom logic and Blazor components that are dynamically loaded into the Scrim dashboard as draggable UI cards. These plugins can tap into the underlying broadcast pipeline to visualize audio, control streams, read current active profile configurations, or interface with external APIs.
 
 ## Where Do Plugins Go?
 
@@ -19,7 +19,25 @@ Create a new .NET Class Library project targeting the same framework as Scrim (`
 
 Reference the `Scrim.dll` assembly or the relevant interfaces in your project.
 
-### 2. Implement the `IScrimPlugin` Interface
+### 2. The `IScrimHost` Extensibility API
+
+During initialization, your plugin will be provided an `IScrimHost` object. This interface grants access to the core services of Scrim:
+
+```csharp
+public interface IScrimHost {
+    BroadcastHub Broadcast { get; }
+    IMetadataService Metadata { get; }
+    IProfileManager ProfileManager { get; }
+    SongRequestController SongRequests { get; }
+}
+```
+
+- **`Broadcast`**: Allows you to check the `ActiveClientCount` or hook into stream events.
+- **`Metadata`**: Allows you to retrieve the `CurrentMetadata` (Track, Artist, Album Art) resolving from the active window.
+- **`ProfileManager`**: Retrieve the `CurrentProfile` to see what AudioFormat, Bitrate, and PID are currently being broadcasted.
+- **`SongRequests`**: Access the live `GetLiveQueue()` to build visualizers, integrations (like Twitch Chat), or automatic song responders.
+
+### 3. Implement the `IScrimPlugin` Interface
 
 The core of any plugin is a class that implements `IScrimPlugin`.
 
@@ -32,8 +50,11 @@ namespace MyCustomPlugin {
         public string Version => "1.0.0";
         public string Author => "DJ John Doe";
 
-        public void Initialize() {
-            // Setup hooks, background workers, or inject dependencies here
+        private IScrimHost _host;
+
+        public void Initialize(IScrimHost host) {
+            _host = host;
+            // E.g. Check active users: int listeners = _host.Broadcast.ActiveClientCount;
         }
 
         public void Shutdown() {
@@ -43,7 +64,7 @@ namespace MyCustomPlugin {
 }
 ```
 
-### 3. Creating a Custom UI Card (Optional)
+### 4. Creating a Custom UI Card (Optional)
 
 If you want your plugin to add a custom card to the Scrim drag-and-drop dashboard, you need to:
 
@@ -64,7 +85,7 @@ namespace MyCustomPlugin {
         public string CardTitle => "Visualizer Module";
         public Type ComponentType => typeof(MyCustomCardComponent);
 
-        public void Initialize() { }
+        public void Initialize(IScrimHost host) { }
         public void Shutdown() { }
     }
 }
@@ -72,6 +93,6 @@ namespace MyCustomPlugin {
 
 *Note: Your `MyCustomCardComponent.razor` should ideally follow the aesthetic guidelines in the specification (dark background, #181818 cards).*
 
-### 4. Build and Deploy
+### 5. Build and Deploy
 
 Compile your class library. Take the resulting `MyCustomPlugin.dll` (and any related dependencies) and drop them into the Scrim `Plugins/` folder. Restart Scrim, and your plugin card will automatically appear in the right column of the dashboard!

@@ -6,7 +6,7 @@ namespace Scrim.Plugins {
         string Name { get; }
         string Version { get; }
         string Author { get; }
-        void Initialize();
+        void Initialize(IScrimHost host);
         void Shutdown();
     }
 

@@ -10,7 +10,7 @@ $OutputPublishDir = ".\publish"
 
 if ($Clean) {
     Write-Host "Cleaning solution..." -ForegroundColor Cyan
-    dotnet clean ".\src\Scrim.sln"
+    dotnet clean $ProjectPath
     if (Test-Path $OutputPublishDir) {
         Remove-Item -Recurse -Force $OutputPublishDir
     }
@@ -18,12 +18,12 @@ if ($Clean) {
 
 if ($Build) {
     Write-Host "Building solution..." -ForegroundColor Cyan
-    dotnet build ".\src\Scrim.sln" -c Release
+    dotnet build $ProjectPath -c Release
 }
 
 if ($Test) {
     Write-Host "Running tests..." -ForegroundColor Cyan
-    dotnet test ".\src\Scrim.sln" -c Release
+    dotnet test $ProjectPath -c Release
 }
 
 if ($Publish) {
