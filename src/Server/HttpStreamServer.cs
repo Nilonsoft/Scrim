@@ -780,17 +780,43 @@ namespace Scrim.Server {
                     context.Response.ContentType = "application/json; charset=utf-8";
                     context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
                     context.Response.OutputStream.Write(err, 0, err.Length);
-                    context.Response.Close();
                     return;
                 }
 
                 using var reader = new StreamReader(context.Request.InputStream, System.Text.Encoding.UTF8);
                 string body = reader.ReadToEnd();
-                var textMatch = System.Text.RegularExpressions.Regex.Match(body, "\"text\"\\s*:\\s*\"(.*?)\"");
-                var senderMatch = System.Text.RegularExpressions.Regex.Match(body, "\"sender\"\\s*:\\s*\"(.*?)\"");
-                var clientMatch = System.Text.RegularExpressions.Regex.Match(body, "\"clientId\"\\s*:\\s*\"(.*?)\"");
 
-                string rawClientId = clientMatch.Success ? clientMatch.Groups[1].Value : (context.Request.QueryString["clientId"] ?? "");
+                string text = "";
+                string sender = "Anonymous";
+                string rawClientId = "";
+
+                if (!string.IsNullOrWhiteSpace(body)) {
+                    try {
+                        using var doc = System.Text.Json.JsonDocument.Parse(body);
+                        var root = doc.RootElement;
+                        if (root.TryGetProperty("text", out var tProp)) {
+                            text = tProp.GetString() ?? "";
+                        }
+                        if (root.TryGetProperty("sender", out var sProp)) {
+                            sender = sProp.GetString() ?? "Anonymous";
+                        }
+                        if (root.TryGetProperty("clientId", out var cProp)) {
+                            rawClientId = cProp.GetString() ?? "";
+                        }
+                    } catch {
+                        var textMatch = System.Text.RegularExpressions.Regex.Match(body, "\"text\"\\s*:\\s*\"(.*?)\"");
+                        var senderMatch = System.Text.RegularExpressions.Regex.Match(body, "\"sender\"\\s*:\\s*\"(.*?)\"");
+                        var clientMatch = System.Text.RegularExpressions.Regex.Match(body, "\"clientId\"\\s*:\\s*\"(.*?)\"");
+                        if (textMatch.Success) text = textMatch.Groups[1].Value;
+                        if (senderMatch.Success) sender = senderMatch.Groups[1].Value;
+                        if (clientMatch.Success) rawClientId = clientMatch.Groups[1].Value;
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(rawClientId)) {
+                    rawClientId = context.Request.QueryString["clientId"] ?? "";
+                }
+
                 string userHash = ComputeUserHash(context, rawClientId);
 
                 if (_chatService.IsUserBanned(userHash)) {
@@ -799,15 +825,8 @@ namespace Scrim.Server {
                     context.Response.ContentType = "application/json; charset=utf-8";
                     context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
                     context.Response.OutputStream.Write(err, 0, err.Length);
-                    context.Response.Close();
                     return;
                 }
-
-                string text = textMatch.Success ? textMatch.Groups[1].Value : "";
-                string sender = senderMatch.Success ? senderMatch.Groups[1].Value : "Anonymous";
-
-                text = System.Text.RegularExpressions.Regex.Unescape(text);
-                sender = System.Text.RegularExpressions.Regex.Unescape(sender);
 
                 if (!_chatService.IsNicknameAllowed(sender, _profileManager.CurrentProfile.NicknameBlacklist)) {
                     context.Response.StatusCode = 400;
@@ -815,18 +834,23 @@ namespace Scrim.Server {
                     context.Response.ContentType = "application/json; charset=utf-8";
                     context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
                     context.Response.OutputStream.Write(err, 0, err.Length);
-                    context.Response.Close();
                     return;
                 }
 
+                ChatMessage? msg = null;
                 if (!string.IsNullOrWhiteSpace(text)) {
-                    _chatService.AddMessage(sender, text, isHost: false, userId: userHash);
+                    msg = _chatService.AddMessage(sender, text, isHost: false, userId: userHash);
                 }
 
                 context.Response.ContentType = "application/json; charset=utf-8";
                 context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
                 context.Response.StatusCode = 200;
-                byte[] ok = System.Text.Encoding.UTF8.GetBytes("{\"success\":true}");
+
+                string msgJson = msg != null 
+                    ? $"{{\"id\":\"{EscapeJson(msg.Id)}\",\"sender\":\"{EscapeJson(msg.Sender)}\",\"text\":\"{EscapeJson(msg.Text)}\",\"timestamp\":\"{msg.Timestamp:o}\",\"isHost\":false,\"color\":\"{EscapeJson(msg.Color)}\"}}"
+                    : "null";
+
+                byte[] ok = System.Text.Encoding.UTF8.GetBytes($"{{\"success\":true,\"message\":{msgJson}}}");
                 context.Response.OutputStream.Write(ok, 0, ok.Length);
             } catch {
                 context.Response.StatusCode = 400;
@@ -1103,7 +1127,11 @@ namespace Scrim.Server {
 
         private string EscapeJson(string? value) {
             if (string.IsNullOrEmpty(value)) return "";
-            return value.Replace("\\", "\\\\").Replace("\"", "\\\"");
+            return value.Replace("\\", "\\\\")
+                        .Replace("\"", "\\\"")
+                        .Replace("\r", "\\r")
+                        .Replace("\n", "\\n")
+                        .Replace("\t", "\\t");
         }
 
         public void Stop() {

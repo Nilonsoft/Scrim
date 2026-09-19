@@ -1447,10 +1447,11 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     if (chatRulesAgreeBtn) {
-        chatRulesAgreeBtn.addEventListener('click', function () {
+        chatRulesAgreeBtn.addEventListener('click', function (e) {
+            if (e && e.preventDefault) e.preventDefault();
             try {
                 localStorage.setItem('scrim_chat_rules_agreed', 'true');
-            } catch (e) {}
+            } catch (err) {}
             const fn = pendingChatSubmit;
             hideChatRulesModal();
             if (typeof fn === 'function') {
@@ -1580,6 +1581,7 @@ document.addEventListener('DOMContentLoaded', function () {
         });
 
     function submitChatMessage(sender, text) {
+        if (!text) return;
         if (chatSendBtn) chatSendBtn.disabled = true;
 
         fetch('/api/chat', {
@@ -1591,6 +1593,11 @@ document.addEventListener('DOMContentLoaded', function () {
             if (res.ok) {
                 chatMessageInput.value = '';
                 chatMessageInput.focus();
+                return res.json().then(function (data) {
+                    if (data && data.message) {
+                        appendChatMessage(data.message);
+                    }
+                }).catch(function () {});
             } else if (res.status === 403) {
                 return res.json().then(function (errData) {
                     if (errData && errData.isBanned) {
@@ -1601,6 +1608,17 @@ document.addEventListener('DOMContentLoaded', function () {
                 }).catch(function () {
                     setChatStatus(false);
                 });
+            } else if (res.status === 400) {
+                return res.json().then(function (errData) {
+                    const errMsg = (errData && errData.error) ? errData.error : "Message could not be sent.";
+                    if (chatMessageInput) {
+                        const originalPh = chatMessageInput.placeholder;
+                        chatMessageInput.placeholder = `⚠️ ${errMsg}`;
+                        setTimeout(function () {
+                            chatMessageInput.placeholder = originalPh;
+                        }, 4000);
+                    }
+                }).catch(function () {});
             }
         }).catch(function (err) {
             if (chatSendBtn) chatSendBtn.disabled = !isChatEnabled || isUserBanned;
