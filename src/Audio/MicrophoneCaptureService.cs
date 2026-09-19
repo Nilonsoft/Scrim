@@ -67,20 +67,19 @@ namespace Scrim.Audio {
             }
 #pragma warning restore CS0618 // Type or member is obsolete
 
-            // Force 44100Hz 16-bit stereo for uniformity with Loopback
-            _capture.WaveFormat = new WaveFormat(44100, 16, 2);
+            var inFormat = _capture.WaveFormat;
             
             _capture.DataAvailable += (s, a) => {
                 if (a.BytesRecorded > 0) {
-                    byte[] buffer = new byte[a.BytesRecorded];
-                    Array.Copy(a.Buffer, buffer, a.BytesRecorded);
+                    byte[] buffer = ConvertTo16Bit44100Stereo(a.Buffer, a.BytesRecorded, inFormat);
+                    if (buffer.Length == 0) return;
                     
                     var provider = _effectLoader.GetProvider(CurrentEffect);
                     provider?.Process(buffer);
 
                     // Track real-time input peak level for microphone gauge
                     float maxSample = 0f;
-                    for (int i = 0; i < a.BytesRecorded; i += 2) {
+                    for (int i = 0; i < buffer.Length; i += 2) {
                         short sample = BitConverter.ToInt16(buffer, i);
                         float abs = Math.Abs(sample) / 32768.0f;
                         if (abs > maxSample) maxSample = abs;
@@ -116,8 +115,99 @@ namespace Scrim.Audio {
                 }
             };
 
-            _capture.StartRecording();
+            try {
+                _capture.StartRecording();
+            } catch (Exception ex) {
+                Console.WriteLine($"[MicrophoneCaptureService] Failed to start recording: {ex.Message}");
+                _capture.Dispose();
+                _capture = null;
+                return;
+            }
+
             EnsureVirtualPlayback();
+        }
+
+        private static byte[] ConvertTo16Bit44100Stereo(byte[] inBuffer, int bytesRecorded, WaveFormat inFormat) {
+            if (bytesRecorded <= 0 || inBuffer == null) return Array.Empty<byte>();
+
+            int channels = Math.Max(1, inFormat.Channels);
+            int sampleRate = inFormat.SampleRate;
+
+            // Direct pass-through if already 16-bit 44.1kHz stereo
+            if (sampleRate == 44100 && inFormat.BitsPerSample == 16 && channels == 2) {
+                byte[] copy = new byte[bytesRecorded];
+                Buffer.BlockCopy(inBuffer, 0, copy, 0, bytesRecorded);
+                return copy;
+            }
+
+            // Convert float (32-bit) or PCM (16-bit / 24-bit) to 44.1kHz 16-bit stereo
+            bool isFloat = inFormat.Encoding == WaveFormatEncoding.IeeeFloat || inFormat.BitsPerSample == 32;
+            int bytesPerSample = isFloat ? 4 : (inFormat.BitsPerSample / 8);
+            if (bytesPerSample <= 0) bytesPerSample = 2;
+            int bytesPerFrame = channels * bytesPerSample;
+            if (bytesPerFrame <= 0) return Array.Empty<byte>();
+
+            int inFrames = bytesRecorded / bytesPerFrame;
+            if (inFrames <= 0) return Array.Empty<byte>();
+
+            int outFrames = (sampleRate == 44100) ? inFrames : (int)Math.Round(inFrames * 44100.0 / sampleRate);
+            if (outFrames <= 0) return Array.Empty<byte>();
+
+            byte[] outBytes = new byte[outFrames * 4];
+            double ratio = (double)sampleRate / 44100.0;
+
+            for (int j = 0; j < outFrames; j++) {
+                double inIndex = j * ratio;
+                int idx0 = (int)inIndex;
+                double frac = inIndex - idx0;
+                int idx1 = Math.Min(idx0 + 1, inFrames - 1);
+
+                float l0, r0, l1, r1;
+
+                if (isFloat) {
+                    int offset0 = idx0 * bytesPerFrame;
+                    int offset1 = idx1 * bytesPerFrame;
+
+                    l0 = BitConverter.ToSingle(inBuffer, offset0);
+                    r0 = channels >= 2 ? BitConverter.ToSingle(inBuffer, offset0 + 4) : l0;
+
+                    l1 = BitConverter.ToSingle(inBuffer, offset1);
+                    r1 = channels >= 2 ? BitConverter.ToSingle(inBuffer, offset1 + 4) : l1;
+                } else if (inFormat.BitsPerSample == 16) {
+                    int offset0 = idx0 * bytesPerFrame;
+                    int offset1 = idx1 * bytesPerFrame;
+
+                    l0 = BitConverter.ToInt16(inBuffer, offset0) / 32768.0f;
+                    r0 = channels >= 2 ? BitConverter.ToInt16(inBuffer, offset0 + 2) / 32768.0f : l0;
+
+                    l1 = BitConverter.ToInt16(inBuffer, offset1) / 32768.0f;
+                    r1 = channels >= 2 ? BitConverter.ToInt16(inBuffer, offset1 + 2) / 32768.0f : l1;
+                } else {
+                    // 24-bit or other integer PCM fallback
+                    int offset0 = idx0 * bytesPerFrame;
+                    int offset1 = idx1 * bytesPerFrame;
+
+                    l0 = BitConverter.ToInt16(inBuffer, offset0) / 32768.0f;
+                    r0 = channels >= 2 ? BitConverter.ToInt16(inBuffer, offset0 + 2) / 32768.0f : l0;
+
+                    l1 = BitConverter.ToInt16(inBuffer, offset1) / 32768.0f;
+                    r1 = channels >= 2 ? BitConverter.ToInt16(inBuffer, offset1 + 2) / 32768.0f : l1;
+                }
+
+                float l = (float)(l0 * (1.0 - frac) + l1 * frac);
+                float r = (float)(r0 * (1.0 - frac) + r1 * frac);
+
+                short sL = (short)Math.Clamp((int)(l * 32767.0f), short.MinValue, short.MaxValue);
+                short sR = (short)Math.Clamp((int)(r * 32767.0f), short.MinValue, short.MaxValue);
+
+                int outOffset = j * 4;
+                outBytes[outOffset] = (byte)(sL & 0xFF);
+                outBytes[outOffset + 1] = (byte)((sL >> 8) & 0xFF);
+                outBytes[outOffset + 2] = (byte)(sR & 0xFF);
+                outBytes[outOffset + 3] = (byte)((sR >> 8) & 0xFF);
+            }
+
+            return outBytes;
         }
 
         private void EnsureMonitorPlayback() {

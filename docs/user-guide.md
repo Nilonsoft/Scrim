@@ -215,7 +215,21 @@ Synthesized in-memory 44.1kHz stereo audio effects mixed directly into your live
 
 ---
 
-## 11. Console Customization & Profile Persistence
+## 11. Persistent Per-Song Reactions & Session Song History
+
+### Per-Song Reactions & Real-Time Floating Particles
+- **Single Vote with Vote Switching**: Anonymous listeners can vote once per track (`👍 Thumbs Up`, `❤️ Love`, or `👎 Dislike`), click their vote again to undo, or click another emoji to seamlessly switch their vote.
+- **Per-Song Persistence**: Reactions are tracked and persisted per track (`Title::Artist`). When a song is replayed later in a session or across sessions, its accumulated reaction counts and the listener's individual vote are automatically restored on both the web player and broadcaster console.
+- **Host Reaction Moderation**: The station owner can view reactions per track in the console Media Player card and clear counts for individual songs or reset all counts.
+
+### Session Song History & Recently Played Modal
+- **Session History Tracking**: Tracks every unique song played during a broadcast session in reverse-chronological order.
+- **Reaction Badges**: In both the broadcaster console Media Player drawer and the web player's **RECENTLY PLAYED** modal, each track displays its accumulated reaction badges (`👍`, `❤️`, `👎`).
+- **Owner Clear Control**: The host can clear session history at any time with a single click.
+
+---
+
+## 12. Console Customization & Profile Persistence
 
 ### Modular 3-Column Drag & Drop
 - Click **`+ Add / Manage Cards`** to show or hide any of the 11 available studio cards.
@@ -224,10 +238,10 @@ Synthesized in-memory 44.1kHz stereo audio effects mixed directly into your live
   - **📻 Studio (Little-Big-Little)**: 310px left column, flexible center master column, 340px right column.
   - **⚖️ Equal (1fr - 1fr - 1fr)**: Three evenly balanced columns.
 
-### Seamless Persistence in `~/.scrim/`
+### Persistent Audio Routing & Device Settings
 All settings are stored in `C:\Users\<User>\.scrim\Default.json`:
-- Selected audio devices, microphone modes, and virtual routing.
-- Custom card order and column layout.
-- Station branding, show titles, and genre tags.
-- Custom domain URLs and custom soundboard effects.
+- **Selected Application & Process Tracking**: Retains your chosen music application (e.g. `Spotify`, `Chrome`, `Discord`) across song changes and application restarts by tracking process identity rather than temporary song title strings.
+- **Virtual Audio Device Persistence**: If you previously configured `CABLE Input` or a virtual audio cable, Scrim automatically reselects and re-establishes virtual routing on startup.
+- **Clean Microphone & Loopback Resampling**: Universal 44.1kHz 16-bit stereo PCM resampling engine prevents hardware sample rate mismatches (such as 48kHz microphone shared-mode formats or 32-bit floating-point audio) from creating static or crashing the transmitter.
+- Station branding, show titles, genre tags, custom soundboard effects, and card layouts remain consistent across all sessions.
 - **Upgrade-Proof**: Upgrading or reinstalling the Scrim MSI installer never resets or overwrites your personal preferences.

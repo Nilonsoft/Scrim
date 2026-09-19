@@ -997,6 +997,7 @@ document.addEventListener('DOMContentLoaded', function () {
         })
         .catch(function (e) { console.warn("Could not fetch initial metadata", e); });
 
+    let lastTrackKey = "";
     let lastTrackTitle = "";
 
     function updateTrackMetadata(title, artist, album, albumArtUrl, hasArt, duration, position, isPlaying) {
@@ -1006,8 +1007,11 @@ document.addEventListener('DOMContentLoaded', function () {
         const albumSub = document.getElementById('albumSub');
 
         const cleanTitle = (title || "").trim();
-        const trackChanged = (cleanTitle !== "" && cleanTitle !== lastTrackTitle);
+        const cleanArtist = (artist || "").trim();
+        const currentSongKey = cleanTitle + "::" + cleanArtist;
+        const trackChanged = (cleanTitle !== "" && currentSongKey !== lastTrackKey);
         if (cleanTitle !== "") {
+            lastTrackKey = currentSongKey;
             lastTrackTitle = cleanTitle;
         }
         if (trackChanged) {
@@ -1622,9 +1626,21 @@ document.addEventListener('DOMContentLoaded', function () {
     refreshReactionsState();
 
     // Recently Played History Logic & Initial Fetch
+    function fetchSongHistory() {
+        fetch('/api/history').then(function (res) {
+            if (res.ok) return res.json();
+            return null;
+        }).then(function (data) {
+            if (data && Array.isArray(data.history)) {
+                renderSongHistory(data.history);
+            }
+        }).catch(function () {});
+    }
+
     if (historyToggleBtn && historyModal) {
         historyToggleBtn.addEventListener('click', function () {
             historyModal.style.display = 'flex';
+            fetchSongHistory();
         });
     }
 
@@ -1647,6 +1663,8 @@ document.addEventListener('DOMContentLoaded', function () {
             historyModal.style.display = 'none';
         }
     });
+
+    fetchSongHistory();
 
     function renderSongHistory(items) {
         if (!historyItemsList) return;
@@ -1696,13 +1714,52 @@ document.addEventListener('DOMContentLoaded', function () {
             info.appendChild(titleEl);
             info.appendChild(artistEl);
 
+            const rightWrap = document.createElement('div');
+            rightWrap.style.display = 'flex';
+            rightWrap.style.alignItems = 'center';
+            rightWrap.style.gap = '8px';
+            rightWrap.style.whiteSpace = 'nowrap';
+
+            if ((track.thumbsUp || 0) > 0 || (track.heart || 0) > 0 || (track.thumbsDown || 0) > 0) {
+                const reactionsEl = document.createElement('div');
+                reactionsEl.className = 'history-track-reactions';
+                reactionsEl.style.display = 'flex';
+                reactionsEl.style.gap = '6px';
+                reactionsEl.style.alignItems = 'center';
+                reactionsEl.style.fontSize = '11px';
+
+                if ((track.thumbsUp || 0) > 0) {
+                    const upSpan = document.createElement('span');
+                    upSpan.style.color = '#38bdf8';
+                    upSpan.title = 'Thumbs Up';
+                    upSpan.textContent = `👍 ${track.thumbsUp}`;
+                    reactionsEl.appendChild(upSpan);
+                }
+                if ((track.heart || 0) > 0) {
+                    const heartSpan = document.createElement('span');
+                    heartSpan.style.color = '#f43f5e';
+                    heartSpan.title = 'Love';
+                    heartSpan.textContent = `❤️ ${track.heart}`;
+                    reactionsEl.appendChild(heartSpan);
+                }
+                if ((track.thumbsDown || 0) > 0) {
+                    const downSpan = document.createElement('span');
+                    downSpan.style.color = '#94a3b8';
+                    downSpan.title = 'Thumbs Down';
+                    downSpan.textContent = `👎 ${track.thumbsDown}`;
+                    reactionsEl.appendChild(downSpan);
+                }
+                rightWrap.appendChild(reactionsEl);
+            }
+
             const timeEl = document.createElement('div');
             timeEl.className = 'history-track-time';
             timeEl.textContent = track.playedAt || '';
+            rightWrap.appendChild(timeEl);
 
             row.appendChild(thumb);
             row.appendChild(info);
-            row.appendChild(timeEl);
+            row.appendChild(rightWrap);
 
             historyItemsList.appendChild(row);
         });

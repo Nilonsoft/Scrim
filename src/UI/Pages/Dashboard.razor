@@ -370,6 +370,7 @@
     private bool IsLive = false;
     private int ListenerCount => Hub.ActiveClientCount;
     private uint SelectedProcessId = 0;
+    private string SelectedProcessDisplayName = "";
     private string SelectedDeviceId = "";
     private IEnumerable<WindowInfo> Windows = Array.Empty<WindowInfo>();
     private IEnumerable<MicrophoneDevice> Devices = Array.Empty<MicrophoneDevice>();
@@ -497,8 +498,11 @@
 
         // Auto-select target window by saved name/ID if available, or default to system audio
         WindowInfo? initialWin = null;
-        if (!string.IsNullOrEmpty(p.TargetProcessName) && p.TargetProcessId != 0) {
-            initialWin = Windows.FirstOrDefault(w => w.Title.Contains(p.TargetProcessName, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrEmpty(p.TargetProcessName) && !p.TargetProcessName.Equals("System Audio", StringComparison.OrdinalIgnoreCase)) {
+            initialWin = Windows.FirstOrDefault(w => string.Equals(w.ProcessName, p.TargetProcessName, StringComparison.OrdinalIgnoreCase));
+            if (initialWin == null) {
+                initialWin = Windows.FirstOrDefault(w => w.Title.Contains(p.TargetProcessName, StringComparison.OrdinalIgnoreCase));
+            }
         }
         if (initialWin == null && p.TargetProcessId > 0) {
             initialWin = Windows.FirstOrDefault(w => w.ProcessId == (uint)p.TargetProcessId);
@@ -506,10 +510,27 @@
 
         if (initialWin != null) {
             SelectedProcessId = initialWin.ProcessId;
+            SelectedProcessDisplayName = !string.IsNullOrEmpty(initialWin.ProcessName) ? initialWin.ProcessName : initialWin.Title;
+            MetadataService.StartMonitoring(SelectedProcessId);
             EnsureAudioMonitoring(SelectedProcessId);
         } else {
             SelectedProcessId = 0;
+            SelectedProcessDisplayName = "System Audio";
             EnsureAudioMonitoring(0);
+        }
+
+        // Restore and ensure Virtual Cable routing if previously configured
+        if (!string.IsNullOrEmpty(p.CaptureDeviceId)) {
+            if (!RenderDevices.Any(d => d.Id == p.CaptureDeviceId)) {
+                if (IsVbCableInstalled && !string.IsNullOrEmpty(VbCableDeviceId)) {
+                    p.CaptureDeviceId = VbCableDeviceId;
+                    ProfileManager.SaveProfile(p);
+                } else if (IsVirtualDeviceReady && !string.IsNullOrEmpty(DetectedVirtualDeviceId)) {
+                    p.CaptureDeviceId = DetectedVirtualDeviceId;
+                    ProfileManager.SaveProfile(p);
+                }
+            }
+            MicService.SetVirtualOutputDevice(p.CaptureDeviceId);
         }
 
         Mixer.AppVolume = (float)ProfileManager.CurrentProfile.AppStreamVolume / 100f;
@@ -571,18 +592,18 @@
     }
 
     private void OnProcessChanged() {
-        EnsureAudioMonitoring(SelectedProcessId);
         if (SelectedProcessId != 0) {
             MetadataService.StartMonitoring(SelectedProcessId);
 
             var win = Windows.FirstOrDefault(w => w.ProcessId == SelectedProcessId);
             ProfileManager.CurrentProfile.TargetProcessId = (int)SelectedProcessId;
-            if (win != null && !string.IsNullOrEmpty(win.Title)) {
-                ProfileManager.CurrentProfile.TargetProcessName = win.Title;
+            if (win != null) {
+                SelectedProcessDisplayName = !string.IsNullOrEmpty(win.ProcessName) ? win.ProcessName : win.Title;
+                ProfileManager.CurrentProfile.TargetProcessName = SelectedProcessDisplayName;
             }
             ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
-
         } else {
+            SelectedProcessDisplayName = "System Audio";
             ProfileManager.CurrentProfile.TargetProcessId = 0;
             ProfileManager.CurrentProfile.TargetProcessName = "System Audio";
             ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
@@ -725,6 +746,19 @@
                 !newWindows.Select(w => (w.ProcessId, w.Title)).SequenceEqual(Windows.Select(w => (w.ProcessId, w.Title)));
             if (changed) {
                 Windows = newWindows;
+                var savedName = ProfileManager.CurrentProfile.TargetProcessName;
+                if (!string.IsNullOrEmpty(savedName) && !savedName.Equals("System Audio", StringComparison.OrdinalIgnoreCase)) {
+                    if (SelectedProcessId == 0 || !Windows.Any(w => w.ProcessId == SelectedProcessId)) {
+                        var reconnected = Windows.FirstOrDefault(w => string.Equals(w.ProcessName, savedName, StringComparison.OrdinalIgnoreCase))
+                                       ?? Windows.FirstOrDefault(w => w.Title.Contains(savedName, StringComparison.OrdinalIgnoreCase));
+                        if (reconnected != null) {
+                            SelectedProcessId = reconnected.ProcessId;
+                            SelectedProcessDisplayName = !string.IsNullOrEmpty(reconnected.ProcessName) ? reconnected.ProcessName : reconnected.Title;
+                            EnsureAudioMonitoring(SelectedProcessId);
+                            MetadataService.StartMonitoring(SelectedProcessId);
+                        }
+                    }
+                }
             }
         } catch { }
     }
@@ -1517,8 +1551,11 @@
             
             <div style="margin-bottom: 14px;">
                 <label class="scrim-label">Application Window</label>
-                <select class="scrim-select" @bind="SelectedProcessId" @bind:after="OnProcessChanged" @onfocus="ForceRefreshWindows" @onclick="ForceRefreshWindows">
+                <select class="scrim-select" @bind="SelectedProcessId" @bind:after="OnProcessChanged">
                     <option value="0">System Audio (All Apps / Master Desktop Mix)</option>
+                    @if (SelectedProcessId != 0 && !Windows.Any(w => w.ProcessId == SelectedProcessId)) {
+                        <option value="@SelectedProcessId">@(string.IsNullOrEmpty(SelectedProcessDisplayName) ? "Selected Application" : SelectedProcessDisplayName)</option>
+                    }
                     @foreach (var w in Windows) {
                         <option value="@w.ProcessId">@w.Title</option>
                     }
@@ -2055,6 +2092,7 @@
                                 <div style="font-size: 11px; color: #64748b; text-align: center; padding: 10px 0;">No songs played yet this session.</div>
                             } else {
                                 @foreach (var item in HistoryService.GetHistory(100)) {
+                                    var songReactions = ReactionService.GetSongReactions(item.Title, item.Artist);
                                     <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 6px; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 11px; gap: 8px;">
                                         <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;">
                                             <span style="color: #e2e8f0; font-weight: 500;">@item.Title</span>
@@ -2062,7 +2100,14 @@
                                                 <span style="color: #8e95a5; margin-left: 4px;">— @item.Artist</span>
                                             }
                                         </div>
-                                        <span style="color: #64748b; font-size: 10px; white-space: nowrap;">@item.PlayedAtFormatted</span>
+                                        <div style="display: flex; gap: 6px; align-items: center; font-size: 10px; white-space: nowrap;">
+                                            @if (songReactions.ThumbsUp > 0 || songReactions.Heart > 0 || songReactions.ThumbsDown > 0) {
+                                                <span style="color: #38bdf8;" title="Thumbs Up">👍 @songReactions.ThumbsUp</span>
+                                                <span style="color: #f43f5e;" title="Love">❤️ @songReactions.Heart</span>
+                                                <span style="color: #94a3b8;" title="Thumbs Down">👎 @songReactions.ThumbsDown</span>
+                                            }
+                                            <span style="color: #64748b;">@item.PlayedAtFormatted</span>
+                                        </div>
                                     </div>
                                 }
                             }

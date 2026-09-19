@@ -217,6 +217,44 @@ namespace Scrim.Tests {
             try { File.Delete(tempStorage); } catch { }
         }
 
+        [Fact]
+        public void ReplayingSong_RestoresAccumulatedReactionsAndUserVotes() {
+            var tempStorage = Path.Combine(Path.GetTempPath(), $"scrim_test_{Guid.NewGuid():N}.json");
+            var mockMeta = new MockMetadataService();
+            var service = new SongReactionService(mockMeta, storagePath: tempStorage);
+
+            // 1. Play Song 1: user A gives thumbs_up, user B gives heart
+            mockMeta.TriggerTrackChange("Song Alpha", "Artist A");
+            service.AddOrSwitchReaction("client_A", "thumbs_up", out _);
+            service.AddOrSwitchReaction("client_B", "heart", out _);
+
+            Assert.Equal(1, service.CurrentCounts.ThumbsUp);
+            Assert.Equal(1, service.CurrentCounts.Heart);
+            Assert.Equal("thumbs_up", service.GetUserReaction("client_A"));
+            Assert.Equal("heart", service.GetUserReaction("client_B"));
+
+            // 2. Transition to Song 2: Song 2 has 0 reactions initially
+            mockMeta.TriggerTrackChange("Song Beta", "Artist B");
+            Assert.Equal(0, service.CurrentCounts.ThumbsUp);
+            Assert.Equal(0, service.CurrentCounts.Heart);
+            Assert.Null(service.GetUserReaction("client_A"));
+
+            // 3. User A votes thumbs_down on Song 2
+            service.AddOrSwitchReaction("client_A", "thumbs_down", out _);
+            Assert.Equal(1, service.CurrentCounts.ThumbsDown);
+            Assert.Equal("thumbs_down", service.GetUserReaction("client_A"));
+
+            // 4. Replay Song 1: Reactions and user votes must be restored!
+            mockMeta.TriggerTrackChange("Song Alpha", "Artist A");
+            Assert.Equal(1, service.CurrentCounts.ThumbsUp);
+            Assert.Equal(1, service.CurrentCounts.Heart);
+            Assert.Equal(0, service.CurrentCounts.ThumbsDown);
+            Assert.Equal("thumbs_up", service.GetUserReaction("client_A"));
+            Assert.Equal("heart", service.GetUserReaction("client_B"));
+
+            try { File.Delete(tempStorage); } catch { }
+        }
+
         private class MockMetadataService : IMetadataService {
             public MediaMetadata CurrentMetadata { get; private set; } = new MediaMetadata { Title = "Initial Song", Artist = "Artist 1" };
             public event EventHandler<MediaMetadata>? MetadataChanged;

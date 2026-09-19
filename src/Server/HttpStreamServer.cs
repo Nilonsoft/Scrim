@@ -220,18 +220,19 @@ namespace Scrim.Server {
                     bool hasConnectionHeader = false;
                     var rawLines = headerText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
                     var validLines = rawLines.Where(l => !string.IsNullOrEmpty(l)).ToList();
+                    bool isStreamOrSse = validLines.Count > 0 && (validLines[0].Contains("/api/events") || validLines[0].Contains("/stream") || validLines[0].Contains("/live"));
 
                     for (int i = 0; i < validLines.Count; i++) {
                         if (validLines[i].StartsWith("Host:", StringComparison.OrdinalIgnoreCase)) {
                             originalHost = validLines[i].Substring(5).Trim();
                             validLines[i] = $"Host: 127.0.0.1:{internalPort}";
-                        } else if (validLines[i].StartsWith("Connection:", StringComparison.OrdinalIgnoreCase)) {
+                        } else if (validLines[i].StartsWith("Connection:", StringComparison.OrdinalIgnoreCase) && !isStreamOrSse) {
                             validLines[i] = "Connection: close";
                             hasConnectionHeader = true;
                         }
                     }
 
-                    if (!hasConnectionHeader) {
+                    if (!hasConnectionHeader && !isStreamOrSse) {
                         validLines.Add("Connection: close");
                     }
                     if (!string.IsNullOrEmpty(originalHost)) {
@@ -747,7 +748,8 @@ namespace Scrim.Server {
             var elements = items.Select(item => {
                 string artUrl = !string.IsNullOrEmpty(item.AlbumArtUrl) ? item.AlbumArtUrl : "";
                 bool hasArt = !string.IsNullOrEmpty(artUrl) || (item.AlbumArt != null && item.AlbumArt.Length > 0);
-                return $"{{\"id\":\"{item.Id}\",\"title\":\"{EscapeJson(item.Title)}\",\"artist\":\"{EscapeJson(item.Artist)}\",\"album\":\"{EscapeJson(item.Album)}\",\"playedAt\":\"{EscapeJson(item.PlayedAtFormatted)}\",\"hasArt\":{(hasArt ? "true" : "false")},\"albumArtUrl\":\"{EscapeJson(artUrl)}\"}}";
+                var counts = _reactionService.GetSongReactions(item.Title, item.Artist);
+                return $"{{\"id\":\"{item.Id}\",\"title\":\"{EscapeJson(item.Title)}\",\"artist\":\"{EscapeJson(item.Artist)}\",\"album\":\"{EscapeJson(item.Album)}\",\"playedAt\":\"{EscapeJson(item.PlayedAtFormatted)}\",\"hasArt\":{(hasArt ? "true" : "false")},\"albumArtUrl\":\"{EscapeJson(artUrl)}\",\"thumbsUp\":{counts.ThumbsUp},\"thumbsDown\":{counts.ThumbsDown},\"heart\":{counts.Heart}}}";
             });
             return "[" + string.Join(",", elements) + "]";
         }
