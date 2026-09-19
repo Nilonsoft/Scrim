@@ -19,6 +19,23 @@ namespace Scrim.Configuration {
         public string AccentColor { get; set; } = "#ef4444";
         public string LogoUrl { get; set; } = "";
         public string NavLinks { get; set; } = "Discover,Schedule,Shows,About";
+
+        public System.Collections.Generic.List<WebNavLink> CustomNavLinks { get; set; } = new() {
+            new WebNavLink { Label = "Discover", Url = "#discover" },
+            new WebNavLink { Label = "Schedule", Url = "#schedule" },
+            new WebNavLink { Label = "Shows", Url = "#shows" },
+            new WebNavLink { Label = "About", Url = "#about" }
+        };
+
+        // Layout Customization & Card Arrangement
+        public System.Collections.Generic.List<string> LeftColumnCards { get; set; } = new() { "card-audio-routing", "card-playlist", "card-web-branding" };
+        public System.Collections.Generic.List<string> CenterColumnCards { get; set; } = new() { "card-vu-talk", "card-voice-fx", "card-queue" };
+        public System.Collections.Generic.List<string> RightColumnCards { get; set; } = new() { "card-encoding", "card-media-player", "card-soundboard" };
+    }
+
+    public class WebNavLink {
+        public string Label { get; set; } = "";
+        public string Url { get; set; } = "";
     }
 
     public enum CloseToTrayMode {

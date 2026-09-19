@@ -96,7 +96,23 @@ document.addEventListener('DOMContentLoaded', function () {
             document.documentElement.style.setProperty('--on-air-glow', `0 0 20px ${branding.accentColor}88`);
         }
 
-        if (branding.navLinks) {
+        if (branding.customNavLinks && Array.isArray(branding.customNavLinks) && branding.customNavLinks.length > 0) {
+            const navContainer = document.getElementById('navLinksContainer');
+            if (navContainer) {
+                navContainer.innerHTML = '';
+                branding.customNavLinks.forEach(link => {
+                    const a = document.createElement('a');
+                    a.href = link.url || '#';
+                    if (link.url && (link.url.startsWith('http://') || link.url.startsWith('https://'))) {
+                        a.target = '_blank';
+                        a.rel = 'noopener noreferrer';
+                    }
+                    a.className = 'nav-link';
+                    a.textContent = link.label;
+                    navContainer.appendChild(a);
+                });
+            }
+        } else if (branding.navLinks) {
             const navContainer = document.getElementById('navLinksContainer');
             if (navContainer) {
                 const links = branding.navLinks.split(',').map(s => s.trim()).filter(Boolean);

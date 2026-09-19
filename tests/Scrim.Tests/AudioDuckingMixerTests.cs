@@ -73,5 +73,41 @@ namespace Scrim.Tests {
             
             cts.Cancel();
         }
+
+        [Fact]
+        public void MicControlMode_PushToMute_TogglesMuteState() {
+            var mixer = new AudioDuckingMixer();
+            mixer.ControlMode = MicControlMode.PushToMute;
+            
+            // In PushToMute, mic is open by default
+            Assert.True(mixer.IsMicLive);
+            
+            // Toggle mute
+            mixer.IsToggleMuted = true;
+            Assert.False(mixer.IsMicLive);
+            
+            // Push to mute active
+            mixer.IsToggleMuted = false;
+            mixer.PushToMuteActive = true;
+            Assert.False(mixer.IsMicLive);
+        }
+
+        [Fact]
+        public void MicControlMode_PushToTalk_TogglesTalkState() {
+            var mixer = new AudioDuckingMixer();
+            mixer.ControlMode = MicControlMode.PushToTalk;
+            
+            // In PushToTalk, mic is muted by default
+            Assert.False(mixer.IsMicLive);
+            
+            // Latch / toggle live
+            mixer.LatchActive = true;
+            Assert.True(mixer.IsMicLive);
+            
+            // Push to talk active
+            mixer.LatchActive = false;
+            mixer.PushToTalkActive = true;
+            Assert.True(mixer.IsMicLive);
+        }
     }
 }

@@ -4,6 +4,11 @@ using System.Threading.Channels;
 using System.Threading.Tasks;
 
 namespace Scrim.Audio {
+    public enum MicControlMode {
+        PushToTalk,
+        PushToMute
+    }
+
     public class AudioDuckingMixer {
         private readonly Channel<byte[]> _mixedOutput;
         private readonly double _duckingGain = Math.Pow(10, -14.0 / 20.0); // -14 dB
@@ -17,6 +22,19 @@ namespace Scrim.Audio {
 
         public bool PushToTalkActive { get; set; }
         public bool LatchActive { get; set; }
+        public bool PushToMuteActive { get; set; }
+        public bool IsToggleMuted { get; set; }
+        public MicControlMode ControlMode { get; set; } = MicControlMode.PushToTalk;
+
+        public bool IsMicLive {
+            get {
+                if (ControlMode == MicControlMode.PushToMute) {
+                    return !IsToggleMuted && !PushToMuteActive;
+                } else {
+                    return LatchActive || PushToTalkActive;
+                }
+            }
+        }
 
         public ChannelReader<byte[]> MixedStream => _mixedOutput.Reader;
 
@@ -46,11 +64,11 @@ namespace Scrim.Audio {
             // Both are assumed 16-bit stereo PCM
             byte[] outBuffer = new byte[appBuffer.Length];
             
-            bool micActive = PushToTalkActive || LatchActive;
+            bool micActive = IsMicLive;
             
             // Check noise gate
             double rms = CalculateRms(micBuffer);
-            if (rms > _noiseGateThreshold) {
+            if (ControlMode == MicControlMode.PushToTalk && !micActive && rms > _noiseGateThreshold) {
                 micActive = true;
             }
 
@@ -58,7 +76,7 @@ namespace Scrim.Audio {
 
             for (int i = 0; i < appBuffer.Length; i += 2) {
                 short appSample = BitConverter.ToInt16(appBuffer, i);
-                short micSample = BitConverter.ToInt16(micBuffer, i);
+                short micSample = micActive ? BitConverter.ToInt16(micBuffer, i) : (short)0;
 
                 // Smooth gain
                 if (_currentGain > targetGain) {
