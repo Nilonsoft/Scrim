@@ -1286,10 +1286,12 @@
         Task.Run(() => {
             try {
                 var (wav, pcmStereo) = GenerateSound(soundName);
-                Mixer.PlaySoundEffect(pcmStereo);
+                if (SelectedProcessId != 0) {
+                    Mixer.PlaySoundEffect(pcmStereo);
+                }
                 using var ms = new MemoryStream(wav);
                 using var sp = new System.Media.SoundPlayer(ms);
-                sp.Play();
+                sp.PlaySync();
             } catch { }
         });
     }
@@ -1299,11 +1301,11 @@
             try {
                 if (File.Exists(sound.FilePath)) {
                     byte[]? pcm = LoadWavToPcm16Stereo44100(sound.FilePath);
-                    if (pcm != null && pcm.Length > 0) {
+                    if (pcm != null && pcm.Length > 0 && SelectedProcessId != 0) {
                         Mixer.PlaySoundEffect(pcm);
                     }
                     using var sp = new System.Media.SoundPlayer(sound.FilePath);
-                    sp.Play();
+                    sp.PlaySync();
                 }
             } catch { }
         });
