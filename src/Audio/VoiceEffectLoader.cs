@@ -20,6 +20,7 @@ namespace Scrim.Audio {
 
             // Load Built-Ins
             RegisterBuiltIn("normal", "Normal", VoiceEffect.Normal);
+            RegisterBuiltIn("anime_girl", "Anime Girl", VoiceEffect.AnimeGirl);
             RegisterBuiltIn("woman", "Woman", VoiceEffect.Woman);
             RegisterBuiltIn("man", "Man", VoiceEffect.Man);
             RegisterBuiltIn("robot", "Robot", VoiceEffect.Robot);

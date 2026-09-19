@@ -5,6 +5,7 @@ namespace Scrim.Audio {
         Radio,
         Alien,
         Woman,
-        Man
+        Man,
+        AnimeGirl
     }
 }

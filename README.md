@@ -17,6 +17,7 @@ Scrim relies on **FFmpeg** to encode audio streams on the fly into MP3, AAC, or 
 ## Voice Changers & Processing FX
 
 Scrim includes built-in real-time DSP voice changers with dual-tap granular pitch shifting and vocal formant filtering:
+- **Anime Girl**: High-pitch shift (+7.2 semitones, 1.52x ratio) with chest resonance high-pass cut (<320Hz) and sparkling presence boost (3.5kHz - 8kHz) for a cute anime heroine vocal tone.
 - **Woman**: Shifts vocal fundamental frequency up (+4.2 semitones) and filters low-end rumble for a clear, natural feminine tone.
 - **Man**: Shifts pitch down (-4.5 semitones) and shapes low-mid chest resonance for a deep baritone broadcast voice.
 - **Robot**: 50Hz metallic ring modulation.

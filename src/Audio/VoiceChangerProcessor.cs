@@ -19,6 +19,9 @@ namespace Scrim.Audio {
         private double _womanHpL = 0, _womanHpR = 0;
         private double _womanPrevL = 0, _womanPrevR = 0;
         private double _manLpL = 0, _manLpR = 0;
+        private double _animeHpL = 0, _animeHpR = 0;
+        private double _animePrevL = 0, _animePrevR = 0;
+        private double _animeLpL = 0, _animeLpR = 0;
 
         public void Process(byte[] buffer, VoiceEffect effect) {
             if (effect == VoiceEffect.Normal) return;
@@ -26,7 +29,7 @@ namespace Scrim.Audio {
             // Assume 44.1kHz sample rate
             double sampleRate = 44100.0;
 
-            if (effect == VoiceEffect.Woman || effect == VoiceEffect.Man) {
+            if (effect == VoiceEffect.Woman || effect == VoiceEffect.Man || effect == VoiceEffect.AnimeGirl) {
                 ProcessPitchShift(buffer, effect);
                 return;
             }
@@ -72,8 +75,12 @@ namespace Scrim.Audio {
         }
 
         private void ProcessPitchShift(byte[] buffer, VoiceEffect effect) {
-            // Target pitch ratios: Woman ~ +4.2 semitones (1.28), Man ~ -4.5 semitones (0.77)
-            double pitchRatio = (effect == VoiceEffect.Woman) ? 1.28 : 0.77;
+            // Target pitch ratios: Anime Girl ~ +7.2 semitones (1.52), Woman ~ +4.2 semitones (1.28), Man ~ -4.5 semitones (0.77)
+            double pitchRatio = effect switch {
+                VoiceEffect.AnimeGirl => 1.52,
+                VoiceEffect.Woman => 1.28,
+                _ => 0.77
+            };
             double phaseDelta = (1.0 - pitchRatio) / WindowSize;
 
             bool isStereo = buffer.Length >= 4 && (buffer.Length % 4 == 0);
@@ -113,7 +120,22 @@ namespace Scrim.Audio {
                 double outR = isStereo ? (ReadInterpolated(_delayR, readPos1) * w1) + (ReadInterpolated(_delayR, readPos2) * w2) : outL;
 
                 // Vocal tract formant and spectral shaping
-                if (effect == VoiceEffect.Woman) {
+                if (effect == VoiceEffect.AnimeGirl) {
+                    // Anime Girl: High-pass (<320Hz) strips chest rumble, high-shelf adds cute sparkling presence
+                    _animeHpL = 0.89 * (_animeHpL + outL - _animePrevL);
+                    _animePrevL = outL;
+                    _animeLpL = _animeLpL + 0.40 * (outL - _animeLpL);
+                    double trebleL = outL - _animeLpL;
+                    outL = (_animeHpL * 0.85 + trebleL * 0.50) * 1.25;
+
+                    if (isStereo) {
+                        _animeHpR = 0.89 * (_animeHpR + outR - _animePrevR);
+                        _animePrevR = outR;
+                        _animeLpR = _animeLpR + 0.40 * (outR - _animeLpR);
+                        double trebleR = outR - _animeLpR;
+                        outR = (_animeHpR * 0.85 + trebleR * 0.50) * 1.25;
+                    }
+                } else if (effect == VoiceEffect.Woman) {
                     // High-pass filter removes chest rumble (<200Hz) and boosts feminine presence/clarity
                     _womanHpL = 0.92 * (_womanHpL + outL - _womanPrevL);
                     _womanPrevL = outL;

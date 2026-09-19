@@ -73,9 +73,11 @@ namespace Scrim.Audio {
                 var token = _mixingCts.Token;
 
                 Task.Run(async () => {
-                    // Standard 20ms keepalive chunk at 44.1kHz 16-bit stereo (882 samples * 4 bytes = 3528 bytes)
+                    // Standard keepalive chunk at 44.1kHz 16-bit stereo (882 samples * 4 bytes = 3528 bytes = 20ms)
                     const int KeepaliveBytes = 3528;
                     byte[] silentFrame = new byte[KeepaliveBytes];
+                    var micQueue = new System.Collections.Generic.Queue<byte>();
+                    bool wasSilent = false;
 
                     while (!token.IsCancellationRequested) {
                         byte[]? appBuffer = null;
@@ -84,22 +86,52 @@ namespace Scrim.Audio {
                         if (appAudio.TryRead(out var directBuf)) {
                             appBuffer = directBuf;
                         } else {
-                            // Wait up to 20ms for incoming app audio so the stream never stalls during pause or silence
-                            using var timeoutCts = new CancellationTokenSource(20);
+                            // Wait up to 350ms for normal playback packet arrival before generating keepalive silence.
+                            // This prevents temporary thread scheduling jitter from prematurely injecting silence holes into ongoing audio.
+                            using var timeoutCts = new CancellationTokenSource(350);
                             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(token, timeoutCts.Token);
                             try {
                                 appBuffer = await appAudio.ReadAsync(linkedCts.Token);
                             } catch (OperationCanceledException) {
                                 if (token.IsCancellationRequested) break;
-                                // 20ms timeout elapsed: generate keepalive silence
+                                // 350ms elapsed with zero incoming packets: application is paused or silent
                                 appBuffer = silentFrame;
+                                wasSilent = true;
                             }
                         }
 
                         if (appBuffer != null && appBuffer.Length > 0) {
+                            // Smooth micro-ramp (1ms = 44 samples) when transitioning from silence to audio
+                            // to eliminate any DC offset step discontinuity / pop artifact
+                            if (wasSilent && appBuffer != silentFrame) {
+                                wasSilent = false;
+                                int rampSamples = Math.Min(44, appBuffer.Length / 4);
+                                for (int s = 0; s < rampSamples; s++) {
+                                    float ramp = (float)s / rampSamples;
+                                    int idx = s * 4;
+                                    short sampleL = (short)(BitConverter.ToInt16(appBuffer, idx) * ramp);
+                                    short sampleR = (short)(BitConverter.ToInt16(appBuffer, idx + 2) * ramp);
+                                    byte[] bL = BitConverter.GetBytes(sampleL);
+                                    byte[] bR = BitConverter.GetBytes(sampleR);
+                                    appBuffer[idx] = bL[0];
+                                    appBuffer[idx + 1] = bL[1];
+                                    appBuffer[idx + 2] = bR[0];
+                                    appBuffer[idx + 3] = bR[1];
+                                }
+                            }
+
+                            // Buffer incoming microphone packets continuously without dropping residual bytes
+                            while (micAudio.TryRead(out var mBuf)) {
+                                for (int b = 0; b < mBuf.Length; b++) {
+                                    micQueue.Enqueue(mBuf[b]);
+                                }
+                            }
+
+                            // Extract matching amount of microphone audio for this mixing frame
                             byte[] micBuffer = new byte[appBuffer.Length];
-                            if (micAudio.TryRead(out var mBuf)) {
-                                Array.Copy(mBuf, micBuffer, Math.Min(mBuf.Length, micBuffer.Length));
+                            int micBytesToCopy = Math.Min(micQueue.Count, appBuffer.Length);
+                            for (int b = 0; b < micBytesToCopy; b++) {
+                                micBuffer[b] = micQueue.Dequeue();
                             }
 
                             ProcessMix(appBuffer, micBuffer);

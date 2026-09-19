@@ -91,10 +91,13 @@ namespace Scrim.Audio {
             // AUDCLNT_STREAMFLAGS_LOOPBACK (0x00020000) | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM (0x80000000) | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY (0x08000000)
             uint streamFlags = 0x00020000 | 0x80000000 | 0x08000000;
 
+            // 100ms buffer in 100-nanosecond units (100 * 10000 = 1,000,000 hns) prevents WASAPI buffer overruns under system load
+            const long BufferDuration100Ms = 1000000L;
+
             int initResult = _audioClient.Initialize(
                 0, // AUDCLNT_SHAREMODE_SHARED
                 streamFlags,
-                0, 
+                BufferDuration100Ms, 
                 0,
                 ref format,
                 ref sessionGuid);
@@ -103,7 +106,7 @@ namespace Scrim.Audio {
                 initResult = _audioClient.Initialize(
                     0,
                     0x00020000,
-                    0,
+                    BufferDuration100Ms,
                     0,
                     ref format,
                     ref sessionGuid);
@@ -118,7 +121,21 @@ namespace Scrim.Audio {
             if (svcResult >= 0 && pCaptureClient != nint.Zero) {
                 _captureClient = (IAudioCaptureClient)Marshal.GetObjectForIUnknown(pCaptureClient);
                 _audioClient.Start();
-                _captureTask = Task.Run(() => CaptureLoop(_cts!.Token));
+                
+                var tcs = new TaskCompletionSource();
+                var thread = new Thread(() => {
+                    try {
+                        CaptureLoop(_cts!.Token);
+                    } finally {
+                        tcs.TrySetResult();
+                    }
+                }) {
+                    IsBackground = true,
+                    Priority = ThreadPriority.AboveNormal,
+                    Name = "ScrimLoopbackCaptureThread"
+                };
+                thread.Start();
+                _captureTask = tcs.Task;
             }
 
             return 0;
@@ -129,13 +146,13 @@ namespace Scrim.Audio {
             try {
                 while (!token.IsCancellationRequested) {
                     if (_captureClient == null) {
-                        Thread.Sleep(5);
+                        Thread.Sleep(2);
                         continue;
                     }
 
                     _captureClient.GetNextPacketSize(out uint packetLength);
                     if (packetLength == 0) {
-                        Thread.Sleep(2);
+                        Thread.Sleep(1);
                         continue;
                     }
 

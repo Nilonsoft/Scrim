@@ -107,10 +107,7 @@ public partial class MainWindow : Window
 
     private void Window_StateChanged(object sender, EventArgs e)
     {
-        if (this.WindowState == WindowState.Minimized)
-        {
-            this.Hide();
-        }
+        // Minimize stays visible on the Windows taskbar; closing (X) closes to tray.
     }
 
     private void TrayIcon_TrayMouseDoubleClick(object sender, RoutedEventArgs e)
