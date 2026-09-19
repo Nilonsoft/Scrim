@@ -80,6 +80,7 @@ namespace Scrim.Audio {
                     const int KeepaliveBytes = 3528;
                     byte[] silentFrame = new byte[KeepaliveBytes];
                     var micQueue = new System.Collections.Generic.Queue<byte>();
+                    long lastAppPacketTicks = 0;
                     bool wasSilent = false;
 
                     while (!token.IsCancellationRequested) {
@@ -89,14 +90,27 @@ namespace Scrim.Audio {
                             // Try non-blocking read from app audio first
                             if (appAudio.TryRead(out var directBuf)) {
                                 appBuffer = directBuf;
+                                lastAppPacketTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+                                wasSilent = false;
                             } else {
-                                // Pace keepalive frames at 20ms real-time (10ms if sound effects or mic packets are queued)
-                                // to ensure real-time sound effect playback speed and smooth 50Hz VU meter decay
-                                int waitTimeoutMs = (_sfxQueue.Count > 0 || _activeSfxQueue.Count >= 4 || micQueue.Count >= KeepaliveBytes) ? 10 : 20;
+                                // If in active playback mode (or initial startup), wait up to 350ms to accommodate
+                                // NAudio's 50-100ms buffer delivery intervals without injecting silence gaps.
+                                // If idle/silent, pace keepalive silence frames at 20ms (10ms if sfx/mic queued)
+                                // so soundboard effects and VU decay ballistics run smoothly in real time.
+                                bool isRecentPlayback = !wasSilent && (lastAppPacketTicks == 0 || System.Diagnostics.Stopwatch.GetElapsedTime(lastAppPacketTicks).TotalMilliseconds < 350);
+                                int waitTimeoutMs;
+                                if (isRecentPlayback) {
+                                    waitTimeoutMs = 350;
+                                } else {
+                                    waitTimeoutMs = (_sfxQueue.Count > 0 || _activeSfxQueue.Count >= 4 || micQueue.Count >= KeepaliveBytes) ? 10 : 20;
+                                }
+
                                 using var timeoutCts = new CancellationTokenSource(waitTimeoutMs);
                                 using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(token, timeoutCts.Token);
                                 try {
                                     appBuffer = await appAudio.ReadAsync(linkedCts.Token);
+                                    lastAppPacketTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+                                    wasSilent = false;
                                 } catch (OperationCanceledException) {
                                     if (token.IsCancellationRequested) break;
                                     appBuffer = silentFrame;
@@ -122,6 +136,8 @@ namespace Scrim.Audio {
                                         appBuffer[idx + 2] = bR[0];
                                         appBuffer[idx + 3] = bR[1];
                                     }
+                                } else if (appBuffer != silentFrame) {
+                                    wasSilent = false;
                                 }
 
                                 // Buffer incoming microphone packets continuously without dropping residual bytes
