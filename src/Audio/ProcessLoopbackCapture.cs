@@ -38,11 +38,16 @@ namespace Scrim.Audio {
             _processId = processId;
             _cts = new CancellationTokenSource();
 
+            uint targetPid = processId == 0 ? (uint)Environment.ProcessId : processId;
+            var loopbackMode = processId == 0 
+                ? PROCESS_LOOPBACK_MODE.PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE 
+                : PROCESS_LOOPBACK_MODE.PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE;
+
             var activationParams = new AUDIOCLIENT_ACTIVATION_PARAMS {
                 ActivationType = AUDIOCLIENT_ACTIVATION_TYPE.AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK,
                 ProcessLoopbackParams = new AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS {
-                    TargetProcessId = processId,
-                    ProcessLoopbackMode = PROCESS_LOOPBACK_MODE.PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE
+                    TargetProcessId = targetPid,
+                    ProcessLoopbackMode = loopbackMode
                 }
             };
 
@@ -83,9 +88,10 @@ namespace Scrim.Audio {
             };
 
             Guid sessionGuid = Guid.Empty;
-            uint streamFlags = 0x00020000; // AUDCLNT_STREAMFLAGS_LOOPBACK
+            // AUDCLNT_STREAMFLAGS_LOOPBACK (0x00020000) | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM (0x80000000) | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY (0x08000000)
+            uint streamFlags = 0x00020000 | 0x80000000 | 0x08000000;
 
-            _audioClient.Initialize(
+            int initResult = _audioClient.Initialize(
                 0, // AUDCLNT_SHAREMODE_SHARED
                 streamFlags,
                 0, 
@@ -93,13 +99,27 @@ namespace Scrim.Audio {
                 ref format,
                 ref sessionGuid);
 
+            if (initResult < 0) {
+                initResult = _audioClient.Initialize(
+                    0,
+                    0x00020000,
+                    0,
+                    0,
+                    ref format,
+                    ref sessionGuid);
+            }
+
+            if (initResult < 0) {
+                return initResult;
+            }
+
             Guid IID_IAudioCaptureClient = new Guid("C8ADBD64-E71E-48a0-A4DE-185C395CD317");
-            _audioClient.GetService(ref IID_IAudioCaptureClient, out nint pCaptureClient);
-            _captureClient = (IAudioCaptureClient)Marshal.GetObjectForIUnknown(pCaptureClient);
-
-            _audioClient.Start();
-
-            _captureTask = Task.Run(() => CaptureLoop(_cts!.Token));
+            int svcResult = _audioClient.GetService(ref IID_IAudioCaptureClient, out nint pCaptureClient);
+            if (svcResult >= 0 && pCaptureClient != nint.Zero) {
+                _captureClient = (IAudioCaptureClient)Marshal.GetObjectForIUnknown(pCaptureClient);
+                _audioClient.Start();
+                _captureTask = Task.Run(() => CaptureLoop(_cts!.Token));
+            }
 
             return 0;
         }

@@ -40,6 +40,67 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    // Real-Time Audio Reactive Waveform Visualizer
+    let audioCtx = null;
+    let analyser = null;
+    let sourceNode = null;
+    let freqData = null;
+    const waveBars = document.querySelectorAll('.waveform-container .wave-bar');
+
+    function initAudioVisualizer() {
+        if (analyser || !audio) return;
+        try {
+            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContextClass) return;
+            audioCtx = new AudioContextClass();
+            analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 64;
+            analyser.smoothingTimeConstant = 0.75;
+            freqData = new Uint8Array(analyser.frequencyBinCount);
+
+            sourceNode = audioCtx.createMediaElementSource(audio);
+            sourceNode.connect(analyser);
+            analyser.connect(audioCtx.destination);
+        } catch (e) {
+            console.warn("AudioContext visualizer initialization:", e);
+        }
+    }
+
+    function animateWaveform() {
+        requestAnimationFrame(animateWaveform);
+        if (!waveBars || waveBars.length === 0) return;
+
+        if (isPlaying && analyser && freqData) {
+            analyser.getByteFrequencyData(freqData);
+            for (let i = 0; i < waveBars.length; i++) {
+                // Read frequency bins across the spectrum (skip bin 0 for DC offset)
+                const binIndex = Math.min(i + 1, freqData.length - 1);
+                const val = freqData[binIndex] || 0;
+                const norm = val / 255.0;
+                const h = Math.max(4, Math.round(norm * 44 + 4));
+                waveBars[i].style.height = h + 'px';
+                if (norm > 0.08) {
+                    waveBars[i].style.background = 'rgba(0, 210, 255, ' + (0.35 + norm * 0.65) + ')';
+                } else {
+                    waveBars[i].style.background = 'rgba(255, 255, 255, 0.25)';
+                }
+            }
+        } else {
+            // Decay bars smoothly back to resting 4px baseline
+            for (let i = 0; i < waveBars.length; i++) {
+                const currentH = parseFloat(waveBars[i].style.height) || 4;
+                if (currentH > 4.1) {
+                    waveBars[i].style.height = Math.max(4, (currentH * 0.85)).toFixed(1) + 'px';
+                } else {
+                    waveBars[i].style.height = '4px';
+                    waveBars[i].style.background = 'rgba(255, 255, 255, 0.25)';
+                }
+            }
+        }
+    }
+
+    animateWaveform();
+
     // Audio Playback with Event Synchronization
     if (playBtn && audio) {
         audio.addEventListener('playing', function () {
@@ -82,6 +143,12 @@ document.addEventListener('DOMContentLoaded', function () {
         });
 
         playBtn.addEventListener('click', function () {
+            // Ensure audio visualizer graph is initialized and unpaused on user interaction
+            initAudioVisualizer();
+            if (audioCtx && audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+
             if (isPlaying || isConnecting) {
                 // Stop playback cleanly
                 audio.pause();

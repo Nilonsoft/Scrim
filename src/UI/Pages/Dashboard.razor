@@ -398,15 +398,14 @@
             MicService.IsMonitoring = true;
         }
 
-        // Auto-select target window by saved name/ID if available, or first available
+        // Auto-select target window by saved name/ID if available, or default to system audio
         WindowInfo? initialWin = null;
-        if (!string.IsNullOrEmpty(p.TargetProcessName)) {
+        if (!string.IsNullOrEmpty(p.TargetProcessName) && p.TargetProcessId != 0) {
             initialWin = Windows.FirstOrDefault(w => w.Title.Contains(p.TargetProcessName, StringComparison.OrdinalIgnoreCase));
         }
-        if (initialWin == null && p.TargetProcessId != 0) {
+        if (initialWin == null && p.TargetProcessId > 0) {
             initialWin = Windows.FirstOrDefault(w => w.ProcessId == (uint)p.TargetProcessId);
         }
-        initialWin ??= Windows.FirstOrDefault(w => w.ProcessId != 0);
 
         if (initialWin != null) {
             SelectedProcessId = initialWin.ProcessId;
@@ -414,6 +413,9 @@
             if (ProfileManager.CurrentProfile.MuteAppLocally) {
                 LocalAudioRouting.SetProcessMute(SelectedProcessId, true);
             }
+        } else {
+            SelectedProcessId = 0;
+            EnsureAudioMonitoring(0);
         }
 
         Mixer.AppVolume = (float)ProfileManager.CurrentProfile.AppStreamVolume / 100f;
@@ -449,8 +451,8 @@
     }
 
     private void OnProcessChanged() {
+        EnsureAudioMonitoring(SelectedProcessId);
         if (SelectedProcessId != 0) {
-            EnsureAudioMonitoring(SelectedProcessId);
             MetadataService.StartMonitoring(SelectedProcessId);
 
             var win = Windows.FirstOrDefault(w => w.ProcessId == SelectedProcessId);
@@ -463,11 +465,14 @@
             if (ProfileManager.CurrentProfile.MuteAppLocally) {
                 LocalAudioRouting.SetProcessMute(SelectedProcessId, true);
             }
+        } else {
+            ProfileManager.CurrentProfile.TargetProcessId = 0;
+            ProfileManager.CurrentProfile.TargetProcessName = "System Audio";
+            ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
         }
     }
 
     private void EnsureAudioMonitoring(uint pid) {
-        if (pid == 0) return;
         try {
             Capture.StartCapture(pid);
             MicService.StartCapture(SelectedDeviceId);
@@ -599,15 +604,8 @@
         try {
             StreamServer.Start(ProfileManager.CurrentProfile.Port);
 
-            if (SelectedProcessId == 0) {
-                var first = Windows.FirstOrDefault(w => w.ProcessId != 0);
-                if (first != null) {
-                    SelectedProcessId = first.ProcessId;
-                }
-            }
-
+            Capture.StartCapture(SelectedProcessId);
             if (SelectedProcessId != 0) {
-                Capture.StartCapture(SelectedProcessId);
                 MetadataService.StartMonitoring(SelectedProcessId);
             }
 
@@ -641,9 +639,7 @@
             MetadataService.StopMonitoring();
 
             // Resume monitoring mixer so VU meters stay responsive in console
-            if (SelectedProcessId != 0) {
-                EnsureAudioMonitoring(SelectedProcessId);
-            }
+            EnsureAudioMonitoring(SelectedProcessId);
 
             _ = JSRuntime.InvokeVoidAsync("eval", "document.body.setAttribute('data-broadcasting', 'false')");
         } catch (Exception ex) {
@@ -1054,7 +1050,7 @@
             <div style="margin-bottom: 14px;">
                 <label class="scrim-label">Application Window</label>
                 <select class="scrim-select" @bind="SelectedProcessId" @bind:after="OnProcessChanged" disabled="@IsLive">
-                    <option value="0">Select Application / Window</option>
+                    <option value="0">System Audio (All Apps / Master Desktop Mix)</option>
                     @foreach (var w in Windows) {
                         <option value="@w.ProcessId">@w.Title</option>
                     }
