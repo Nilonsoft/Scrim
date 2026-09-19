@@ -4,8 +4,10 @@ Scrim provides built-in capabilities to broadcast your station over your local h
 
 ## How It Works
 
-1. **Multi-Prefix HTTP Stream Server**:
-   - By default, Scrim binds its embedded HTTP streaming server (`HttpStreamServer`) to `localhost`, all active local IPv4 addresses (`192.168.x.x`, `10.x.x.x`), and a wildcard prefix (`http://+:{port}/`).
+1. **Dual-Mode HTTP Stream Server & Zero-Config Socket Bridge**:
+   - Scrim binds its embedded HTTP streaming server (`HttpStreamServer`) to serve on all network interfaces.
+   - On Windows, kernel-level `HTTP.sys` URL reservations normally require administrative privileges to bind non-localhost IPs. Scrim incorporates an automatic, zero-permission TCP socket bridge (`TcpListener`) fallback on the configured port.
+   - This ensures that standard non-elevated user runs work seamlessly out of the box on all local IPv4/IPv6 addresses (`192.168.x.x`, `10.x.x.x`), custom domains, and Wi-Fi networks without requiring UAC prompts or returning `HTTP 400 Bad Request - Invalid Hostname`.
    - Listeners on the same Wi-Fi or LAN can connect immediately without special configuration by pointing their browser or media player to `http://<Local-IP>:<Port>`.
 
 2. **Outside of Local Network (Internet) Access**:

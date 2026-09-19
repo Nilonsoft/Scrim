@@ -36,11 +36,28 @@ namespace Scrim.Tests {
                 server.Start(testPort);
 
                 using var client = new HttpClient();
-                // Test GET /api/branding
+                // Test GET /api/branding via localhost
                 var response = await client.GetAsync($"http://localhost:{testPort}/api/branding");
                 Assert.True(response.IsSuccessStatusCode);
                 string brandingJson = await response.Content.ReadAsStringAsync();
                 Assert.Contains("TEST STATION", brandingJson);
+
+                // Test GET /api/branding via 127.0.0.1 (exercises bridge when non-elevated)
+                var ipResponse = await client.GetAsync($"http://127.0.0.1:{testPort}/api/branding");
+                Assert.True(ipResponse.IsSuccessStatusCode);
+                string ipBranding = await ipResponse.Content.ReadAsStringAsync();
+                Assert.Contains("TEST STATION", ipBranding);
+
+                // Test GET /api/branding via active LAN IP (reproduces the user scenario: e.g. 192.168.8.205)
+                foreach (var ip in System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName()).AddressList) {
+                    if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && !System.Net.IPAddress.IsLoopback(ip)) {
+                        var lanResponse = await client.GetAsync($"http://{ip}:{testPort}/api/branding");
+                        Assert.True(lanResponse.IsSuccessStatusCode);
+                        string lanBranding = await lanResponse.Content.ReadAsStringAsync();
+                        Assert.Contains("TEST STATION", lanBranding);
+                        break;
+                    }
+                }
 
                 // Test OPTIONS CORS preflight
                 var request = new HttpRequestMessage(HttpMethod.Options, $"http://localhost:{testPort}/api/branding");

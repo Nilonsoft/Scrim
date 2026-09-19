@@ -3,6 +3,8 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
+using System.Net.Sockets;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Scrim.Configuration;
@@ -16,6 +18,7 @@ namespace Scrim.Server {
         private readonly IProfileManager _profileManager;
         private readonly INetworkDiscoveryService _networkDiscovery;
         private HttpListener? _listener;
+        private TcpListener? _bridgeListener;
         private CancellationTokenSource? _cts;
 
         public HttpStreamServer(BroadcastHub hub, IMetadataService metadataService, SongRequestController requestController, IProfileManager profileManager, INetworkDiscoveryService networkDiscovery) {
@@ -44,7 +47,7 @@ namespace Scrim.Server {
         }
 
         public void Start(int port) {
-            if (_listener != null && _listener.IsListening) return;
+            if ((_listener != null && _listener.IsListening) || _bridgeListener != null) return;
 
             int targetPort = FindAvailablePort(port);
             var profile = _profileManager.CurrentProfile;
@@ -83,15 +86,33 @@ namespace Scrim.Server {
                 } catch (Exception) {
                     try { listener.Close(); } catch { }
 
-                    // If network / wildcard prefixes failed (e.g. Access is Denied without admin rights),
-                    // fall back IMMEDIATELY to a clean loopback-only listener on the SAME targetPort!
+                    // If network / wildcard prefixes failed (e.g. Access is Denied without admin rights):
+                    // Start an internal loopback HttpListener on an available high port,
+                    // and bind a non-elevated socket TcpListener on targetPort (0.0.0.0:targetPort).
+                    // This allows LAN, WAN, and custom hostnames (e.g. 192.168.x.x) to connect cleanly
+                    // without HTTP.sys rejecting them with "HTTP Error 400. The request hostname is invalid."
                     if (addedNetworkPrefixes) {
+                        int internalLoopbackPort = FindAvailablePort(targetPort + 1000);
                         var loopbackListener = new HttpListener();
-                        loopbackListener.Prefixes.Add($"http://localhost:{targetPort}/");
-                        loopbackListener.Prefixes.Add($"http://127.0.0.1:{targetPort}/");
+                        loopbackListener.Prefixes.Add($"http://127.0.0.1:{internalLoopbackPort}/");
+                        loopbackListener.Prefixes.Add($"http://localhost:{internalLoopbackPort}/");
+
+                        TcpListener? bridge = null;
                         try {
                             loopbackListener.Start();
+                            try {
+                                bridge = new TcpListener(IPAddress.IPv6Any, targetPort);
+                                bridge.Server.DualMode = true;
+                                bridge.Start();
+                            } catch {
+                                bridge?.Stop();
+                                bridge = new TcpListener(IPAddress.Any, targetPort);
+                                bridge.Start();
+                            }
+
                             _listener = loopbackListener;
+                            _bridgeListener = bridge;
+
                             if (targetPort != port) {
                                 profile.Port = targetPort;
                                 _profileManager.SaveProfile(profile);
@@ -102,10 +123,12 @@ namespace Scrim.Server {
                             break;
                         } catch {
                             try { loopbackListener.Close(); } catch { }
+                            try { bridge?.Stop(); } catch { }
+                            _bridgeListener = null;
                         }
                     }
 
-                    // Only advance port if even loopback failed (truly occupied by another application)
+                    // Advance port if binding failed
                     targetPort++;
                 }
             }
@@ -114,6 +137,105 @@ namespace Scrim.Server {
 
             _cts = new CancellationTokenSource();
             Task.Run(() => AcceptLoop(_cts.Token));
+
+            if (_bridgeListener != null) {
+                int internalPort = _listener.Prefixes
+                    .Select(p => new Uri(p).Port)
+                    .FirstOrDefault();
+                if (internalPort > 0) {
+                    Task.Run(() => BridgeAcceptLoop(_cts.Token, internalPort));
+                }
+            }
+        }
+
+        private async Task BridgeAcceptLoop(CancellationToken token, int internalPort) {
+            while (!token.IsCancellationRequested && _bridgeListener != null) {
+                TcpClient client;
+                try {
+                    client = await _bridgeListener.AcceptTcpClientAsync(token);
+                } catch {
+                    break;
+                }
+
+                _ = Task.Run(() => ForwardClientAsync(client, internalPort, token));
+            }
+        }
+
+        private static async Task ForwardClientAsync(TcpClient client, int internalPort, CancellationToken token) {
+            try {
+                using (client)
+                using (var server = new TcpClient()) {
+                    await server.ConnectAsync(IPAddress.Loopback, internalPort, token);
+                    using var clientStream = client.GetStream();
+                    using var serverStream = server.GetStream();
+
+                    var buffer = new byte[32768];
+                    int totalRead = 0;
+                    int headerEnd = -1;
+
+                    while (totalRead < buffer.Length) {
+                        int read = await clientStream.ReadAsync(buffer.AsMemory(totalRead, buffer.Length - totalRead), token);
+                        if (read <= 0) break;
+                        totalRead += read;
+
+                        for (int i = 0; i <= totalRead - 4; i++) {
+                            if (buffer[i] == '\r' && buffer[i + 1] == '\n' &&
+                                buffer[i + 2] == '\r' && buffer[i + 3] == '\n') {
+                                headerEnd = i + 4;
+                                break;
+                            }
+                        }
+                        if (headerEnd != -1) break;
+
+                        for (int i = 0; i <= totalRead - 2; i++) {
+                            if (buffer[i] == '\n' && buffer[i + 1] == '\n') {
+                                headerEnd = i + 2;
+                                break;
+                            }
+                        }
+                        if (headerEnd != -1) break;
+                    }
+
+                    if (headerEnd == -1) return;
+
+                    string headerText = System.Text.Encoding.ASCII.GetString(buffer, 0, headerEnd);
+                    string originalHost = "";
+                    bool hasConnectionHeader = false;
+                    var rawLines = headerText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+                    var validLines = rawLines.Where(l => !string.IsNullOrEmpty(l)).ToList();
+
+                    for (int i = 0; i < validLines.Count; i++) {
+                        if (validLines[i].StartsWith("Host:", StringComparison.OrdinalIgnoreCase)) {
+                            originalHost = validLines[i].Substring(5).Trim();
+                            validLines[i] = $"Host: 127.0.0.1:{internalPort}";
+                        } else if (validLines[i].StartsWith("Connection:", StringComparison.OrdinalIgnoreCase)) {
+                            validLines[i] = "Connection: close";
+                            hasConnectionHeader = true;
+                        }
+                    }
+
+                    if (!hasConnectionHeader) {
+                        validLines.Add("Connection: close");
+                    }
+                    if (!string.IsNullOrEmpty(originalHost)) {
+                        validLines.Add($"X-Forwarded-Host: {originalHost}");
+                        validLines.Add("X-Forwarded-Proto: http");
+                    }
+
+                    string modHeaders = string.Join("\r\n", validLines) + "\r\n\r\n";
+                    byte[] modHeaderBytes = System.Text.Encoding.ASCII.GetBytes(modHeaders);
+                    await serverStream.WriteAsync(modHeaderBytes, token);
+
+                    int remaining = totalRead - headerEnd;
+                    if (remaining > 0) {
+                        await serverStream.WriteAsync(buffer.AsMemory(headerEnd, remaining), token);
+                    }
+
+                    var t1 = clientStream.CopyToAsync(serverStream, token);
+                    var t2 = serverStream.CopyToAsync(clientStream, token);
+                    await Task.WhenAny(t1, t2);
+                }
+            } catch { }
         }
 
         private async Task AcceptLoop(CancellationToken token) {
@@ -182,8 +304,9 @@ namespace Scrim.Server {
             var response = context.Response;
             response.ContentType = "audio/x-mpegurl; charset=utf-8";
             response.Headers.Add("Access-Control-Allow-Origin", "*");
-            string host = context.Request.Url?.Host ?? "localhost";
-            int port = context.Request.Url?.Port ?? _profileManager.CurrentProfile.Port;
+            string rawHost = context.Request.Headers["X-Forwarded-Host"] ?? context.Request.Url?.Host ?? "localhost";
+            string host = rawHost.Contains(':') ? rawHost.Split(':')[0] : rawHost;
+            int port = _profileManager.CurrentProfile.Port;
             string m3uContent = $"#EXTM3U\r\n#EXTINF:-1,{_profileManager.CurrentProfile.StationName ?? "Scrim Broadcast"}\r\nhttp://{host}:{port}/stream\r\n";
             byte[] bytes = System.Text.Encoding.UTF8.GetBytes(m3uContent);
             response.ContentLength64 = bytes.Length;
@@ -195,8 +318,9 @@ namespace Scrim.Server {
             var response = context.Response;
             response.ContentType = "audio/x-scpls; charset=utf-8";
             response.Headers.Add("Access-Control-Allow-Origin", "*");
-            string host = context.Request.Url?.Host ?? "localhost";
-            int port = context.Request.Url?.Port ?? _profileManager.CurrentProfile.Port;
+            string rawHost = context.Request.Headers["X-Forwarded-Host"] ?? context.Request.Url?.Host ?? "localhost";
+            string host = rawHost.Contains(':') ? rawHost.Split(':')[0] : rawHost;
+            int port = _profileManager.CurrentProfile.Port;
             string plsContent = $"[playlist]\r\nNumberOfEntries=1\r\nFile1=http://{host}:{port}/stream\r\nTitle1={_profileManager.CurrentProfile.StationName ?? "Scrim Broadcast"}\r\nLength1=-1\r\nVersion=2\r\n";
             byte[] bytes = System.Text.Encoding.UTF8.GetBytes(plsContent);
             response.ContentLength64 = bytes.Length;
@@ -411,6 +535,11 @@ namespace Scrim.Server {
 
         public void Stop() {
             _cts?.Cancel();
+            try {
+                _bridgeListener?.Stop();
+            } catch { }
+            _bridgeListener = null;
+
             try {
                 _listener?.Stop();
                 _listener?.Close();
