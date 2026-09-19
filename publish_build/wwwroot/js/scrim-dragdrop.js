@@ -78,14 +78,13 @@ window.scrimDragDrop = {
         var needleL = document.getElementById('vu-needle-left');
         var needleR = document.getElementById('vu-needle-right');
 
-        var baseAngle = -38; // Resting angle (silence)
-        var maxAngle = 30;   // Peak deflection
+        var baseAngle = -45; // Resting angle at -20dB/silence mark
+        var maxAngle = 40;   // Peak deflection into the red zone (+3dB)
 
-        // Calculate needle angle based on real audio level (0.0 to 1.0)
+        // Calculate needle angle with logarithmic-style analog ballistics
         var calcAngle = function (level) {
-            if (!level || level <= 0.001) return baseAngle;
-            // Power curve 0.6 mimics standard analog VU meter ballistic response
-            var deflection = Math.pow(Math.min(1.0, level), 0.65) * (maxAngle - baseAngle);
+            if (!level || level <= 0.002) return baseAngle;
+            var deflection = Math.pow(Math.min(1.0, level), 0.52) * (maxAngle - baseAngle);
             return Math.max(baseAngle, Math.min(maxAngle, baseAngle + deflection));
         };
 
@@ -101,7 +100,7 @@ window.scrimDragDrop = {
     },
 
     setStreamOutLevels: function (levelL, levelR, micLevel, isLive) {
-        this.setVuLevels(levelL, levelR);
+        window.scrimDragDrop.setVuLevels(levelL, levelR);
 
         var barL = document.getElementById('meter-stream-bar-l');
         var barR = document.getElementById('meter-stream-bar-r');

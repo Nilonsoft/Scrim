@@ -145,22 +145,36 @@ document.addEventListener('DOMContentLoaded', function () {
         requestAnimationFrame(animateWaveform);
         if (!waveBars || waveBars.length === 0) return;
 
+        let hasData = false;
         if (isPlaying && analyser && freqData) {
             analyser.getByteFrequencyData(freqData);
-            for (let i = 0; i < waveBars.length; i++) {
-                // Read frequency bins across the spectrum (skip bin 0 for DC offset)
-                const binIndex = Math.min(i + 1, freqData.length - 1);
-                const val = freqData[binIndex] || 0;
-                const norm = val / 255.0;
-                const h = Math.max(4, Math.round(norm * 44 + 4));
-                waveBars[i].style.height = h + 'px';
-                if (norm > 0.08) {
-                    waveBars[i].style.background = 'rgba(0, 210, 255, ' + (0.35 + norm * 0.65) + ')';
-                } else {
-                    waveBars[i].style.background = 'rgba(255, 255, 255, 0.25)';
+            
+            // Check if analyser has non-zero audio signal
+            let total = 0;
+            for (let k = 1; k < Math.min(20, freqData.length); k++) {
+                total += freqData[k];
+            }
+
+            if (total > 0) {
+                hasData = true;
+                for (let i = 0; i < waveBars.length; i++) {
+                    const binIndex = Math.min(i + 1, freqData.length - 1);
+                    const val = freqData[binIndex] || 0;
+                    const norm = val / 255.0;
+                    // Dynamic logarithmic scaling for lively, music-reactive bounce
+                    const scaled = Math.min(1.0, Math.pow(norm, 0.65) * 1.55);
+                    const h = Math.max(4, Math.round(scaled * 42 + 4));
+                    waveBars[i].style.height = h + 'px';
+                    if (scaled > 0.05) {
+                        waveBars[i].style.background = 'rgba(0, 210, 255, ' + (0.45 + scaled * 0.55) + ')';
+                    } else {
+                        waveBars[i].style.background = 'rgba(255, 255, 255, 0.25)';
+                    }
                 }
             }
-        } else {
+        }
+
+        if (!hasData) {
             // Decay bars smoothly back to resting 4px baseline
             for (let i = 0; i < waveBars.length; i++) {
                 const currentH = parseFloat(waveBars[i].style.height) || 4;
