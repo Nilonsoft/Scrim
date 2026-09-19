@@ -38,6 +38,16 @@ public partial class MainWindow : Window
                 TrayIcon.ToolTipText = $"Scrim Console - {profile.ProfileName} (:{profile.Port})";
             }
         }
+
+        try
+        {
+            string iconPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "app.ico");
+            if (System.IO.File.Exists(iconPath) && TrayIcon != null)
+            {
+                TrayIcon.Icon = new System.Drawing.Icon(iconPath);
+            }
+        }
+        catch { }
     }
 
     private void BlazorWebView_Initialized(object? sender, Microsoft.AspNetCore.Components.WebView.BlazorWebViewInitializedEventArgs e)
