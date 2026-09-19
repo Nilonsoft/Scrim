@@ -596,10 +596,6 @@ body {
     display: flex;
 }
 
-.album-art-image.loading .album-art-overlay {
-    display: none;
-}
-
 .loader-radar {
     position: relative;
     width: 80px;
@@ -658,38 +654,6 @@ body {
 @keyframes textShimmer {
     0%, 100% { opacity: 0.4; }
     50% { opacity: 1; color: #ffffff; }
-}
-
-.album-art-overlay {
-    width: 100%;
-    height: 100%;
-    background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.15), transparent 60%), rgba(0, 0, 0, 0.25);
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    text-align: center;
-    padding: 16px;
-    transition: opacity 0.4s ease;
-}
-
-.album-badge {
-    font-size: 19px;
-    font-weight: 900;
-    color: #ffffff;
-    line-height: 1.15;
-    letter-spacing: 2px;
-    text-shadow: 0 2px 8px rgba(0,0,0,0.8);
-    margin-bottom: 6px;
-    word-break: break-word;
-}
-
-.album-sub {
-    font-size: 11px;
-    font-weight: 700;
-    color: #ffeedd;
-    letter-spacing: 2px;
-    text-shadow: 0 2px 4px rgba(0,0,0,0.8);
 }
 
 /* Shimmer Loading for Track Title and Artist */

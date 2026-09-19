@@ -1066,8 +1066,6 @@ document.addEventListener('DOMContentLoaded', function () {
     function updateTrackMetadata(title, artist, album, albumArtUrl, hasArt, duration, position, isPlaying) {
         const albumArt = document.getElementById('albumArt');
         const metaContainer = document.getElementById('metaContainer');
-        const albumBadge = document.getElementById('albumBadge');
-        const albumSub = document.getElementById('albumSub');
 
         const cleanTitle = (title || "").trim();
         const cleanArtist = (artist || "").trim();
@@ -1131,9 +1129,6 @@ document.addEventListener('DOMContentLoaded', function () {
                 bottomTrackLink.title = 'Search "' + cleanTitle + '" on Google';
             }
 
-            if (albumBadge) albumBadge.textContent = cleanTitle;
-            if (albumSub) albumSub.textContent = (artist || "LIVE STREAM").toUpperCase();
-
             // Cache in sessionStorage so refreshing immediately preserves artwork and track info
             try {
                 sessionStorage.setItem('scrim_cached_track', JSON.stringify({
@@ -1173,9 +1168,6 @@ document.addEventListener('DOMContentLoaded', function () {
                 bottomTrackLink.removeAttribute('href');
                 bottomTrackLink.title = 'Awaiting Stream...';
             }
-
-            if (albumBadge) albumBadge.textContent = "ON AIR";
-            if (albumSub) albumSub.textContent = "LIVE BROADCAST";
         }
 
         // Update Song Tracker Timing
