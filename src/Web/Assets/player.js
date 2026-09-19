@@ -2073,12 +2073,25 @@ document.addEventListener('DOMContentLoaded', function () {
             const row = document.createElement('div');
             row.className = 'history-row';
 
+            const cleanTitle = (track.title || '').trim();
+            const cleanArtist = (track.artist || '').trim();
+            const searchTerms = cleanArtist ? (cleanTitle + ' ' + cleanArtist) : cleanTitle;
+            const searchUrl = 'https://www.google.com/search?q=' + encodeURIComponent(searchTerms || 'music');
+            const searchTitle = 'Search "' + (cleanTitle || 'Track') + (cleanArtist ? ' - ' + cleanArtist : '') + '" on Google';
+
+            const thumbWrap = document.createElement('a');
+            thumbWrap.className = 'history-thumb-link';
+            thumbWrap.href = searchUrl;
+            thumbWrap.target = '_blank';
+            thumbWrap.rel = 'noopener noreferrer';
+            thumbWrap.title = searchTitle;
+
             const thumb = document.createElement('div');
             thumb.className = 'history-thumb';
             if (track.hasArt && track.albumArtUrl) {
                 const img = document.createElement('img');
                 img.src = track.albumArtUrl;
-                img.alt = track.title || 'Track Art';
+                img.alt = cleanTitle || 'Track Art';
                 thumb.appendChild(img);
             } else {
                 thumb.innerHTML = `
@@ -2089,19 +2102,37 @@ document.addEventListener('DOMContentLoaded', function () {
                     </svg>
                 `;
             }
+            thumbWrap.appendChild(thumb);
 
             const info = document.createElement('div');
             info.className = 'history-track-info';
 
-            const titleEl = document.createElement('div');
-            titleEl.className = 'history-track-title';
-            titleEl.textContent = track.title || 'Unknown Track';
+            const titleLink = document.createElement('a');
+            titleLink.className = 'history-track-title history-track-title-link';
+            titleLink.href = searchUrl;
+            titleLink.target = '_blank';
+            titleLink.rel = 'noopener noreferrer';
+            titleLink.title = searchTitle;
+
+            const titleText = document.createElement('span');
+            titleText.textContent = cleanTitle || 'Unknown Track';
+            titleLink.appendChild(titleText);
+
+            const searchIcon = document.createElement('span');
+            searchIcon.className = 'history-search-icon';
+            searchIcon.innerHTML = `
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+            `;
+            titleLink.appendChild(searchIcon);
 
             const artistEl = document.createElement('div');
             artistEl.className = 'history-track-artist';
-            artistEl.textContent = track.artist || 'Live Broadcast';
+            artistEl.textContent = cleanArtist || 'Live Broadcast';
 
-            info.appendChild(titleEl);
+            info.appendChild(titleLink);
             info.appendChild(artistEl);
 
             const rightWrap = document.createElement('div');
@@ -2147,7 +2178,7 @@ document.addEventListener('DOMContentLoaded', function () {
             rightWrap.appendChild(reactionsEl);
             rightWrap.appendChild(timeEl);
 
-            row.appendChild(thumb);
+            row.appendChild(thumbWrap);
             row.appendChild(info);
             row.appendChild(rightWrap);
 

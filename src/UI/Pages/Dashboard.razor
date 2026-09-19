@@ -2274,11 +2274,16 @@
                                 @foreach (var item in HistoryService.GetHistory(100)) {
                                     var songReactions = ReactionService.GetSongReactions(item.Title, item.Artist);
                                     <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 6px; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 11px; gap: 8px;">
-                                        <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;">
-                                            <span style="color: #e2e8f0; font-weight: 500;">@item.Title</span>
+                                        <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; display: flex; align-items: center; gap: 4px;">
+                                            <a href="@($"https://www.google.com/search?q={Uri.EscapeDataString(((item.Title ?? "") + " " + (item.Artist ?? "")).Trim())}")" target="_blank" rel="noopener noreferrer" style="color: #e2e8f0; font-weight: 500; text-decoration: none; cursor: pointer;" title="Search '@item.Title' on Google" onmouseover="this.style.color='#00d2ff'" onmouseout="this.style.color='#e2e8f0'">
+                                                @item.Title
+                                            </a>
                                             @if (!string.IsNullOrEmpty(item.Artist)) {
-                                                <span style="color: #8e95a5; margin-left: 4px;">— @item.Artist</span>
+                                                <span style="color: #8e95a5;">— @item.Artist</span>
                                             }
+                                            <a href="@($"https://www.google.com/search?q={Uri.EscapeDataString(((item.Title ?? "") + " " + (item.Artist ?? "")).Trim())}")" target="_blank" rel="noopener noreferrer" style="color: #64748b; font-size: 10px; text-decoration: none; margin-left: 2px;" title="Search on Google" onmouseover="this.style.color='#00d2ff'" onmouseout="this.style.color='#64748b'">
+                                                🔍
+                                            </a>
                                         </div>
                                         <div style="display: flex; gap: 6px; align-items: center; font-size: 10px; white-space: nowrap;">
                                             @if (songReactions.ThumbsUp > 0 || songReactions.Heart > 0 || songReactions.ThumbsDown > 0) {

@@ -1846,6 +1846,18 @@ body {
     gap: 2px;
 }
 
+.history-thumb-link {
+    display: block;
+    cursor: pointer;
+    text-decoration: none;
+    line-height: 0;
+}
+
+.history-thumb-link:hover .history-thumb {
+    outline: 2px solid var(--accent-color, #00d2ff);
+    outline-offset: 1px;
+}
+
 .history-track-title {
     font-size: 12.5px;
     font-weight: 600;
@@ -1853,6 +1865,38 @@ body {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.history-track-title-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: #f1f5f9;
+    text-decoration: none;
+    cursor: pointer;
+    transition: color 0.15s ease;
+    max-width: 100%;
+}
+
+.history-track-title-link:hover {
+    color: var(--accent-color, #00d2ff);
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+}
+
+.history-track-title-link .history-search-icon {
+    opacity: 0;
+    color: var(--accent-color, #00d2ff);
+    transform: translateX(-3px);
+    transition: opacity 0.15s ease, transform 0.15s ease;
+    flex-shrink: 0;
+}
+
+.history-row:hover .history-search-icon,
+.history-track-title-link:hover .history-search-icon {
+    opacity: 0.85;
+    transform: translateX(0);
 }
 
 .history-track-artist {
