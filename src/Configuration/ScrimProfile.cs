@@ -21,6 +21,7 @@ namespace Scrim.Configuration {
         public string CaptureDeviceId { get; set; } = "";
         public string CustomPublicUrl { get; set; } = "";
         public bool EnableChat { get; set; } = true;
+        public System.Collections.Generic.List<string> NicknameBlacklist { get; set; } = new();
 
         // Web Player Branding Customization
         public string StationName { get; set; } = "GLOBAL INDIE RADIO";

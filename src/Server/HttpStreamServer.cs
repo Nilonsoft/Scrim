@@ -428,9 +428,15 @@ namespace Scrim.Server {
                 immediateChannel.Writer.TryWrite($"data: {{\"type\":\"chat_status\",\"enabled\":{(enabled ? "true" : "false")}}}\n\n");
             };
 
+            Action<string, string> onAssign = (target, assigned) => {
+                string assignJson = $"{{\"type\":\"assign_nickname\",\"target\":\"{EscapeJson(target)}\",\"assigned\":\"{EscapeJson(assigned)}\"}}";
+                immediateChannel.Writer.TryWrite($"data: {assignJson}\n\n");
+            };
+
             _chatService.MessagePosted += onMessage;
             _chatService.ChatCleared += onClear;
             _chatService.ChatStatusChanged += onStatus;
+            _chatService.NicknameAssigned += onAssign;
 
             try {
                 using var writer = new StreamWriter(response.OutputStream);
@@ -499,6 +505,7 @@ namespace Scrim.Server {
                 _chatService.MessagePosted -= onMessage;
                 _chatService.ChatCleared -= onClear;
                 _chatService.ChatStatusChanged -= onStatus;
+                _chatService.NicknameAssigned -= onAssign;
                 writeLock.Dispose();
                 response.Close();
             }
@@ -510,10 +517,12 @@ namespace Scrim.Server {
                 response.ContentType = "application/json; charset=utf-8";
                 response.Headers.Add("Access-Control-Allow-Origin", "*");
                 bool isEnabled = _profileManager.CurrentProfile.EnableChat;
+                var blacklist = _profileManager.CurrentProfile.NicknameBlacklist;
+                string blacklistJson = string.Join(",", blacklist.Select(b => $"\"{EscapeJson(b)}\""));
                 var messages = _chatService.GetRecentMessages().Select(m => 
                     $"{{\"id\":\"{EscapeJson(m.Id)}\",\"sender\":\"{EscapeJson(m.Sender)}\",\"text\":\"{EscapeJson(m.Text)}\",\"timestamp\":\"{m.Timestamp:o}\",\"isHost\":{(m.IsHost ? "true" : "false")},\"color\":\"{EscapeJson(m.Color)}\"}}"
                 );
-                string json = $"{{\"enabled\":{(isEnabled ? "true" : "false")},\"messages\":[{string.Join(",", messages)}]}}";
+                string json = $"{{\"enabled\":{(isEnabled ? "true" : "false")},\"blacklist\":[{blacklistJson}],\"messages\":[{string.Join(",", messages)}]}}";
                 byte[] buffer = System.Text.Encoding.UTF8.GetBytes(json);
                 response.ContentLength64 = buffer.Length;
                 response.OutputStream.Write(buffer, 0, buffer.Length);
@@ -546,6 +555,16 @@ namespace Scrim.Server {
 
                 text = System.Text.RegularExpressions.Regex.Unescape(text);
                 sender = System.Text.RegularExpressions.Regex.Unescape(sender);
+
+                if (!_chatService.IsNicknameAllowed(sender, _profileManager.CurrentProfile.NicknameBlacklist)) {
+                    context.Response.StatusCode = 400;
+                    byte[] err = System.Text.Encoding.UTF8.GetBytes("{\"error\":\"This nickname is not permitted on this station\"}");
+                    context.Response.ContentType = "application/json; charset=utf-8";
+                    context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+                    context.Response.OutputStream.Write(err, 0, err.Length);
+                    context.Response.Close();
+                    return;
+                }
 
                 if (!string.IsNullOrWhiteSpace(text)) {
                     _chatService.AddMessage(sender, text, isHost: false);

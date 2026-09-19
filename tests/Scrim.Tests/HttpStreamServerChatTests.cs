@@ -113,5 +113,75 @@ namespace Scrim.Tests {
                 server.Stop();
             }
         }
+
+        [Fact]
+        public async Task ChatApi_EnforcesBlacklist_AndRejectsBlacklistedNicknames() {
+            int testPort = 19387;
+            var hub = new BroadcastHub();
+            var metaMock = new Mock<IMetadataService>();
+            metaMock.Setup(m => m.CurrentMetadata).Returns(new MediaMetadata());
+
+            var profileManagerMock = new Mock<IProfileManager>();
+            var profile = new ScrimProfile {
+                Port = testPort,
+                EnableNetworkAccess = false,
+                EnableChat = true,
+                NicknameBlacklist = new System.Collections.Generic.List<string> { "badword", "spammer" }
+            };
+            profileManagerMock.Setup(p => p.CurrentProfile).Returns(profile);
+
+            var networkMock = new Mock<INetworkDiscoveryService>();
+            var requestController = new SongRequestController();
+            var chatService = new LiveChatService();
+            var themeService = new ThemeService();
+
+            var server = new HttpStreamServer(hub, metaMock.Object, requestController, profileManagerMock.Object, networkMock.Object, themeService, chatService);
+
+            try {
+                server.Start(testPort);
+
+                using var client = new HttpClient();
+
+                // 1. GET /api/chat includes blacklist
+                var getRes = await client.GetAsync($"http://localhost:{testPort}/api/chat");
+                Assert.Equal(HttpStatusCode.OK, getRes.StatusCode);
+                string getJson = await getRes.Content.ReadAsStringAsync();
+                Assert.Contains("\"badword\"", getJson);
+                Assert.Contains("\"spammer\"", getJson);
+
+                // 2. Allowed sender succeeds
+                var goodContent = new StringContent("{\"sender\":\"CoolListener\",\"text\":\"Hello!\"}", System.Text.Encoding.UTF8, "application/json");
+                var goodRes = await client.PostAsync($"http://localhost:{testPort}/api/chat", goodContent);
+                Assert.Equal(HttpStatusCode.OK, goodRes.StatusCode);
+
+                // 3. Blacklisted sender fails with 400 Bad Request
+                var badContent = new StringContent("{\"sender\":\"Spammer123\",\"text\":\"Spam message\"}", System.Text.Encoding.UTF8, "application/json");
+                var badRes = await client.PostAsync($"http://localhost:{testPort}/api/chat", badContent);
+                Assert.Equal(HttpStatusCode.BadRequest, badRes.StatusCode);
+
+                // Only 1 message was added
+                Assert.Single(chatService.GetRecentMessages());
+
+                // 4. Nickname assignment triggers event
+                string assignedTarget = "";
+                string assignedNew = "";
+                chatService.NicknameAssigned += (t, a) => {
+                    assignedTarget = t;
+                    assignedNew = a;
+                };
+                chatService.AssignNickname("CoolListener", "SuperFan");
+                Assert.Equal("CoolListener", assignedTarget);
+                Assert.Equal("SuperFan", assignedNew);
+
+                // 5. Clear chat clears messages and fires event
+                bool clearedFired = false;
+                chatService.ChatCleared += () => clearedFired = true;
+                chatService.Clear();
+                Assert.True(clearedFired);
+                Assert.Empty(chatService.GetRecentMessages());
+            } finally {
+                server.Stop();
+            }
+        }
     }
 }

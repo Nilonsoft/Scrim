@@ -544,11 +544,26 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    let reconnectTimeout = null;
+
+    function scheduleStreamReconnect() {
+        if (reconnectTimeout || userExplicitlyStopped || !isUserPlaying) return;
+        reconnectTimeout = setTimeout(function () {
+            reconnectTimeout = null;
+            if (!userExplicitlyStopped && isUserPlaying) {
+                console.log("[Audio] Attempting automatic stream reconnect...");
+                startStream(true);
+            }
+        }, 1500);
+    }
+
     function checkAutoplay(isLive) {
-        if (!isLive || userExplicitlyStopped || isPlaying || isConnecting) {
+        if (!isLive || userExplicitlyStopped) {
             return;
         }
-        attemptAutoplay();
+        if (!isPlaying && !isConnecting) {
+            startStream(true);
+        }
     }
 
     function attemptAutoplay() {
@@ -649,6 +664,10 @@ document.addEventListener('DOMContentLoaded', function () {
         });
 
         audio.addEventListener('playing', function () {
+            if (reconnectTimeout) {
+                clearTimeout(reconnectTimeout);
+                reconnectTimeout = null;
+            }
             if (isUserPlaying) {
                 isPlaying = true;
                 isConnecting = false;
@@ -680,21 +699,44 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         });
 
+        audio.addEventListener('ended', function () {
+            if (isUserPlaying && !userExplicitlyStopped) {
+                isPlaying = false;
+                isConnecting = true;
+                updatePlayButtonUI();
+                const subtitleEl = document.getElementById('showSubtitle');
+                if (subtitleEl) subtitleEl.textContent = "Broadcast lapsed — auto-reconnecting...";
+                scheduleStreamReconnect();
+            }
+        });
+
+        audio.addEventListener('stalled', function () {
+            if (isUserPlaying && !userExplicitlyStopped && !isPlaying) {
+                scheduleStreamReconnect();
+            }
+        });
+
         audio.addEventListener('error', function (e) {
             // Ignore error events triggered when user intentionally stopped or src is cleared
             if (!isUserPlaying || !audio.getAttribute('src')) {
                 return;
             }
             console.warn("Audio element stream error or station offline:", e);
-            isUserPlaying = false;
-            isPlaying = false;
-            isConnecting = false;
-            updatePlayButtonUI();
-            audio.removeAttribute('src');
-
-            const subtitleEl = document.getElementById('showSubtitle');
-            if (subtitleEl) {
-                subtitleEl.textContent = "Station Offline — Broadcaster has not started transmission";
+            if (!userExplicitlyStopped) {
+                isPlaying = false;
+                isConnecting = true;
+                updatePlayButtonUI();
+                const subtitleEl = document.getElementById('showSubtitle');
+                if (subtitleEl) {
+                    subtitleEl.textContent = "Broadcast interrupted — waiting for DJ to resume...";
+                }
+                scheduleStreamReconnect();
+            } else {
+                isUserPlaying = false;
+                isPlaying = false;
+                isConnecting = false;
+                updatePlayButtonUI();
+                audio.removeAttribute('src');
             }
         });
     }
@@ -1066,7 +1108,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     if (listenerCount) listenerCount.textContent = data.listeners || '1';
                     if (data.isLive !== undefined) {
                         updateLiveIndicator(data.isLive);
-                        if (data.isLive) {
+                        if (data.isLive && (!isPlaying || !audio.src)) {
                             checkAutoplay(true);
                         }
                     }
@@ -1083,9 +1125,16 @@ document.addEventListener('DOMContentLoaded', function () {
                     if (data.enabled !== undefined) {
                         setChatStatus(data.enabled);
                     }
+                    if (Array.isArray(data.blacklist)) {
+                        currentBlacklist = data.blacklist;
+                    }
                     if (Array.isArray(data.messages)) {
                         data.messages.forEach(appendChatMessage);
                     }
+                }
+
+                if (data.type === 'assign_nickname' && data.target && data.assigned) {
+                    handleNicknameAssignment(data.target, data.assigned);
                 }
 
                 if (data.type === 'chat') {
@@ -1299,6 +1348,34 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    let currentBlacklist = [];
+
+    function isBlacklistedNickname(nick) {
+        if (!nick || !currentBlacklist.length) return false;
+        const lower = nick.toLowerCase();
+        return currentBlacklist.some(function (b) {
+            return b && lower.includes(b.toLowerCase());
+        });
+    }
+
+    function handleNicknameAssignment(target, assigned) {
+        if (!chatNicknameInput || !target || !assigned) return;
+        const current = chatNicknameInput.value.trim();
+        if (current.toLowerCase() === target.toLowerCase()) {
+            chatNicknameInput.value = assigned;
+            try {
+                localStorage.setItem('scrim_chat_nickname', assigned);
+            } catch (e) {}
+            if (chatMessageInput) {
+                const prevPh = chatMessageInput.placeholder;
+                chatMessageInput.placeholder = `DJ assigned you nickname "${assigned}"! (You can edit it anytime)`;
+                setTimeout(function () {
+                    chatMessageInput.placeholder = prevPh;
+                }, 6000);
+            }
+        }
+    }
+
     // Fetch initial chat state & recent history
     fetch('/api/chat')
         .then(function (r) { return r.json(); })
@@ -1306,6 +1383,9 @@ document.addEventListener('DOMContentLoaded', function () {
             if (data) {
                 if (data.enabled !== undefined) {
                     setChatStatus(data.enabled);
+                }
+                if (Array.isArray(data.blacklist)) {
+                    currentBlacklist = data.blacklist;
                 }
                 if (Array.isArray(data.messages)) {
                     data.messages.forEach(appendChatMessage);
