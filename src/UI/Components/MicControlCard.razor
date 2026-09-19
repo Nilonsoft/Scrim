@@ -1,0 +1,24 @@
+@using Scrim.Audio
+@inject AudioDuckingMixer Mixer
+
+<div class="card p-3 mb-3" style="background-color: #181818; border: 1px solid #383838; border-radius: 8px;">
+    <h4 style="color: white; margin-top: 0;">Microphone</h4>
+    <div class="d-flex align-items-center">
+        <button class="btn btn-outline-danger me-2" @onmousedown="PttDown" @onmouseup="PttUp">Push To Talk</button>
+        <button class="btn @(Mixer.LatchActive ? "btn-danger" : "btn-outline-secondary")" @onclick="ToggleLatch">On Air (Latch)</button>
+    </div>
+</div>
+
+@code {
+    private void PttDown() { 
+        Mixer.PushToTalkActive = true; 
+    }
+    
+    private void PttUp() { 
+        Mixer.PushToTalkActive = false; 
+    }
+
+    private void ToggleLatch() {
+        Mixer.LatchActive = !Mixer.LatchActive;
+    }
+}

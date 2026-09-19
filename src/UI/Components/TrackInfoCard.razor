@@ -1,0 +1,10 @@
+<div class="card p-3 mb-3" style="background-color: #181818; border: 1px solid #383838; border-radius: 8px;">
+    <h4 style="color: white; margin-top: 0;">Now Playing</h4>
+    <h2 style="color: white;">@Title</h2>
+    <h5 style="color: #aaa;">@Artist</h5>
+</div>
+
+@code {
+    [Parameter] public string Title { get; set; } = "Unknown Track";
+    [Parameter] public string Artist { get; set; } = "Unknown Artist";
+}

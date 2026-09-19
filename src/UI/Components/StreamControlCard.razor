@@ -1,0 +1,36 @@
+@using Scrim.Server
+@using Scrim.Audio
+@using Scrim.Encoding
+@using System.Threading
+@inject HttpStreamServer StreamServer
+@inject ProcessLoopbackCapture Capture
+@inject MultiFormatTranscoder Transcoder
+
+<div class="card p-3 mb-3" style="background-color: #181818; border: 1px solid #383838; border-radius: 8px;">
+    <h4 style="color: white; margin-top: 0;">Broadcast Status</h4>
+    <p style="color: #ccc;">Status: <strong style="color: @(IsLive ? "#ff4444" : "#44ff44")">@(IsLive ? "ON AIR" : "OFFLINE")</strong></p>
+    <div class="d-flex">
+        <button class="btn btn-success me-2" @onclick="StartStream" disabled="@IsLive">Start Stream</button>
+        <button class="btn btn-danger" @onclick="StopStream" disabled="@(!IsLive)">Stop Stream</button>
+    </div>
+</div>
+
+@code {
+    private bool IsLive;
+
+    private void StartStream() { 
+        IsLive = true; 
+        StreamServer.Start(8080);
+        // We'll need a target PID. Let's just pass 0 for now as a placeholder
+        // or let the backend discover it.
+        Capture.StartCapture(0);
+        Transcoder.StartTranscoding(Capture.AudioStream);
+    }
+    
+    private void StopStream() { 
+        IsLive = false; 
+        StreamServer.Stop();
+        Transcoder.StopTranscoding();
+        Capture.StopCapture();
+    }
+}
