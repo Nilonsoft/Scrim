@@ -75,7 +75,7 @@ Once the download completes, restart Scrim. Scrim will detect FFmpeg automatical
 ### Manual Installation (Alternative)
 1. Download a portable build from [gyan.dev/ffmpeg/builds](https://www.gyan.dev/ffmpeg/builds/) (choose `ffmpeg-release-essentials.zip`).
 2. Extract the archive and copy `ffmpeg.exe` into one of the following locations:
-   - Your Scrim installation directory (`C:\Program Files\Scrim\` or wherever Scrim is installed).
+   - Your Scrim installation directory (`%LOCALAPPDATA%\Programs\Scrim\` or wherever Scrim is installed).
    - Any folder on your Windows system `PATH` (such as `C:\Windows\System32`).
 3. Re-open Scrim, and you are ready to broadcast!
 

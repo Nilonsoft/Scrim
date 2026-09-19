@@ -99,7 +99,7 @@ Scrim includes automated WiX Toolset v5 scripts to generate a standalone Windows
 pwsh -NoProfile -File ./build-installer.ps1
 ```
 
-The resulting installer (`bin/ScrimSetup-v1.0.0.msi`) bundles all dependencies and driver payloads for offline 1-click installation with automatic desktop shortcuts and in-place upgrade support.
+The resulting installer (`bin/ScrimSetup-v1.0.0.msi`) bundles all dependencies, driver payloads, and offline documentation (`docs/` and `README.md`) for 1-click per-user installation (`%LOCALAPPDATA%\Programs\Scrim`) without requiring administrator elevation, complete with desktop and Start Menu shortcuts and in-place upgrade support.
 
 ---
 

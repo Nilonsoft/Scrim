@@ -41,6 +41,11 @@
                   Description="Low-Latency Live Audio Streaming Station"
                   Target="[INSTALLFOLDER]Scrim.exe"
                   WorkingDirectory="INSTALLFOLDER" />
+        <Shortcut Id="ApplicationUserGuideShortcut"
+                  Name="Scrim User Guide"
+                  Description="User Guide and Documentation"
+                  Target="[INSTALLFOLDER]docs\user-guide.md"
+                  WorkingDirectory="INSTALLFOLDER" />
         <RemoveFolder Id="CleanUpProgramMenuFolder" On="uninstall" />
         <RegistryValue Root="HKCU" Key="Software\ScrimStudio\Scrim" Name="installed" Type="integer" Value="1" KeyPath="yes" />
       </Component>

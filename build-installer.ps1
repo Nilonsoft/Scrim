@@ -50,6 +50,19 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "Publish completed successfully." -ForegroundColor Green
 
+# Package documentation and README into publish directory for MSI inclusion
+$docsSource = Join-Path $scriptRoot "docs"
+$docsDest = Join-Path $publishDir "docs"
+if (Test-Path $docsSource) {
+    Copy-Item -Path $docsSource -Destination $docsDest -Recurse -Force
+    Write-Host "Copied docs/ to publish directory." -ForegroundColor Gray
+}
+$readmeSource = Join-Path $scriptRoot "README.md"
+if (Test-Path $readmeSource) {
+    Copy-Item -Path $readmeSource -Destination $publishDir -Force
+    Write-Host "Copied README.md to publish directory." -ForegroundColor Gray
+}
+
 Write-Host "`n[3/3] Compiling WiX MSI Installer: $outputMsi..." -ForegroundColor Yellow
 & wix build $wxsFile -arch x64 -d "Version=$Version" -d "PublishDir=$publishDir" -o $outputMsi
 if ($LASTEXITCODE -ne 0) {
