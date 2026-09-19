@@ -10,6 +10,7 @@ namespace Scrim.Audio {
 
     public interface IMicrophoneCaptureService : IDisposable {
         ChannelReader<byte[]> MicrophoneStream { get; }
+        string CurrentEffect { get; set; }
         IEnumerable<MicrophoneDevice> GetDevices();
         void StartCapture(string? deviceId = null);
         void StopCapture();

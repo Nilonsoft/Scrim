@@ -4,9 +4,11 @@
 @using Scrim.Windows
 @using System.Threading
 @using System.Collections.Generic
+@using Scrim.Configuration
 @inject HttpStreamServer StreamServer
 @inject ProcessLoopbackCapture Capture
 @inject MultiFormatTranscoder Transcoder
+@inject IProfileManager ProfileManager
 
 <div class="card p-3 mb-3" style="background-color: #181818; border: 1px solid #383838; border-radius: 8px;">
     <h4 style="color: white; margin-top: 0;">Broadcast Status</h4>
@@ -45,7 +47,7 @@
 
     private void StartStream() { 
         IsLive = true; 
-        StreamServer.Start(8080);
+        StreamServer.Start(ProfileManager.CurrentProfile.Port);
         Capture.StartCapture(SelectedProcessId);
         Transcoder.StartTranscoding(Capture.AudioStream);
     }

@@ -22,6 +22,7 @@ namespace Scrim {
             services.AddSingleton<IProfileManager, ProfileManager>();
 
             // Audio & Encoding
+            services.AddSingleton<VoiceEffectLoader>();
             services.AddSingleton<MultiFormatTranscoder>();
             services.AddSingleton<AudioDuckingMixer>();
             services.AddTransient<ProcessLoopbackCapture>();
@@ -43,6 +44,9 @@ namespace Scrim {
 
         protected override void OnStartup(StartupEventArgs e) {
             base.OnStartup(e);
+
+            var effectLoader = Services.GetRequiredService<VoiceEffectLoader>();
+            effectLoader.LoadEffects();
 
             var pluginLoader = Services.GetRequiredService<PluginLoader>();
             pluginLoader.LoadPlugins();

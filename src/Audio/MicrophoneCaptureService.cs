@@ -7,10 +7,13 @@ namespace Scrim.Audio {
     public class MicrophoneCaptureService : IMicrophoneCaptureService {
         private readonly Channel<byte[]> _channel;
         private WasapiCapture? _capture;
+        private readonly VoiceEffectLoader _effectLoader;
         
         public ChannelReader<byte[]> MicrophoneStream => _channel.Reader;
+        public string CurrentEffect { get; set; } = "normal";
 
-        public MicrophoneCaptureService() {
+        public MicrophoneCaptureService(VoiceEffectLoader effectLoader) {
+            _effectLoader = effectLoader;
             _channel = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(100) {
                 FullMode = BoundedChannelFullMode.DropOldest
             });
@@ -44,6 +47,10 @@ namespace Scrim.Audio {
                 if (a.BytesRecorded > 0) {
                     byte[] buffer = new byte[a.BytesRecorded];
                     Array.Copy(a.Buffer, buffer, a.BytesRecorded);
+                    
+                    var provider = _effectLoader.GetProvider(CurrentEffect);
+                    provider?.Process(buffer);
+                    
                     _channel.Writer.TryWrite(buffer);
                 }
             };
