@@ -24,6 +24,7 @@
 @inject IJSRuntime JSRuntime
 @inject LocalAudioRoutingService LocalAudioRouting
 @inject INetworkDiscoveryService NetworkDiscovery
+@inject VirtualAudioDeviceService VirtualDeviceService
 
 <!-- Top Header Bar -->
 <header class="scrim-topbar">
@@ -368,6 +369,11 @@
     private IEnumerable<WindowInfo> Windows = Array.Empty<WindowInfo>();
     private IEnumerable<MicrophoneDevice> Devices = Array.Empty<MicrophoneDevice>();
     private List<(string Id, string Name)> RenderDevices = new();
+    private bool IsVirtualDeviceReady = false;
+    private string? DetectedVirtualDeviceId;
+    private string? DetectedVirtualDeviceName;
+    private bool IsInstallingVirtualCable = false;
+    private string? VirtualCableInstallStatus;
     private readonly WindowEnumerator _enumerator = new();
     private DotNetObjectReference<Dashboard>? _dotNetRef;
     private System.Timers.Timer? _refreshTimer;
@@ -415,6 +421,7 @@
         Devices = MicService.GetDevices();
         RenderDevices = ProcessLoopbackCapture.GetRenderDevices().ToList();
         LocalAudioRouting.RestoreAllMuted();
+        CheckVirtualDeviceStatus();
 
         // Load persisted card layout from current profile (card-playlist removed by default)
         var p = ProfileManager.CurrentProfile;
@@ -878,6 +885,45 @@
         RefreshWindows();
         Devices = MicService.GetDevices();
         RenderDevices = ProcessLoopbackCapture.GetRenderDevices().ToList();
+        CheckVirtualDeviceStatus();
+    }
+
+    private void CheckVirtualDeviceStatus() {
+        IsVirtualDeviceReady = VirtualDeviceService.IsVirtualDeviceInstalled(out DetectedVirtualDeviceId, out DetectedVirtualDeviceName);
+    }
+
+    private void UseDetectedVirtualDevice() {
+        if (!string.IsNullOrEmpty(DetectedVirtualDeviceId)) {
+            ProfileManager.CurrentProfile.CaptureDeviceId = DetectedVirtualDeviceId;
+            ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+            EnsureAudioMonitoring(SelectedProcessId);
+            StateHasChanged();
+        }
+    }
+
+    private async Task InstallVirtualAudioCable() {
+        if (IsInstallingVirtualCable) return;
+        IsInstallingVirtualCable = true;
+        VirtualCableInstallStatus = "Installing driver (please accept Windows UAC prompt)...";
+        StateHasChanged();
+
+        var result = await VirtualDeviceService.InstallVirtualCableAsync();
+        IsInstallingVirtualCable = false;
+        VirtualCableInstallStatus = result.Message;
+
+        RefreshAudioAndWindows();
+
+        if (result.Success && !string.IsNullOrEmpty(result.DeviceId)) {
+            ProfileManager.CurrentProfile.CaptureDeviceId = result.DeviceId;
+            ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+            EnsureAudioMonitoring(SelectedProcessId);
+        }
+
+        StateHasChanged();
+    }
+
+    private void OpenWindowsAppVolume() {
+        VirtualDeviceService.OpenAppVolumeSettings();
     }
 
     private int _previousNonZeroAppVolume = 100;
@@ -942,22 +988,20 @@
         ProfileManager.CurrentProfile.AudioFormat = format;
         ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
 
-        if (IsLive) {
-            if (Enum.TryParse<AudioFormat>(format, true, out var parsed)) {
-                Transcoder.SetFormat(parsed, ProfileManager.CurrentProfile.Bitrate);
-            }
+        if (Enum.TryParse<AudioFormat>(format, true, out var parsed)) {
+            Transcoder.SetFormat(parsed, ProfileManager.CurrentProfile.Bitrate);
         }
+        StateHasChanged();
     }
 
     private void SetBitrate(int bitrate) {
         ProfileManager.CurrentProfile.Bitrate = bitrate;
         ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
 
-        if (IsLive) {
-            if (Enum.TryParse<AudioFormat>(ProfileManager.CurrentProfile.AudioFormat, true, out var parsed)) {
-                Transcoder.SetFormat(parsed, bitrate);
-            }
+        if (Enum.TryParse<AudioFormat>(ProfileManager.CurrentProfile.AudioFormat, true, out var parsed)) {
+            Transcoder.SetFormat(parsed, bitrate);
         }
+        StateHasChanged();
     }
 
     private void SetAccentColor(string hex) {
@@ -1292,7 +1336,7 @@
                 </div>
             </div>
 
-            <!-- Audio Output Capture Device -->
+            <!-- Audio Output Capture Device & Virtual Cable Integration -->
             <div style="margin-bottom: 14px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
                     <label class="scrim-label" style="margin: 0;">Audio Output / Stream Device</label>
@@ -1306,8 +1350,43 @@
                         <option value="@rd.Id">@rd.Name</option>
                     }
                 </select>
-                <div style="font-size: 10px; color: #64748b; margin-top: 4px; line-height: 1.4;">
-                    💡 <b>Stream-Only / Local Mute Tip:</b> To stream music without hearing it through your headphones, route the music app's output in Windows Settings to a virtual device (e.g. <i>Steam Streaming Speakers</i>), then select that device here.
+
+                <!-- Virtual Audio Device Status & 1-Click Setup -->
+                <div style="margin-top: 8px; background: #14171d; border: 1px solid #252a35; border-radius: 8px; padding: 8px 10px;">
+                    @if (IsVirtualDeviceReady) {
+                        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #10b981; box-shadow: 0 0 6px #10b981;"></span>
+                                <span style="font-size: 11px; font-weight: 600; color: #e2e8f0;">Virtual Device: @(DetectedVirtualDeviceName?.Replace("Speakers (", "").TrimEnd(')'))</span>
+                            </div>
+                            <div style="display: flex; gap: 6px;">
+                                @if (ProfileManager.CurrentProfile.CaptureDeviceId != DetectedVirtualDeviceId) {
+                                    <button class="pill-option" style="padding: 2px 8px; font-size: 10px; background: #00d2ff; color: #0b0d14; font-weight: 700;" @onclick="UseDetectedVirtualDevice" title="Route Scrim stream capture to this virtual device">
+                                        🎯 Select for Stream
+                                    </button>
+                                }
+                                <button class="pill-option" style="padding: 2px 8px; font-size: 10px; color: #94a3b8;" @onclick="OpenWindowsAppVolume" title="Open Windows Volume Mixer to assign music apps to this device">
+                                    ⚙ Route App in Windows
+                                </button>
+                            </div>
+                        </div>
+                        <div style="font-size: 10px; color: #64748b; margin-top: 4px; line-height: 1.4;">
+                            💡 Click <b>Route App in Windows</b> to set your music app's output to this device for 100% silent local listening.
+                        </div>
+                    } else {
+                        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;">
+                            <div>
+                                <div style="font-size: 11px; font-weight: 600; color: #e2e8f0;">Scrim Virtual Audio Cable</div>
+                                <div style="font-size: 10px; color: #64748b;">Install WHQL virtual cable for isolated stream audio.</div>
+                            </div>
+                            <button class="pill-option" style="padding: 3px 10px; font-size: 10px; background: #00d2ff; color: #0b0d14; font-weight: 700;" @onclick="InstallVirtualAudioCable" disabled="@IsInstallingVirtualCable">
+                                @(IsInstallingVirtualCable ? "⏳ Installing..." : "📥 Install Virtual Cable")
+                            </button>
+                        </div>
+                        @if (!string.IsNullOrEmpty(VirtualCableInstallStatus)) {
+                            <div style="font-size: 10px; color: #38bdf8; margin-top: 4px;">@VirtualCableInstallStatus</div>
+                        }
+                    }
                 </div>
             </div>
 

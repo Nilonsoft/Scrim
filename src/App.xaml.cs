@@ -28,6 +28,7 @@ namespace Scrim {
             services.AddTransient<ProcessLoopbackCapture>();
             services.AddTransient<MicrophoneCaptureService>();
             services.AddSingleton<LocalAudioRoutingService>();
+            services.AddSingleton<VirtualAudioDeviceService>();
 
             // Server & Metadata
             services.AddSingleton<INetworkDiscoveryService, NetworkDiscoveryService>();
