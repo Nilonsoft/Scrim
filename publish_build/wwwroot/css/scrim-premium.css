@@ -759,6 +759,100 @@ body {
     background: #6b7280;
 }
 
+/* Topbar Stream Transmission (TX) Badge & Indicator */
+.topbar-tx-badge {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    border-radius: 20px;
+    padding: 4px 11px;
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.2s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+.topbar-tx-badge.tx-on {
+    background: rgba(34, 197, 94, 0.12);
+    border: 1px solid rgba(34, 197, 94, 0.45);
+    box-shadow: 0 0 12px rgba(34, 197, 94, 0.22);
+}
+
+.topbar-tx-badge.tx-on:hover {
+    background: rgba(34, 197, 94, 0.18);
+    border-color: rgba(34, 197, 94, 0.65);
+    box-shadow: 0 0 16px rgba(34, 197, 94, 0.32);
+}
+
+.topbar-tx-badge.tx-off {
+    background: #14171d;
+    border: 1px solid #232731;
+    opacity: 0.75;
+}
+
+.topbar-tx-badge.tx-off:hover {
+    background: #1a1e26;
+    border-color: #323846;
+    opacity: 1;
+}
+
+.topbar-tx-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #475569;
+    transition: all 0.2s ease;
+}
+
+.topbar-tx-badge.tx-on .topbar-tx-dot {
+    background: #22c55e;
+    box-shadow: 0 0 8px #22c55e;
+    animation: txPulse 1.6s infinite ease-in-out;
+}
+
+.topbar-tx-label {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.6px;
+    transition: color 0.2s ease;
+}
+
+.topbar-tx-badge.tx-on .topbar-tx-label {
+    color: #4ade80;
+    text-shadow: 0 0 8px rgba(74, 222, 128, 0.5);
+}
+
+.topbar-tx-badge.tx-off .topbar-tx-label {
+    color: #64748b;
+}
+
+.topbar-tx-meter {
+    width: 52px;
+    height: 6px;
+    background: #0c0e12;
+    border-radius: 3px;
+    overflow: hidden;
+    border: 1px solid #1e222c;
+    transition: border-color 0.2s ease;
+}
+
+.topbar-tx-badge.tx-on .topbar-tx-meter {
+    border-color: rgba(34, 197, 94, 0.35);
+}
+
+.topbar-tx-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(to right, #22c55e 0%, #eab308 70%, #ef4444 100%);
+    border-radius: 2px;
+    transition: width 0.06s linear;
+}
+
+@keyframes txPulse {
+    0% { transform: scale(0.9); opacity: 0.7; box-shadow: 0 0 4px #22c55e; }
+    50% { transform: scale(1.2); opacity: 1; box-shadow: 0 0 10px #22c55e; }
+    100% { transform: scale(0.9); opacity: 0.7; box-shadow: 0 0 4px #22c55e; }
+}
+
 .stream-meter-channel {
     display: flex;
     align-items: center;

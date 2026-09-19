@@ -164,7 +164,13 @@ window.scrimDragDrop = {
 
         if (topbarTx) {
             var avgPct = (pctL + pctR) / 2;
-            topbarTx.style.width = isLive ? avgPct.toFixed(0) + '%' : '0%';
+            if (isLive) {
+                // When live/transmitting, maintain an active RF carrier pilot floor (minimum 8%) plus audio level modulation
+                var txPct = Math.max(8, avgPct);
+                topbarTx.style.width = txPct.toFixed(0) + '%';
+            } else {
+                topbarTx.style.width = '0%';
+            }
         }
     }
 };

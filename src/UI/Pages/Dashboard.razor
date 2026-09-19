@@ -52,10 +52,11 @@
             <span class="on-air-dot"></span>
             <span>@(IsLive ? "ON AIR" : "OFFLINE")</span>
         </div>
-        <div style="display: flex; align-items: center; gap: 6px; background: #14171d; border: 1px solid #232731; border-radius: 20px; padding: 4px 10px;" title="Stream Broadcast Output Level">
-            <span style="font-size: 10px; font-weight: 700; color: #788195; letter-spacing: 0.5px;">TX</span>
-            <div style="width: 50px; height: 6px; background: #0c0e12; border-radius: 3px; overflow: hidden; border: 1px solid #1e222c;">
-                <div id="topbar-tx-indicator" style="height: 100%; width: 0%; background: linear-gradient(to right, #22c55e, #eab308, #ef4444); border-radius: 2px; transition: width 0.06s linear;"></div>
+        <div class="topbar-tx-badge @(IsLive ? "tx-on" : "tx-off")" @onclick="ToggleBroadcast" title="@(IsLive ? "Transmitter Active (Live Broadcasting) - Click to Stop TX" : "Transmitter Standby (Offline) - Click to Start TX")">
+            <span class="topbar-tx-dot"></span>
+            <span class="topbar-tx-label">TX</span>
+            <div class="topbar-tx-meter">
+                <div id="topbar-tx-indicator" class="topbar-tx-fill"></div>
             </div>
         </div>
     </div>
