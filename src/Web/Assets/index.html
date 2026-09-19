@@ -3,53 +3,222 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Scrim Radio</title>
+    <title id="webTitle">Global Indie Radio - Live Broadcast</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/assets/player.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div class="glass-container">
-        <header>
-            <div class="on-air-indicator" id="onAirBadge">ON AIR</div>
-            <h1>Scrim Radio</h1>
-            <div class="listener-count"><span id="listenerCount">0</span> listeners</div>
-        </header>
-        
-        <main>
-            <div class="player-card">
-                <div class="album-art-container">
-                    <!-- Placeholder gradient if no art -->
-                    <div class="album-art-placeholder" id="albumArt"></div>
-                </div>
-                
-                <div class="track-info">
-                    <h2 id="trackTitle">Awaiting Track...</h2>
-                    <h3 id="trackArtist">Scrim DJ</h3>
-                </div>
+    <!-- Top Navigation Header -->
+    <header class="player-header">
+        <div class="header-left">
+            <span class="station-brand" id="stationBrand">GLOBAL INDIE RADIO</span>
+            <div class="on-air-pill" id="onAirPill">
+                <span class="pill-dot"></span>
+                <span class="pill-text">ON AIR</span>
+                <span class="broadcast-waves">((•))</span>
+            </div>
+        </div>
 
-                <div class="controls">
-                    <button id="playBtn" class="play-btn">
-                        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-                    </button>
-                    <div class="volume-control">
-                        <input type="range" id="volumeSlider" min="0" max="1" step="0.01" value="1">
+        <div class="header-center">
+            <div class="clock-pill" id="liveClock">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <polyline points="12 6 12 12 16 14"></polyline>
+                </svg>
+                <span id="clockTime">10:09 PM GMT</span>
+            </div>
+        </div>
+
+        <div class="header-right">
+            <nav class="nav-links" id="navLinksContainer">
+                <a href="#discover" class="nav-link">Discover</a>
+                <a href="#schedule" class="nav-link">Schedule</a>
+                <a href="#shows" class="nav-link">Shows</a>
+                <a href="#about" class="nav-link">About</a>
+            </nav>
+            <div class="header-icons">
+                <button class="icon-btn" title="Listeners">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                        <circle cx="9" cy="7" r="4"></circle>
+                        <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                    </svg>
+                    <span id="listenerCount" style="font-size: 12px; margin-left: 4px; font-weight: 600;">68</span>
+                </button>
+                <button class="icon-btn" title="User Profile">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                        <circle cx="12" cy="7" r="4"></circle>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Container -->
+    <main class="player-main-container">
+        <!-- LEFT: Primary Broadcast Player Card -->
+        <section class="broadcast-player-card">
+            <div class="player-top-row">
+                <!-- Album Artwork -->
+                <div class="album-art-wrap">
+                    <div class="album-art-image" id="albumArt">
+                        <div class="album-art-overlay">
+                            <span class="album-badge">THE NEW<br>ABNORMAL</span>
+                            <span class="album-sub">THE STROKES</span>
+                        </div>
                     </div>
                 </div>
-                <audio id="audioElement" src="/stream" preload="none"></audio>
+
+                <!-- Track & Show Metadata + Live Waveform -->
+                <div class="meta-and-waveform">
+                    <div class="meta-header-icons">
+                        <span class="genre-tag" id="trackGenre">The Strokes</span>
+                        <div class="top-action-icons">
+                            <button class="action-icon-btn" title="Audio Stream">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                                </svg>
+                            </button>
+                            <button class="action-icon-btn" title="Settings">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="3"></circle>
+                                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <h1 class="track-title" id="trackTitle">Selfless</h1>
+                    <h2 class="track-artist" id="trackArtist">THE STROKES</h2>
+                    <div class="show-subtitle" id="showSubtitle">Late Night Indie Drive (Host: Sarah J.)</div>
+
+                    <!-- Live Ambient Waveform Graphic -->
+                    <div class="waveform-container">
+                        <div class="wave-bar"></div>
+                        <div class="wave-bar"></div>
+                        <div class="wave-bar"></div>
+                        <div class="wave-bar"></div>
+                        <div class="wave-bar"></div>
+                        <div class="wave-bar"></div>
+                        <div class="wave-bar"></div>
+                        <div class="wave-bar"></div>
+                        <div class="wave-bar"></div>
+                        <div class="wave-bar"></div>
+                        <div class="wave-bar"></div>
+                        <div class="wave-bar"></div>
+                        <div class="wave-bar"></div>
+                        <div class="wave-bar"></div>
+                        <div class="wave-bar"></div>
+                        <div class="wave-bar"></div>
+                    </div>
+                </div>
             </div>
 
-            <aside class="queue-section">
-                <h3>Song Requests</h3>
-                <form id="requestForm">
-                    <input type="text" id="requestInput" placeholder="Artist - Song" required>
-                    <button type="submit">Request</button>
-                </form>
-                <ul id="requestQueue">
-                    <!-- Requests populate here -->
+            <!-- Scrub / Progress Line -->
+            <div class="scrub-container">
+                <div class="scrub-track">
+                    <div class="scrub-fill" id="scrubFill">
+                        <div class="scrub-thumb"></div>
+                    </div>
+                </div>
+                <div class="time-readout">
+                    <span id="currentTime">2:41</span> / <span id="totalTime">4:18</span>
+                </div>
+            </div>
+
+            <!-- Bottom Transport & Volume Controls -->
+            <div class="player-bottom-bar">
+                <div class="bottom-track-name" id="bottomTrackName">Selfless</div>
+
+                <div class="center-playback-controls">
+                    <button class="transport-btn" title="Previous Track">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                            <polygon points="19 20 9 12 19 4 19 20"></polygon>
+                            <line x1="5" y1="19" x2="5" y2="5" stroke="currentColor" stroke-width="2.5"></line>
+                        </svg>
+                    </button>
+
+                    <!-- Huge Glowing Circular Play/Pause Button -->
+                    <button class="large-play-button" id="playBtn" title="Play / Pause">
+                        <svg class="icon-play" viewBox="0 0 24 24" fill="currentColor">
+                            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                        </svg>
+                        <svg class="icon-pause" viewBox="0 0 24 24" fill="currentColor" style="display: none;">
+                            <rect x="6" y="4" width="4" height="16"></rect>
+                            <rect x="14" y="4" width="4" height="16"></rect>
+                        </svg>
+                    </button>
+
+                    <button class="transport-btn" title="Next Track">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                            <polygon points="5 4 15 12 5 20 5 4"></polygon>
+                            <line x1="19" y1="5" x2="19" y2="19" stroke="currentColor" stroke-width="2.5"></line>
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="volume-and-settings">
+                    <button class="action-icon-btn" title="Volume">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                            <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                        </svg>
+                    </button>
+                    <input type="range" class="volume-slider" id="volumeSlider" min="0" max="1" step="0.02" value="0.85">
+                    <button class="action-icon-btn" title="Audio Settings">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="3"></circle>
+                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <audio id="audioElement" preload="none"></audio>
+        </section>
+
+        <!-- RIGHT: Live Queue & Song Request Cards -->
+        <aside class="sidebar-cards">
+            <!-- UPCOMING: LIVE QUEUE -->
+            <div class="sidebar-card">
+                <h3 class="sidebar-title">UPCOMING: LIVE QUEUE</h3>
+                <ul class="queue-list" id="queueList">
+                    <li class="queue-item">
+                        <span class="queue-track">1. Tame Impala - Borderline</span>
+                        <span class="queue-dur">(3:45)</span>
+                    </li>
+                    <li class="queue-item">
+                        <span class="queue-track">2. Gorillaz - On Melancholy Hill</span>
+                        <span class="queue-dur">(4:12)</span>
+                    </li>
+                    <li class="queue-item">
+                        <span class="queue-track">3. Lana Del Rey - White Dress</span>
+                        <span class="queue-dur">(3:18)</span>
+                    </li>
+                    <li class="queue-item">
+                        <span class="queue-track">4. Arctic Monkeys - Do I Wanna Know?</span>
+                        <span class="queue-dur">(4:32)</span>
+                    </li>
                 </ul>
-            </aside>
-        </main>
-    </div>
+            </div>
+
+            <!-- REQUEST A SONG -->
+            <div class="sidebar-card">
+                <h3 class="sidebar-title">REQUEST A SONG</h3>
+                <form id="requestForm" class="request-form">
+                    <input type="text" id="requestInput" class="request-input" placeholder="Enter Song Title & Artist..." required autocomplete="off">
+                    <button type="submit" class="submit-request-btn">SUBMIT REQUEST</button>
+                </form>
+                <div id="requestSuccess" class="request-success-msg" style="display: none;">Request submitted to DJ!</div>
+            </div>
+        </aside>
+    </main>
+
     <script src="/assets/player.js"></script>
 </body>
 </html>

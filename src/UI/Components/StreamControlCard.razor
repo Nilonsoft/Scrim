@@ -10,7 +10,7 @@
 @inject MultiFormatTranscoder Transcoder
 @inject IProfileManager ProfileManager
 
-<div class="card p-3 mb-3" style="background-color: #181818; border: 1px solid #383838; border-radius: 8px;">
+<div class="scrim-card">
     <h4 style="color: white; margin-top: 0;">Broadcast Status</h4>
     
     <div class="mb-3">
@@ -24,9 +24,17 @@
         <button class="btn btn-sm btn-outline-secondary mt-2" @onclick="RefreshWindows" disabled="@IsLive">Refresh</button>
     </div>
 
-    <p style="color: #ccc;">Status: <strong style="color: @(IsLive ? "#ff4444" : "#44ff44")">@(IsLive ? "ON AIR" : "OFFLINE")</strong></p>
+    <div class="mb-3">
+        <p style="color: #ccc; margin-bottom: 0;">Status: <strong style="color: @(IsLive ? "#ff4444" : "#44ff44")">@(IsLive ? "ON AIR" : "OFFLINE")</strong></p>
+        @if (IsLive)
+        {
+            <p style="color: #ccc; margin-top: 5px; margin-bottom: 0; font-size: 0.9em;">
+                Web UI: <a href="http://localhost:@(ProfileManager.CurrentProfile.Port)" target="_blank" style="color: #00d2ff; text-decoration: none;">http://localhost:@(ProfileManager.CurrentProfile.Port)</a>
+            </p>
+        }
+    </div>
     <div class="d-flex">
-        <button class="btn btn-success me-2" @onclick="StartStream" disabled="@(IsLive || SelectedProcessId == 0)">Start Stream</button>
+        <button class="scrim-btn-primary w-100" @onclick="StartStream" disabled="@(IsLive || SelectedProcessId == 0)">Start Stream</button>
         <button class="btn btn-danger" @onclick="StopStream" disabled="@(!IsLive)">Stop Stream</button>
     </div>
 </div>

@@ -1,92 +1,200 @@
-document.addEventListener('DOMContentLoaded', () => {
+// Global Indie Radio - Web Player Logic
+
+document.addEventListener('DOMContentLoaded', function () {
     const audio = document.getElementById('audioElement');
     const playBtn = document.getElementById('playBtn');
+    const playIcon = playBtn ? playBtn.querySelector('.icon-play') : null;
+    const pauseIcon = playBtn ? playBtn.querySelector('.icon-pause') : null;
     const volumeSlider = document.getElementById('volumeSlider');
     const trackTitle = document.getElementById('trackTitle');
     const trackArtist = document.getElementById('trackArtist');
+    const bottomTrackName = document.getElementById('bottomTrackName');
     const listenerCount = document.getElementById('listenerCount');
+    const clockTime = document.getElementById('clockTime');
     const requestForm = document.getElementById('requestForm');
     const requestInput = document.getElementById('requestInput');
-    const requestQueue = document.getElementById('requestQueue');
+    const requestSuccess = document.getElementById('requestSuccess');
+    const queueList = document.getElementById('queueList');
 
     let isPlaying = false;
 
+    // Live GMT Clock updater
+    function updateClock() {
+        if (!clockTime) return;
+        const now = new Date();
+        let hours = now.getUTCHours();
+        const minutes = String(now.getUTCMinutes()).padStart(2, '0');
+        const ampm = hours >= 12 ? 'PM' : 'AM';
+        hours = hours % 12;
+        hours = hours ? hours : 12;
+        clockTime.textContent = `${hours}:${minutes} ${ampm} GMT`;
+    }
+    updateClock();
+    setInterval(updateClock, 1000);
+
     // Audio Playback
-    playBtn.addEventListener('click', () => {
-        if (isPlaying) {
-            audio.pause();
-            audio.src = ''; // disconnect to prevent buffering lag
-            playBtn.classList.remove('playing');
-            playBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
-            isPlaying = false;
-        } else {
-            // Add timestamp to prevent caching the stream
-            audio.src = '/stream?t=' + new Date().getTime();
-            audio.play().then(() => {
-                playBtn.classList.add('playing');
-                playBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>';
-                isPlaying = true;
-            }).catch(e => console.error("Playback failed:", e));
+    if (playBtn && audio) {
+        playBtn.addEventListener('click', function () {
+            if (isPlaying) {
+                audio.pause();
+                audio.src = '';
+                isPlaying = false;
+                if (playIcon) playIcon.style.display = 'block';
+                if (pauseIcon) pauseIcon.style.display = 'none';
+            } else {
+                audio.src = '/stream?t=' + Date.now();
+                audio.play().then(function () {
+                    isPlaying = true;
+                    if (playIcon) playIcon.style.display = 'none';
+                    if (pauseIcon) pauseIcon.style.display = 'block';
+                }).catch(function (e) {
+                    console.error("Stream playback error:", e);
+                });
+            }
+        });
+    }
+
+    if (volumeSlider && audio) {
+        audio.volume = parseFloat(volumeSlider.value);
+        volumeSlider.addEventListener('input', function (e) {
+            audio.volume = parseFloat(e.target.value);
+        });
+    }
+
+    // Dynamic Branding Function
+    function applyBranding(branding) {
+        if (!branding) return;
+
+        if (branding.pageTitle) {
+            document.title = branding.pageTitle;
+            const titleEl = document.getElementById('webTitle');
+            if (titleEl) titleEl.textContent = branding.pageTitle;
         }
-    });
 
-    volumeSlider.addEventListener('input', (e) => {
-        audio.volume = e.target.value;
-    });
-
-    // Server-Sent Events for Metadata
-    const evtSource = new EventSource('/api/events');
-    
-    evtSource.onmessage = function(event) {
-        try {
-            const data = JSON.parse(event.data);
-            
-            if (data.type === "metadata") {
-                trackTitle.textContent = data.title || "Unknown Track";
-                trackArtist.textContent = data.artist || "Unknown Artist";
-            }
-            
-            if (data.type === "stats") {
-                listenerCount.textContent = data.listeners || "0";
-            }
-            
-            if (data.type === "queue") {
-                updateQueue(data.requests || []);
-            }
-        } catch (e) {
-            console.error("Failed to parse SSE data", e);
+        if (branding.stationName) {
+            const brandEl = document.getElementById('stationBrand');
+            if (brandEl) brandEl.textContent = branding.stationName;
+            const albumSub = document.querySelector('.album-sub');
+            if (albumSub) albumSub.textContent = branding.stationName;
         }
-    };
 
-    // Song Requests
-    requestForm.addEventListener('submit', (e) => {
-        e.preventDefault();
-        const requestText = requestInput.value.trim();
-        if (!requestText) return;
-
-        fetch('/api/requests', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ query: requestText })
-        }).then(res => {
-            if (res.ok) {
-                requestInput.value = '';
-                // Optimistically add to UI, though SSE will sync it eventually
-                const li = document.createElement('li');
-                li.innerHTML = `<span>${requestText}</span><span class="req-status">Pending</span>`;
-                requestQueue.appendChild(li);
+        if (branding.showTitle || branding.hostName) {
+            const subtitleEl = document.getElementById('showSubtitle');
+            if (subtitleEl) {
+                const hostPart = branding.hostName ? ` (Host: ${branding.hostName})` : '';
+                subtitleEl.textContent = `${branding.showTitle || 'Live Broadcast'}${hostPart}`;
             }
-        }).catch(err => console.error(err));
-    });
+        }
+
+        if (branding.genreTag) {
+            const genreEl = document.getElementById('trackGenre');
+            if (genreEl) genreEl.textContent = branding.genreTag;
+        }
+
+        if (branding.accentColor) {
+            document.documentElement.style.setProperty('--on-air-red', branding.accentColor);
+            document.documentElement.style.setProperty('--on-air-glow', `0 0 20px ${branding.accentColor}88`);
+        }
+
+        if (branding.navLinks) {
+            const navContainer = document.getElementById('navLinksContainer');
+            if (navContainer) {
+                const links = branding.navLinks.split(',').map(s => s.trim()).filter(Boolean);
+                if (links.length > 0) {
+                    navContainer.innerHTML = '';
+                    links.forEach(link => {
+                        const a = document.createElement('a');
+                        a.href = '#' + link.toLowerCase().replace(/\s+/g, '-');
+                        a.className = 'nav-link';
+                        a.textContent = link;
+                        navContainer.appendChild(a);
+                    });
+                }
+            }
+        }
+    }
+
+    // Initial branding load
+    fetch('/api/branding')
+        .then(res => res.json())
+        .then(applyBranding)
+        .catch(e => console.warn("Could not fetch branding", e));
+
+    // Connect to Server-Sent Events (SSE)
+    try {
+        const evtSource = new EventSource('/api/events');
+
+        evtSource.onmessage = function (event) {
+            try {
+                const data = JSON.parse(event.data);
+
+                if (data.type === 'metadata') {
+                    const title = data.title || "Unknown Track";
+                    const artist = data.artist || "Unknown Artist";
+                    if (trackTitle) trackTitle.textContent = title;
+                    if (trackArtist) trackArtist.textContent = artist.toUpperCase();
+                    if (bottomTrackName) bottomTrackName.textContent = title;
+                }
+
+                if (data.type === 'branding') {
+                    applyBranding(data);
+                }
+
+                if (data.type === 'stats' && listenerCount) {
+                    listenerCount.textContent = data.listeners || '1';
+                }
+
+                if (data.type === 'queue' && data.requests) {
+                    updateQueue(data.requests);
+                }
+            } catch (err) {
+                console.error("SSE parse error", err);
+            }
+        };
+    } catch (e) {
+        console.warn("SSE not available", e);
+    }
+
+    // Song Request Submission
+    if (requestForm && requestInput) {
+        requestForm.addEventListener('submit', function (e) {
+            e.preventDefault();
+            const text = requestInput.value.trim();
+            if (!text) return;
+
+            fetch('/api/requests', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query: text })
+            }).then(function (res) {
+                if (res.ok) {
+                    requestInput.value = '';
+                    if (requestSuccess) {
+                        requestSuccess.style.display = 'block';
+                        setTimeout(function () {
+                            requestSuccess.style.display = 'none';
+                        }, 3500);
+                    }
+                }
+            }).catch(function (err) {
+                console.error("Request failed", err);
+            });
+        });
+    }
 
     function updateQueue(requests) {
-        requestQueue.innerHTML = '';
-        requests.forEach(req => {
+        if (!queueList || !Array.isArray(requests)) return;
+        if (requests.length === 0) return;
+
+        queueList.innerHTML = '';
+        requests.forEach(function (req, index) {
             const li = document.createElement('li');
-            li.innerHTML = `<span>${req.query}</span><span class="req-status">${req.status}</span>`;
-            requestQueue.appendChild(li);
+            li.className = 'queue-item';
+            li.innerHTML = `
+                <span class="queue-track">${index + 1}. ${req.query}</span>
+                <span class="queue-dur">(${req.status || 'Pending'})</span>
+            `;
+            queueList.appendChild(li);
         });
     }
 });

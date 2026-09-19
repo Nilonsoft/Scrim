@@ -3,6 +3,7 @@ using System.IO;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
+using Scrim.Configuration;
 using Scrim.Metadata;
 
 namespace Scrim.Server {
@@ -10,13 +11,15 @@ namespace Scrim.Server {
         private readonly BroadcastHub _hub;
         private readonly IMetadataService _metadataService;
         private readonly SongRequestController _requestController;
+        private readonly IProfileManager _profileManager;
         private HttpListener? _listener;
         private CancellationTokenSource? _cts;
 
-        public HttpStreamServer(BroadcastHub hub, IMetadataService metadataService, SongRequestController requestController) {
+        public HttpStreamServer(BroadcastHub hub, IMetadataService metadataService, SongRequestController requestController, IProfileManager profileManager) {
             _hub = hub;
             _metadataService = metadataService;
             _requestController = requestController;
+            _profileManager = profileManager;
         }
 
         public void Start(int port) {
@@ -40,6 +43,8 @@ namespace Scrim.Server {
                     Scrim.Web.EmbeddedWebPlayer.ServeAsync(context);
                 } else if (context.Request.Url!.AbsolutePath == "/api/events") {
                     _ = HandleSseClient(context, token);
+                } else if (context.Request.Url!.AbsolutePath == "/api/branding") {
+                    HandleBrandingRequest(context);
                 } else if (context.Request.Url!.AbsolutePath == "/api/requests" && context.Request.HttpMethod == "POST") {
                     HandleSongRequest(context);
                 } else {
@@ -91,11 +96,30 @@ namespace Scrim.Server {
                     string queueJson = $"{{\"type\":\"queue\",\"requests\":[{string.Join(",", requests)}]}}";
                     await writer.WriteAsync($"data: {queueJson}\n\n");
 
+                    var profile = _profileManager.CurrentProfile;
+                    string brandingJson = $"{{\"type\":\"branding\",\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"logoUrl\":\"{EscapeJson(profile.LogoUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\"}}";
+                    await writer.WriteAsync($"data: {brandingJson}\n\n");
+
                     await writer.FlushAsync();
                 }
             } catch {
             } finally {
                 response.Close();
+            }
+        }
+
+        private void HandleBrandingRequest(HttpListenerContext context) {
+            try {
+                var profile = _profileManager.CurrentProfile;
+                string json = $"{{\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"logoUrl\":\"{EscapeJson(profile.LogoUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\"}}";
+                byte[] buffer = System.Text.Encoding.UTF8.GetBytes(json);
+                context.Response.ContentType = "application/json";
+                context.Response.ContentLength64 = buffer.Length;
+                context.Response.OutputStream.Write(buffer, 0, buffer.Length);
+            } catch {
+                context.Response.StatusCode = 500;
+            } finally {
+                context.Response.Close();
             }
         }
 

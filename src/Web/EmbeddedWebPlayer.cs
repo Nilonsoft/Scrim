@@ -17,14 +17,23 @@ namespace Scrim.Web {
             // or we embed them. For simplicity, we'll read from the current app directory if we copy them.
             // But wait, it's better to just read from the filesystem relative to the executable for now.
             
-            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-            // The assets are in src/Web/Assets, but when compiled they should be copied to Output directory.
-            // Let's assume they are copied to "Web/Assets/" in the output.
-            string filePath = Path.Combine(baseDir, "Web", "Assets", path.TrimStart('/'));
+            string relativePath = path.TrimStart('/');
+            if (relativePath.StartsWith("assets/", StringComparison.OrdinalIgnoreCase)) {
+                relativePath = relativePath.Substring("assets/".Length);
+            }
+            if (string.IsNullOrEmpty(relativePath)) {
+                relativePath = "index.html";
+            }
 
-            // Fallback for debugging if running directly from IDE
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            string filePath = Path.Combine(baseDir, "Web", "Assets", relativePath);
+
+            // Fallbacks for development / debugging
             if (!File.Exists(filePath)) {
-                filePath = Path.Combine(baseDir, "..", "..", "..", "..", "src", "Web", "Assets", path.Replace("/assets/", "").TrimStart('/'));
+                filePath = Path.Combine(baseDir, "..", "..", "..", "..", "src", "Web", "Assets", relativePath);
+            }
+            if (!File.Exists(filePath)) {
+                filePath = Path.Combine(baseDir, "..", "..", "..", "src", "Web", "Assets", relativePath);
             }
 
             if (File.Exists(filePath)) {
@@ -33,6 +42,9 @@ namespace Scrim.Web {
                     ".html" => "text/html",
                     ".css" => "text/css",
                     ".js" => "application/javascript",
+                    ".png" => "image/png",
+                    ".jpg" or ".jpeg" => "image/jpeg",
+                    ".svg" => "image/svg+xml",
                     _ => "text/plain"
                 };
 

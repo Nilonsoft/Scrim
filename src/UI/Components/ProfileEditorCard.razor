@@ -1,7 +1,7 @@
 @using Scrim.Configuration
 @inject IProfileManager ProfileManager
 
-<div class="card p-3 mb-3" style="background-color: #181818; border: 1px solid #383838; border-radius: 8px;">
+<div class="scrim-card">
     <h4 style="color: white; margin-top: 0;">Stream Profile</h4>
 
     <div class="mb-3">
@@ -44,12 +44,16 @@
             <label class="form-label text-muted">Broadcast Port</label>
             <input type="number" class="form-control bg-dark text-white border-secondary" @bind="CurrentProfile.Port" />
         </div>
-        <div class="mb-3 form-check">
-            <input type="checkbox" class="form-check-input" id="closeToTrayCheck" @bind="CurrentProfile.CloseToTray" />
-            <label class="form-check-label text-muted" for="closeToTrayCheck">Minimize/Close to System Tray</label>
+        <div class="mb-4">
+            <label class="form-label text-secondary small">System Tray Behavior</label>
+            <select class="form-select scrim-input" @bind="CurrentProfile.CloseMode">
+                <option value="@CloseToTrayMode.Ask">Ask Every Time</option>
+                <option value="@CloseToTrayMode.MinimizeToTray">Always Minimize to Tray</option>
+                <option value="@CloseToTrayMode.Close">Always Exit Application</option>
+            </select>
         </div>
         
-        <button class="btn btn-outline-success btn-sm w-100" @onclick="SaveProfile">Save Configuration</button>
+        <button class="scrim-btn-primary w-100" @onclick="SaveProfile">Save Configuration</button>
     }
 </div>
 

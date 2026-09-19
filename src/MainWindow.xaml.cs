@@ -30,12 +30,43 @@ public partial class MainWindow : Window
         if (_isExplicitClose) return;
 
         var profileManager = ((App)Application.Current).Services.GetService<IProfileManager>();
-        bool closeToTray = profileManager?.CurrentProfile?.CloseToTray ?? true;
+        var profile = profileManager?.CurrentProfile;
+        
+        if (profile == null) return;
 
-        if (closeToTray)
+        var mode = profile.CloseMode;
+
+        if (mode == CloseToTrayMode.Ask)
+        {
+            var prompt = new Scrim.UI.Windows.ClosePromptWindow();
+            prompt.Owner = this;
+            var result = prompt.ShowDialog();
+            
+            if (result == true)
+            {
+                mode = prompt.ChosenMode;
+                if (prompt.RememberChoice)
+                {
+                    profile.CloseMode = mode;
+                    profileManager!.SaveProfile(profile);
+                }
+            }
+            else
+            {
+                e.Cancel = true;
+                return;
+            }
+        }
+
+        if (mode == CloseToTrayMode.MinimizeToTray)
         {
             e.Cancel = true;
             this.Hide();
+        }
+        else if (mode == CloseToTrayMode.Close)
+        {
+            _isExplicitClose = true;
+            Application.Current.Shutdown();
         }
     }
 

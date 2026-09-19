@@ -1,85 +1,616 @@
 @page "/"
+@implements IDisposable
+@using Scrim.Audio
+@using Scrim.Configuration
+@using Scrim.Encoding
+@using Scrim.Metadata
 @using Scrim.Plugins
+@using Scrim.Server
+@using Scrim.Windows
+@using System.Timers
+@inject IProfileManager ProfileManager
+@inject HttpStreamServer StreamServer
+@inject ProcessLoopbackCapture Capture
+@inject MultiFormatTranscoder Transcoder
+@inject MicrophoneCaptureService MicService
+@inject AudioDuckingMixer Mixer
+@inject VoiceEffectLoader EffectLoader
+@inject SongRequestController RequestController
 @inject PluginLoader PluginLoader
+@inject IJSRuntime JSRuntime
 
-<div style="background-color: #121212; min-height: 100vh; padding: 20px; color: white;">
-    <div class="container-fluid">
-        <div class="row">
-            <div class="col-md-4" 
-                 ondragover="event.preventDefault();" 
-                 @ondrop="() => HandleDrop(0)">
-                
-                @foreach (var comp in LeftColumn) {
-                    <div draggable="true" 
-                         @ondragstart="() => HandleDragStart(comp, 0)" 
-                         style="cursor: grab; margin-bottom: 1rem;">
-                        <DynamicComponent Type="@comp" Parameters="@GetParametersFor(comp)" />
-                    </div>
-                }
-            </div>
-            
-            <div class="col-md-8" 
-                 ondragover="event.preventDefault();" 
-                 @ondrop="() => HandleDrop(1)">
-                 
-                @foreach (var comp in RightColumn) {
-                    <div draggable="true" 
-                         @ondragstart="() => HandleDragStart(comp, 1)" 
-                         style="cursor: grab; margin-bottom: 1rem;">
-                        <DynamicComponent Type="@comp" Parameters="@GetParametersFor(comp)" />
-                    </div>
-                }
-            </div>
+<!-- Top Header Bar -->
+<header class="scrim-topbar">
+    <div style="display: flex; align-items: center; gap: 14px;">
+        <button class="scrim-menu-btn" title="Menu">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <line x1="3" y1="6" x2="21" y2="6"></line>
+                <line x1="3" y1="12" x2="21" y2="12"></line>
+                <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+        </button>
+        <span style="font-weight: 700; font-size: 15px; letter-spacing: 1px; color: #fff;">SCRIM CONSOLE</span>
+    </div>
+
+    <!-- Center ON AIR Glowing Badge -->
+    <div class="on-air-badge @(IsLive ? "" : "offline")" @onclick="ToggleBroadcast" title="Click to toggle broadcast">
+        <span class="on-air-dot"></span>
+        <span>@(IsLive ? "ON AIR" : "OFFLINE")</span>
+    </div>
+
+    <!-- Right Listeners Count -->
+    <div style="display: flex; align-items: center; gap: 12px;">
+        @if (IsLive) {
+            <a href="http://localhost:@(ProfileManager.CurrentProfile.Port)" target="_blank" class="listeners-pill" style="text-decoration: none; color: #00d2ff;" title="Open Web UI">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="2" y1="12" x2="22" y2="12"></line>
+                </svg>
+                <span>Web Player :@(ProfileManager.CurrentProfile.Port)</span>
+            </a>
+        }
+        <div class="listeners-pill">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                <circle cx="9" cy="7" r="4"></circle>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+            </svg>
+            <span>Current listeners @ListenerCount</span>
         </div>
     </div>
+</header>
+
+<!-- 3-Column Studio Console Grid -->
+<div class="scrim-console-grid">
+
+    <!-- LEFT COLUMN -->
+    <div class="scrim-column" id="col-left">
+        @foreach (var cardId in LeftColumn) {
+            <div class="scrim-draggable-item" @key="cardId" id="@cardId">
+                @RenderCard(cardId)
+            </div>
+        }
+    </div>
+
+    <!-- CENTER COLUMN -->
+    <div class="scrim-column" id="col-center">
+        @foreach (var cardId in CenterColumn) {
+            <div class="scrim-draggable-item" @key="cardId" id="@cardId">
+                @RenderCard(cardId)
+            </div>
+        }
+    </div>
+
+    <!-- RIGHT COLUMN -->
+    <div class="scrim-column" id="col-right">
+        @foreach (var cardId in RightColumn) {
+            <div class="scrim-draggable-item" @key="cardId" id="@cardId">
+                @RenderCard(cardId)
+            </div>
+        }
+    </div>
+
 </div>
 
 @code {
-    private List<Type> LeftColumn = new();
-    private List<Type> RightColumn = new();
+    private List<string> LeftColumn = new() { "card-audio-routing", "card-playlist", "card-web-branding" };
+    private List<string> CenterColumn = new() { "card-vu-talk", "card-voice-fx", "card-queue" };
+    private List<string> RightColumn = new() { "card-encoding", "card-media-player", "card-soundboard" };
 
-    private Type? draggedComponent;
-    private int sourceColumnIndex;
+    private bool IsLive = false;
+    private int ListenerCount = 68;
+    private uint SelectedProcessId = 0;
+    private string SelectedDeviceId = "";
+    private IEnumerable<WindowInfo> Windows = Array.Empty<WindowInfo>();
+    private IEnumerable<MicrophoneDevice> Devices = Array.Empty<MicrophoneDevice>();
+    private readonly WindowEnumerator _enumerator = new();
+    private DotNetObjectReference<Dashboard>? _dotNetRef;
+    private Timer? _refreshTimer;
+
+    // Media Player State
+    private bool IsPlayingMedia = true;
+    private string CurrentTrackTitle = "The Peaks Album";
+    private string CurrentTrackArtist = "Mock Ramev";
+    private string CurrentTrackExtra = "Trackdata 01:73";
+
+    // Playlists
+    private class PlaylistItem {
+        public int Number { get; set; }
+        public string Title { get; set; } = "";
+        public string Artist { get; set; } = "";
+        public string Duration { get; set; } = "";
+    }
+
+    private List<PlaylistItem> PlaylistTracks = new() {
+        new PlaylistItem { Number = 1, Title = "Contimwield", Artist = "Klin Spare", Duration = "11:00" },
+        new PlaylistItem { Number = 2, Title = "Steel Lilyam", Artist = "Klin Spare", Duration = "12:30" },
+        new PlaylistItem { Number = 3, Title = "Buarno Round", Artist = "Klin Spare", Duration = "13:05" },
+        new PlaylistItem { Number = 4, Title = "Michari Balda", Artist = "Klin Spare", Duration = "14:30" }
+    };
 
     protected override void OnInitialized() {
-        LeftColumn.Add(typeof(TrackInfoCard));
-        LeftColumn.Add(typeof(MicControlCard));
-        LeftColumn.Add(typeof(ProfileEditorCard));
+        RefreshWindows();
+        Devices = MicService.GetDevices();
 
-        RightColumn.Add(typeof(StreamControlCard));
-        RightColumn.Add(typeof(QueueCard));
+        _refreshTimer = new Timer(2000);
+        _refreshTimer.Elapsed += (s, e) => {
+            InvokeAsync(() => {
+                RefreshQueue();
+                StateHasChanged();
+            });
+        };
+        _refreshTimer.Start();
+    }
 
-        foreach (var plugin in PluginLoader.LoadedPlugins) {
-            if (plugin is IUiExtension uiExt) {
-                RightColumn.Add(uiExt.ComponentType);
-            }
+    protected override async Task OnAfterRenderAsync(bool firstRender) {
+        if (firstRender) {
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await JSRuntime.InvokeVoidAsync("scrimDragDrop.init", new[] { "col-left", "col-center", "col-right" }, _dotNetRef);
         }
     }
 
-    private void HandleDragStart(Type component, int columnIndex) {
-        draggedComponent = component;
-        sourceColumnIndex = columnIndex;
+    [JSInvokable]
+    public void OnCardDropped(int oldIndex, int newIndex, string sourceColId, string targetColId) {
+        var sourceList = GetColumnList(sourceColId);
+        var targetList = GetColumnList(targetColId);
+
+        if (sourceList != null && targetList != null && oldIndex >= 0 && oldIndex < sourceList.Count) {
+            var item = sourceList[oldIndex];
+            sourceList.RemoveAt(oldIndex);
+            
+            if (newIndex >= targetList.Count) {
+                targetList.Add(item);
+            } else if (newIndex < 0) {
+                targetList.Insert(0, item);
+            } else {
+                targetList.Insert(newIndex, item);
+            }
+
+            StateHasChanged();
+        }
     }
 
-    private void HandleDrop(int targetColumnIndex) {
-        if (draggedComponent == null) return;
+    private List<string>? GetColumnList(string colId) => colId switch {
+        "col-left" => LeftColumn,
+        "col-center" => CenterColumn,
+        "col-right" => RightColumn,
+        _ => null
+    };
 
-        if (sourceColumnIndex == 0) LeftColumn.Remove(draggedComponent);
-        else RightColumn.Remove(draggedComponent);
+    private void RefreshWindows() {
+        Windows = _enumerator.GetActiveWindows();
+    }
 
-        if (targetColumnIndex == 0) LeftColumn.Add(draggedComponent);
-        else RightColumn.Add(draggedComponent);
+    private void RefreshQueue() {
+        // queue refreshed via controller
+    }
 
-        draggedComponent = null;
+    private void ToggleBroadcast() {
+        if (IsLive) {
+            StopBroadcast();
+        } else {
+            StartBroadcast();
+        }
+    }
+
+    private void StartBroadcast() {
+        IsLive = true;
+        StreamServer.Start(ProfileManager.CurrentProfile.Port);
+        if (SelectedProcessId != 0) {
+            Capture.StartCapture(SelectedProcessId);
+            Transcoder.StartTranscoding(Capture.AudioStream);
+        }
+    }
+
+    private void StopBroadcast() {
+        IsLive = false;
+        StreamServer.Stop();
+        Transcoder.StopTranscoding();
+        Capture.StopCapture();
+    }
+
+    private void OnTalkDown() {
+        Mixer.PushToTalkActive = true;
+        MicService.StartCapture(SelectedDeviceId);
+    }
+
+    private void OnTalkUp() {
+        Mixer.PushToTalkActive = false;
+    }
+
+    private void ToggleLatch() {
+        Mixer.LatchActive = !Mixer.LatchActive;
+        if (Mixer.LatchActive) {
+            MicService.StartCapture(SelectedDeviceId);
+        }
+    }
+
+    private void SetFormat(string format) {
+        ProfileManager.CurrentProfile.AudioFormat = format;
+        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+    }
+
+    private void SetBitrate(int bitrate) {
+        ProfileManager.CurrentProfile.Bitrate = bitrate;
+        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+    }
+
+    private void SetAccentColor(string hex) {
+        ProfileManager.CurrentProfile.AccentColor = hex;
+        SaveBranding();
+    }
+
+    private void SaveBranding() {
+        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
         StateHasChanged();
     }
 
-    private Dictionary<string, object> GetParametersFor(Type comp) {
-        var dict = new Dictionary<string, object>();
-        if (comp == typeof(TrackInfoCard)) {
-            dict["Title"] = "Scrim Radio";
-            dict["Artist"] = "Live Setup";
-        }
-        return dict;
+    public void Dispose() {
+        _dotNetRef?.Dispose();
+        _refreshTimer?.Dispose();
     }
+
+    private RenderFragment RenderCard(string cardId) => cardId switch {
+        "card-audio-routing" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <h3 class="scrim-card-title">Audio Routing</h3>
+                <button class="scrim-dots-btn">•••</button>
+            </div>
+            
+            <div style="margin-bottom: 14px;">
+                <label class="scrim-label">Application Window</label>
+                <select class="scrim-select" @bind="SelectedProcessId" disabled="@IsLive">
+                    <option value="0">Application Window</option>
+                    @foreach (var w in Windows) {
+                        <option value="@w.ProcessId">@w.Title</option>
+                    }
+                </select>
+            </div>
+
+            <div>
+                <label class="scrim-label">Microphone</label>
+                <select class="scrim-select" @bind="SelectedDeviceId">
+                    <option value="">Microphone Input (Default)</option>
+                    @foreach (var d in Devices) {
+                        <option value="@d.Id">@d.Name</option>
+                    }
+                </select>
+            </div>
+        </div>,
+
+        "card-playlist" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <h3 class="scrim-card-title">Playlist</h3>
+                <button class="scrim-dots-btn">•••</button>
+            </div>
+
+            <table class="playlist-table">
+                <thead>
+                    <tr>
+                        <th style="width: 24px;">#</th>
+                        <th>Playlist</th>
+                        <th style="text-align: right;"></th>
+                    </tr>
+                </thead>
+            </table>
+
+            @foreach (var track in PlaylistTracks) {
+                <div class="playlist-row">
+                    <span class="playlist-num">@track.Number</span>
+                    <div class="playlist-info">
+                        <div class="playlist-title">@track.Title</div>
+                        <div class="playlist-artist">@track.Artist</div>
+                    </div>
+                    <div class="playlist-time">@track.Duration</div>
+                </div>
+            }
+        </div>,
+
+        "card-vu-talk" => @<div class="scrim-card">
+            <!-- Twin Retro VU Meter Display -->
+            <div class="vu-meter-box">
+                <div class="vu-dials-container">
+                    <!-- Left Dial -->
+                    <div class="vu-dial">
+                        <svg class="vu-arc-scale" viewBox="0 0 130 85">
+                            <!-- Curved Scales -->
+                            <path d="M 15 75 A 55 55 0 0 1 115 75" fill="none" stroke="#2a2e38" stroke-width="4" />
+                            <!-- Green Zone (-20 to -2) -->
+                            <path d="M 15 75 A 55 55 0 0 1 80 23" fill="none" stroke="#22c55e" stroke-width="4" stroke-dasharray="3 1" />
+                            <!-- Yellow Zone (-2 to 0) -->
+                            <path d="M 80 23 A 55 55 0 0 1 98 34" fill="none" stroke="#eab308" stroke-width="4" stroke-dasharray="3 1" />
+                            <!-- Red Zone (0 to +3) -->
+                            <path d="M 98 34 A 55 55 0 0 1 115 75" fill="none" stroke="#ef4444" stroke-width="4" stroke-dasharray="3 1" />
+                            <!-- Scale Ticks & Numbers -->
+                            <text x="22" y="70" fill="#717a8c" font-size="8" font-family="sans-serif">-20</text>
+                            <text x="44" y="38" fill="#717a8c" font-size="8" font-family="sans-serif">-8</text>
+                            <text x="80" y="28" fill="#eab308" font-size="8" font-family="sans-serif">0</text>
+                            <text x="104" y="65" fill="#ef4444" font-size="8" font-family="sans-serif">+3</text>
+                            <text x="65" y="62" fill="#505666" font-size="11" font-weight="bold" text-anchor="middle">VU</text>
+                        </svg>
+                        <div class="vu-needle" id="vu-needle-left"></div>
+                        <div class="vu-needle-hub"></div>
+                    </div>
+
+                    <!-- Right Dial -->
+                    <div class="vu-dial">
+                        <svg class="vu-arc-scale" viewBox="0 0 130 85">
+                            <path d="M 15 75 A 55 55 0 0 1 115 75" fill="none" stroke="#2a2e38" stroke-width="4" />
+                            <path d="M 15 75 A 55 55 0 0 1 80 23" fill="none" stroke="#22c55e" stroke-width="4" stroke-dasharray="3 1" />
+                            <path d="M 80 23 A 55 55 0 0 1 98 34" fill="none" stroke="#eab308" stroke-width="4" stroke-dasharray="3 1" />
+                            <path d="M 98 34 A 55 55 0 0 1 115 75" fill="none" stroke="#ef4444" stroke-width="4" stroke-dasharray="3 1" />
+                            <text x="22" y="70" fill="#717a8c" font-size="8" font-family="sans-serif">-20</text>
+                            <text x="44" y="38" fill="#717a8c" font-size="8" font-family="sans-serif">-8</text>
+                            <text x="80" y="28" fill="#eab308" font-size="8" font-family="sans-serif">0</text>
+                            <text x="104" y="65" fill="#ef4444" font-size="8" font-family="sans-serif">+3</text>
+                            <text x="65" y="62" fill="#505666" font-size="11" font-weight="bold" text-anchor="middle">VU</text>
+                        </svg>
+                        <div class="vu-needle" id="vu-needle-right"></div>
+                        <div class="vu-needle-hub"></div>
+                    </div>
+                </div>
+
+                <div class="vu-labels">
+                    <span>L</span>
+                    <span class="vu-brand-center">Stereo</span>
+                    <span>R</span>
+                </div>
+            </div>
+
+            <!-- Big Circular TALK Push-to-Talk Button -->
+            <div class="talk-button-wrapper">
+                <button class="talk-btn @(Mixer.PushToTalkActive || Mixer.LatchActive ? "active" : "")"
+                        @onmousedown="OnTalkDown"
+                        @onmouseup="OnTalkUp"
+                        @ontouchstart="OnTalkDown"
+                        @ontouchend="OnTalkUp">
+                    TALK
+                </button>
+                <div class="talk-subtitle">Push-to-Talk</div>
+            </div>
+        </div>,
+
+        "card-voice-fx" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <h3 class="scrim-card-title">Phone-In Line</h3>
+                <button class="scrim-dots-btn">•••</button>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <span class="scrim-label" style="margin: 0;">Line: Status</span>
+                <button class="scrim-btn-secondary" style="padding: 4px 12px; font-size: 11px;" @onclick="ToggleLatch">
+                    @(Mixer.LatchActive ? "DISCONNECT" : "CONNECT")
+                </button>
+            </div>
+            <div>
+                <label class="scrim-label">Voice Processor FX</label>
+                <select class="scrim-select" @bind="MicService.CurrentEffect">
+                    <option value="">Normal Mic</option>
+                    @foreach (var provider in EffectLoader.AvailableProviders) {
+                        <option value="@provider.Id">@provider.Name</option>
+                    }
+                </select>
+            </div>
+        </div>,
+
+        "card-queue" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <h3 class="scrim-card-title">Song Requests</h3>
+                <button class="scrim-dots-btn">•••</button>
+            </div>
+            @{
+                var liveQueue = RequestController.GetLiveQueue().ToList();
+            }
+            @if (!liveQueue.Any()) {
+                <div style="color: #6c7384; font-size: 13px; text-align: center; padding: 12px 0;">No listener requests pending.</div>
+            } else {
+                @foreach (var req in liveQueue) {
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #22252c;">
+                        <div>
+                            <div style="font-weight: 600; font-size: 13px; color: #fff;">@req.Query</div>
+                            <div style="font-size: 11px; color: #727988;">@req.RequestedAt.ToLocalTime().ToString("t")</div>
+                        </div>
+                        <div style="display: flex; gap: 6px;">
+                            <button class="scrim-btn-secondary" style="padding: 4px 8px; font-size: 11px; color: #22c55e;" @onclick="@(() => RequestController.UpdateStatus(req.Id, "Accepted"))">✓</button>
+                            <button class="scrim-btn-secondary" style="padding: 4px 8px; font-size: 11px; color: #ef4444;" @onclick="@(() => RequestController.UpdateStatus(req.Id, "Declined"))">✗</button>
+                        </div>
+                    </div>
+                }
+            }
+        </div>,
+
+        "card-encoding" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <h3 class="scrim-card-title">Encoding</h3>
+                <button class="scrim-dots-btn">•••</button>
+            </div>
+
+            <!-- Codec Pills -->
+            <div class="pill-group">
+                <button class="pill-option @(ProfileManager.CurrentProfile.AudioFormat.Equals("Mp3", StringComparison.OrdinalIgnoreCase) ? "active" : "")" @onclick="@(() => SetFormat("Mp3"))">MP3</button>
+                <button class="pill-option @(ProfileManager.CurrentProfile.AudioFormat.Equals("Aac", StringComparison.OrdinalIgnoreCase) ? "active" : "")" @onclick="@(() => SetFormat("Aac"))">AAC</button>
+                <button class="pill-option @(ProfileManager.CurrentProfile.AudioFormat.Equals("Opus", StringComparison.OrdinalIgnoreCase) ? "active" : "")" @onclick="@(() => SetFormat("Opus"))">Opus</button>
+                <button class="pill-option @(ProfileManager.CurrentProfile.AudioFormat.Equals("Flac", StringComparison.OrdinalIgnoreCase) ? "active" : "")" @onclick="@(() => SetFormat("Flac"))">FLAC</button>
+            </div>
+
+            <!-- Bitrate Pills -->
+            <label class="scrim-label">Bitrate</label>
+            <div class="pill-group">
+                <button class="pill-option @(ProfileManager.CurrentProfile.Bitrate == 64 ? "active" : "")" @onclick="@(() => SetBitrate(64))">64k</button>
+                <button class="pill-option @(ProfileManager.CurrentProfile.Bitrate == 128 ? "active" : "")" @onclick="@(() => SetBitrate(128))">128k</button>
+                <button class="pill-option @(ProfileManager.CurrentProfile.Bitrate == 192 ? "active" : "")" @onclick="@(() => SetBitrate(192))">192k</button>
+                <button class="pill-option @(ProfileManager.CurrentProfile.Bitrate == 320 ? "active" : "")" @onclick="@(() => SetBitrate(320))">320k</button>
+            </div>
+
+            <div style="display: flex; gap: 8px; margin-top: 14px;">
+                <button class="scrim-btn-primary" style="flex: 1;" @onclick="StartBroadcast" disabled="@IsLive">Start Broadcast</button>
+                <button class="scrim-btn-secondary" @onclick="StopBroadcast" disabled="@(!IsLive)">Stop</button>
+            </div>
+        </div>,
+
+        "card-media-player" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <h3 class="scrim-card-title">
+                    Media Player
+                </h3>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <button class="scrim-dots-btn" title="Cast">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M2 16.1A5 5 0 0 1 5.9 20M2 12.05A9 9 0 0 1 9.95 20M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"></path>
+                            <line x1="2" y1="20" x2="2.01" y2="20"></line>
+                        </svg>
+                    </button>
+                    <button class="scrim-dots-btn">•••</button>
+                </div>
+            </div>
+
+            <div class="media-player-main">
+                <div class="media-album-art">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5">
+                        <path d="M9 18V5l12-2v13"></path>
+                        <circle cx="6" cy="18" r="3"></circle>
+                        <circle cx="18" cy="16" r="3"></circle>
+                    </svg>
+                </div>
+                <div>
+                    <h4 class="media-meta-title">@CurrentTrackTitle</h4>
+                    <div class="media-meta-artist">@CurrentTrackArtist</div>
+                    <div class="media-meta-extra">@CurrentTrackExtra</div>
+                </div>
+            </div>
+
+            <div class="media-progress-container">
+                <div class="media-progress-bar">
+                    <div class="media-progress-fill">
+                        <div class="media-progress-thumb"></div>
+                    </div>
+                </div>
+                <div class="media-time">-0:13</div>
+            </div>
+
+            <div class="media-controls-row">
+                <button class="media-btn" title="Shuffle">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="16 3 21 3 21 8"></polyline>
+                        <line x1="4" y1="20" x2="21" y2="3"></line>
+                        <polyline points="21 16 21 21 16 21"></polyline>
+                        <line x1="15" y1="15" x2="21" y2="21"></line>
+                        <line x1="4" y1="4" x2="9" y2="9"></line>
+                    </svg>
+                </button>
+                <button class="media-btn" title="Previous">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                        <polygon points="19 20 9 12 19 4 19 20"></polygon>
+                        <line x1="5" y1="19" x2="5" y2="5" stroke="currentColor" stroke-width="2"></line>
+                    </svg>
+                </button>
+                <button class="media-play-circle" @onclick="@(() => IsPlayingMedia = !IsPlayingMedia)" title="@(IsPlayingMedia ? "Pause" : "Play")">
+                    @if (IsPlayingMedia) {
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                            <rect x="6" y="4" width="4" height="16"></rect>
+                            <rect x="14" y="4" width="4" height="16"></rect>
+                        </svg>
+                    } else {
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="margin-left: 2px;">
+                            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                        </svg>
+                    }
+                </button>
+                <button class="media-btn" title="Next">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                        <polygon points="5 4 15 12 5 20 5 4"></polygon>
+                        <line x1="19" y1="5" x2="19" y2="19" stroke="currentColor" stroke-width="2"></line>
+                    </svg>
+                </button>
+                <button class="media-btn" title="Repeat">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="17 1 21 5 17 9"></polyline>
+                        <path d="M3 11V9a4 4 0 0 1 4-4h14"></path>
+                        <polyline points="7 23 3 19 7 15"></polyline>
+                        <path d="M21 13v2a4 4 0 0 1-4 4H3"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>,
+
+        "card-soundboard" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <h3 class="scrim-card-title">Soundboard</h3>
+                <button class="scrim-dots-btn">•••</button>
+            </div>
+            <div class="soundboard-grid">
+                <button class="soundboard-btn">Airhorn</button>
+                <button class="soundboard-btn">Applause</button>
+                <button class="soundboard-btn">Rimshot</button>
+                <button class="soundboard-btn">Bleep</button>
+                <button class="soundboard-btn">Vinyl</button>
+                <button class="soundboard-btn">Laser</button>
+            </div>
+        </div>,
+
+        "card-web-branding" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <h3 class="scrim-card-title">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;">
+                        <path d="M12 20h9"></path>
+                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                    </svg>
+                    Website Branding
+                </h3>
+                <button class="scrim-dots-btn">•••</button>
+            </div>
+
+            <div style="margin-bottom: 12px;">
+                <label class="scrim-label">Station Brand / Header Title</label>
+                <input type="text" class="scrim-input" @bind="ProfileManager.CurrentProfile.StationName" @bind:event="oninput" placeholder="e.g. GLOBAL INDIE RADIO" />
+            </div>
+
+            <div style="margin-bottom: 12px;">
+                <label class="scrim-label">Browser Page Title</label>
+                <input type="text" class="scrim-input" @bind="ProfileManager.CurrentProfile.PageTitle" @bind:event="oninput" placeholder="e.g. Global Indie Radio - Live Broadcast" />
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;">
+                <div>
+                    <label class="scrim-label">Show / Program Title</label>
+                    <input type="text" class="scrim-input" @bind="ProfileManager.CurrentProfile.ShowTitle" @bind:event="oninput" placeholder="e.g. Late Night Indie Drive" />
+                </div>
+                <div>
+                    <label class="scrim-label">Host / DJ Name</label>
+                    <input type="text" class="scrim-input" @bind="ProfileManager.CurrentProfile.HostName" @bind:event="oninput" placeholder="e.g. Sarah J." />
+                </div>
+            </div>
+
+            <div style="margin-bottom: 12px;">
+                <label class="scrim-label">Station Tagline / Genre</label>
+                <input type="text" class="scrim-input" @bind="ProfileManager.CurrentProfile.GenreTag" @bind:event="oninput" placeholder="e.g. Indie Alternative" />
+            </div>
+
+            <div style="margin-bottom: 14px;">
+                <label class="scrim-label">Accent Color Theme</label>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <input type="color" style="width: 36px; height: 36px; border: none; border-radius: 8px; background: transparent; cursor: pointer;"
+                           value="@ProfileManager.CurrentProfile.AccentColor"
+                           @onchange="@((ChangeEventArgs e) => SetAccentColor(e.Value?.ToString() ?? "#ef4444"))" />
+                    
+                    <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                        <button class="pill-option" style="padding: 4px 10px; font-size: 11px; background: #ef4444; color: white; border: none;" @onclick="@(() => SetAccentColor("#ef4444"))">Red</button>
+                        <button class="pill-option" style="padding: 4px 10px; font-size: 11px; background: #00d2ff; color: #121316; border: none;" @onclick="@(() => SetAccentColor("#00d2ff"))">Cyan</button>
+                        <button class="pill-option" style="padding: 4px 10px; font-size: 11px; background: #a855f7; color: white; border: none;" @onclick="@(() => SetAccentColor("#a855f7"))">Purple</button>
+                        <button class="pill-option" style="padding: 4px 10px; font-size: 11px; background: #10b981; color: white; border: none;" @onclick="@(() => SetAccentColor("#10b981"))">Green</button>
+                        <button class="pill-option" style="padding: 4px 10px; font-size: 11px; background: #f59e0b; color: #121316; border: none;" @onclick="@(() => SetAccentColor("#f59e0b"))">Amber</button>
+                    </div>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 14px;">
+                <label class="scrim-label">Navigation Links (comma-separated)</label>
+                <input type="text" class="scrim-input" @bind="ProfileManager.CurrentProfile.NavLinks" @bind:event="oninput" placeholder="Discover,Schedule,Shows,About" />
+            </div>
+
+            <button class="scrim-btn-primary" style="width: 100%;" @onclick="SaveBranding">Save & Apply Branding</button>
+        </div>,
+
+        _ => @<div></div>
+    };
 }
