@@ -6,6 +6,9 @@ document.addEventListener('DOMContentLoaded', function () {
     const playIcon = playBtn ? playBtn.querySelector('.icon-play') : null;
     const pauseIcon = playBtn ? playBtn.querySelector('.icon-pause') : null;
     const volumeSlider = document.getElementById('volumeSlider');
+    const volumeBtn = document.getElementById('volumeBtn');
+    const volOnIcon = volumeBtn ? volumeBtn.querySelector('.icon-vol-on') : null;
+    const volMuteIcon = volumeBtn ? volumeBtn.querySelector('.icon-vol-mute') : null;
     const trackTitle = document.getElementById('trackTitle');
     const trackArtist = document.getElementById('trackArtist');
     const bottomTrackName = document.getElementById('bottomTrackName');
@@ -18,6 +21,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     let isPlaying = false;
     let isConnecting = false;
+    let isUserPlaying = false;
     let defaultSubtitle = "Live Broadcast";
 
     function updatePlayButtonUI() {
@@ -27,44 +31,115 @@ document.addEventListener('DOMContentLoaded', function () {
             if (pauseIcon) pauseIcon.style.display = 'block';
             playBtn.classList.add('playing');
             playBtn.classList.remove('connecting');
+            playBtn.title = "Stop Stream (Local)";
         } else if (isConnecting) {
             if (playIcon) playIcon.style.display = 'block';
             if (pauseIcon) pauseIcon.style.display = 'none';
             playBtn.classList.remove('playing');
             playBtn.classList.add('connecting');
+            playBtn.title = "Connecting...";
         } else {
             if (playIcon) playIcon.style.display = 'block';
             if (pauseIcon) pauseIcon.style.display = 'none';
             playBtn.classList.remove('playing');
             playBtn.classList.remove('connecting');
+            playBtn.title = "Play Live Stream";
         }
     }
 
-    // Real-Time Audio Reactive Waveform Visualizer
+    // Volume & Web Audio Graph
+    let currentVolume = 0.85;
+    try {
+        const saved = localStorage.getItem('scrim_volume');
+        if (saved !== null) {
+            const parsed = parseFloat(saved);
+            if (!isNaN(parsed) && parsed >= 0 && parsed <= 1) currentVolume = parsed;
+        }
+    } catch (e) {}
+
+    let lastUnmutedVolume = currentVolume > 0.05 ? currentVolume : 0.85;
+
     let audioCtx = null;
     let analyser = null;
+    let gainNode = null;
     let sourceNode = null;
     let freqData = null;
     const waveBars = document.querySelectorAll('.waveform-container .wave-bar');
 
     function initAudioVisualizer() {
-        if (analyser || !audio) return;
+        if (sourceNode || !audio) return;
         try {
             const AudioContextClass = window.AudioContext || window.webkitAudioContext;
             if (!AudioContextClass) return;
-            audioCtx = new AudioContextClass();
-            analyser = audioCtx.createAnalyser();
-            analyser.fftSize = 64;
-            analyser.smoothingTimeConstant = 0.75;
-            freqData = new Uint8Array(analyser.frequencyBinCount);
-
+            if (!audioCtx) {
+                audioCtx = new AudioContextClass();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+            if (!analyser) {
+                analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 64;
+                analyser.smoothingTimeConstant = 0.75;
+                freqData = new Uint8Array(analyser.frequencyBinCount);
+            }
+            if (!gainNode) {
+                gainNode = audioCtx.createGain();
+                gainNode.gain.setValueAtTime(currentVolume, audioCtx.currentTime);
+                gainNode.connect(audioCtx.destination);
+            }
             sourceNode = audioCtx.createMediaElementSource(audio);
             sourceNode.connect(analyser);
-            analyser.connect(audioCtx.destination);
+            analyser.connect(gainNode);
         } catch (e) {
-            console.warn("AudioContext visualizer initialization:", e);
+            console.warn("AudioContext visualizer/gain initialization:", e);
         }
     }
+
+    function setVolume(val) {
+        currentVolume = Math.max(0, Math.min(1, parseFloat(val)));
+        if (volumeSlider) {
+            volumeSlider.value = currentVolume;
+        }
+        if (audio) {
+            audio.volume = currentVolume;
+        }
+        if (gainNode && audioCtx) {
+            gainNode.gain.setValueAtTime(currentVolume, audioCtx.currentTime);
+        }
+        updateVolumeUI();
+        try {
+            localStorage.setItem('scrim_volume', currentVolume.toString());
+        } catch (e) {}
+    }
+
+    function updateVolumeUI() {
+        const isMuted = currentVolume <= 0.001;
+        if (volOnIcon) volOnIcon.style.display = isMuted ? 'none' : 'block';
+        if (volMuteIcon) volMuteIcon.style.display = isMuted ? 'block' : 'none';
+    }
+
+    if (volumeSlider) {
+        volumeSlider.value = currentVolume;
+        volumeSlider.addEventListener('input', function (e) {
+            const val = parseFloat(e.target.value);
+            if (val > 0) lastUnmutedVolume = val;
+            setVolume(val);
+        });
+    }
+
+    if (volumeBtn) {
+        volumeBtn.addEventListener('click', function () {
+            if (currentVolume > 0.001) {
+                lastUnmutedVolume = currentVolume;
+                setVolume(0);
+            } else {
+                setVolume(lastUnmutedVolume || 0.85);
+            }
+        });
+    }
+
+    updateVolumeUI();
 
     function animateWaveform() {
         requestAnimationFrame(animateWaveform);
@@ -101,36 +176,112 @@ document.addEventListener('DOMContentLoaded', function () {
 
     animateWaveform();
 
-    // Audio Playback with Event Synchronization
+    // Live Stream Play / Stop Controls (Strictly for Web User)
+    function stopStream() {
+        isUserPlaying = false;
+        isPlaying = false;
+        isConnecting = false;
+        updatePlayButtonUI();
+
+        if (audio) {
+            audio.pause();
+            audio.removeAttribute('src'); // Stop streaming connection immediately
+            audio.load(); // Tell browser to drop the pending HTTP connection
+        }
+    }
+
+    function startStream() {
+        isUserPlaying = true;
+        isConnecting = true;
+        updatePlayButtonUI();
+
+        initAudioVisualizer();
+        if (audioCtx && audioCtx.state === 'suspended') {
+            audioCtx.resume();
+        }
+
+        const subtitleEl = document.getElementById('showSubtitle');
+        if (subtitleEl) subtitleEl.textContent = "Connecting to live audio stream...";
+
+        // Always load a fresh live connection with timestamp cache-buster so stream is real-time
+        audio.src = '/stream?t=' + Date.now();
+        audio.load();
+
+        var playPromise = audio.play();
+        if (playPromise !== undefined) {
+            playPromise.then(function () {
+                if (isUserPlaying) {
+                    isPlaying = true;
+                    isConnecting = false;
+                    updatePlayButtonUI();
+                    if (subtitleEl) subtitleEl.textContent = defaultSubtitle;
+                }
+            }).catch(function (err) {
+                console.warn("Playback could not start:", err);
+                if (isUserPlaying) {
+                    isUserPlaying = false;
+                    isPlaying = false;
+                    isConnecting = false;
+                    updatePlayButtonUI();
+                    audio.removeAttribute('src');
+                    if (subtitleEl) {
+                        subtitleEl.textContent = "Station Offline — Broadcaster has not started transmission";
+                    }
+                }
+            });
+        }
+    }
+
     if (playBtn && audio) {
+        playBtn.addEventListener('click', function () {
+            if (isUserPlaying || isPlaying || isConnecting) {
+                stopStream();
+                const subtitleEl = document.getElementById('showSubtitle');
+                if (subtitleEl) subtitleEl.textContent = defaultSubtitle;
+            } else {
+                startStream();
+            }
+        });
+
         audio.addEventListener('playing', function () {
-            isPlaying = true;
-            isConnecting = false;
-            updatePlayButtonUI();
-            const subtitleEl = document.getElementById('showSubtitle');
-            if (subtitleEl) subtitleEl.textContent = defaultSubtitle;
+            if (isUserPlaying) {
+                isPlaying = true;
+                isConnecting = false;
+                updatePlayButtonUI();
+                const subtitleEl = document.getElementById('showSubtitle');
+                if (subtitleEl) subtitleEl.textContent = defaultSubtitle;
+            }
         });
 
         audio.addEventListener('pause', function () {
-            isPlaying = false;
-            isConnecting = false;
-            updatePlayButtonUI();
+            if (!isUserPlaying) {
+                isPlaying = false;
+                isConnecting = false;
+                updatePlayButtonUI();
+            }
         });
 
         audio.addEventListener('waiting', function () {
-            if (isPlaying) {
+            if (isUserPlaying) {
                 isConnecting = true;
                 updatePlayButtonUI();
             }
         });
 
         audio.addEventListener('canplay', function () {
-            isConnecting = false;
-            updatePlayButtonUI();
+            if (isUserPlaying) {
+                isConnecting = false;
+                updatePlayButtonUI();
+            }
         });
 
         audio.addEventListener('error', function (e) {
+            // Ignore error events triggered when user intentionally stopped or src is cleared
+            if (!isUserPlaying || !audio.getAttribute('src')) {
+                return;
+            }
             console.warn("Audio element stream error or station offline:", e);
+            isUserPlaying = false;
             isPlaying = false;
             isConnecting = false;
             updatePlayButtonUI();
@@ -140,57 +291,6 @@ document.addEventListener('DOMContentLoaded', function () {
             if (subtitleEl) {
                 subtitleEl.textContent = "Station Offline — Broadcaster has not started transmission";
             }
-        });
-
-        playBtn.addEventListener('click', function () {
-            // Ensure audio visualizer graph is initialized and unpaused on user interaction
-            initAudioVisualizer();
-            if (audioCtx && audioCtx.state === 'suspended') {
-                audioCtx.resume();
-            }
-
-            if (isPlaying || isConnecting) {
-                // Stop playback cleanly
-                audio.pause();
-                audio.removeAttribute('src');
-                isPlaying = false;
-                isConnecting = false;
-                updatePlayButtonUI();
-            } else {
-                // Initiate stream playback
-                isConnecting = true;
-                updatePlayButtonUI();
-
-                const subtitleEl = document.getElementById('showSubtitle');
-                if (subtitleEl) subtitleEl.textContent = "Connecting to live audio stream...";
-
-                // Directly assign live stream endpoint with cache buster
-                audio.src = '/stream?t=' + Date.now();
-                var playPromise = audio.play();
-                if (playPromise !== undefined) {
-                    playPromise.then(function () {
-                        isPlaying = true;
-                        isConnecting = false;
-                        updatePlayButtonUI();
-                        if (subtitleEl) subtitleEl.textContent = defaultSubtitle;
-                    }).catch(function (err) {
-                        console.warn("Playback could not start immediately:", err);
-                        isPlaying = false;
-                        isConnecting = false;
-                        updatePlayButtonUI();
-                        if (subtitleEl) {
-                            subtitleEl.textContent = "Station Offline — Broadcaster is not on air yet";
-                        }
-                    });
-                }
-            }
-        });
-    }
-
-    if (volumeSlider && audio) {
-        audio.volume = parseFloat(volumeSlider.value);
-        volumeSlider.addEventListener('input', function (e) {
-            audio.volume = parseFloat(e.target.value);
         });
     }
 
