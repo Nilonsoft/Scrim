@@ -174,11 +174,12 @@ namespace Scrim.Server {
                     break;
                 }
 
-                _ = Task.Run(() => ForwardClientAsync(client, internalPort, token));
+                string mount = GetNormalizedMountPoint();
+                _ = Task.Run(() => ForwardClientAsync(client, internalPort, mount, token));
             }
         }
 
-        private static async Task ForwardClientAsync(TcpClient client, int internalPort, CancellationToken token) {
+        private static async Task ForwardClientAsync(TcpClient client, int internalPort, string mountPoint, CancellationToken token) {
             try {
                 using (client)
                 using (var server = new TcpClient()) {
@@ -222,7 +223,7 @@ namespace Scrim.Server {
                     bool hasConnectionHeader = false;
                     var rawLines = headerText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
                     var validLines = rawLines.Where(l => !string.IsNullOrEmpty(l)).ToList();
-                    bool isStreamOrSse = validLines.Count > 0 && (validLines[0].Contains("/api/events") || validLines[0].Contains("/stream") || validLines[0].Contains("/live"));
+                    bool isStreamOrSse = validLines.Count > 0 && (validLines[0].Contains("/api/events") || validLines[0].Contains("/stream") || validLines[0].Contains("/live") || (!string.IsNullOrEmpty(mountPoint) && validLines[0].Contains($"/{mountPoint}")));
 
                     for (int i = 0; i < validLines.Count; i++) {
                         if (validLines[i].StartsWith("Host:", StringComparison.OrdinalIgnoreCase)) {
@@ -293,38 +294,96 @@ namespace Scrim.Server {
                                      userAgent.Contains("Wget", StringComparison.OrdinalIgnoreCase) ||
                                      userAgent.Contains("curl", StringComparison.OrdinalIgnoreCase);
 
-                if (path == "/stream" || path == "/stream.mp3" || path == "/live" || path == "/listen" || (path == "/" && isMediaPlayer)) {
-                    _ = HandleStreamClient(context, token);
-                } else if (path == "/listen.m3u" || path == "/playlist.m3u") {
+                bool isStreamRoute = IsStreamPath(path) || (path == "/" && isMediaPlayer);
+                bool isRestricted = _profileManager.CurrentProfile.RestrictToLocalNetwork && !IsLocalNetworkClient(context);
+
+                if (isStreamRoute) {
+                    if (isRestricted) {
+                        context.Response.StatusCode = 403;
+                        context.Response.ContentType = "application/json";
+                        context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+                        byte[] errBytes = System.Text.Encoding.UTF8.GetBytes("{\"error\":\"Private Stream\",\"message\":\"This broadcast is restricted to local network listeners.\",\"isPrivate\":true}");
+                        context.Response.ContentLength64 = errBytes.Length;
+                        context.Response.OutputStream.Write(errBytes, 0, errBytes.Length);
+                        context.Response.Close();
+                    } else {
+                        _ = HandleStreamClient(context, token);
+                    }
+                } else if (path == "/listen.m3u" || path == "/playlist.m3u" || path == "/stream.m3u" || string.Equals(path, $"/{GetNormalizedMountPoint()}.m3u", StringComparison.OrdinalIgnoreCase)) {
                     HandleM3uRequest(context);
-                } else if (path == "/listen.pls") {
+                } else if (path == "/listen.pls" || path == "/playlist.pls" || path == "/stream.pls" || string.Equals(path, $"/{GetNormalizedMountPoint()}.pls", StringComparison.OrdinalIgnoreCase)) {
                     HandlePlsRequest(context);
                 } else if (path == "/api/events") {
                     _ = HandleSseClient(context, token);
                 } else if (path == "/api/network") {
                     HandleNetworkRequest(context);
                 } else if (path == "/api/albumart") {
-                    HandleAlbumArtRequest(context);
+                    if (isRestricted) {
+                        context.Response.StatusCode = 403;
+                        context.Response.Close();
+                    } else {
+                        HandleAlbumArtRequest(context);
+                    }
                 } else if (path == "/api/metadata") {
-                    HandleMetadataRequest(context);
+                    if (isRestricted) {
+                        context.Response.StatusCode = 403;
+                        context.Response.ContentType = "application/json";
+                        context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+                        byte[] priv = System.Text.Encoding.UTF8.GetBytes("{\"isPrivate\":true,\"title\":\"Private Stream\",\"artist\":\"Restricted to Local Network\"}");
+                        context.Response.OutputStream.Write(priv, 0, priv.Length);
+                        context.Response.Close();
+                    } else {
+                        HandleMetadataRequest(context);
+                    }
                 } else if (path == "/api/branding") {
                     HandleBrandingRequest(context);
                 } else if (path == "/api/requests" && context.Request.HttpMethod == "POST") {
-                    HandleSongRequest(context);
+                    if (isRestricted) {
+                        context.Response.StatusCode = 403;
+                        context.Response.Close();
+                    } else {
+                        HandleSongRequest(context);
+                    }
                 } else if (path == "/api/chat" && context.Request.HttpMethod == "POST") {
-                    HandleChatPostRequest(context);
+                    if (isRestricted) {
+                        context.Response.StatusCode = 403;
+                        context.Response.Close();
+                    } else {
+                        HandleChatPostRequest(context);
+                    }
                 } else if (path == "/api/chat" && context.Request.HttpMethod == "GET") {
-                    HandleChatGetRequest(context);
+                    if (isRestricted) {
+                        context.Response.ContentType = "application/json";
+                        context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+                        byte[] emptyChat = System.Text.Encoding.UTF8.GetBytes("{\"enabled\":false,\"messages\":[]}");
+                        context.Response.OutputStream.Write(emptyChat, 0, emptyChat.Length);
+                        context.Response.Close();
+                    } else {
+                        HandleChatGetRequest(context);
+                    }
                 } else if (path == "/api/reactions/clear" && context.Request.HttpMethod == "POST") {
                     HandleReactionClearRequest(context);
                 } else if (path == "/api/reactions" && context.Request.HttpMethod == "POST") {
-                    HandleReactionPostRequest(context);
+                    if (isRestricted) {
+                        context.Response.StatusCode = 403;
+                        context.Response.Close();
+                    } else {
+                        HandleReactionPostRequest(context);
+                    }
                 } else if (path == "/api/reactions" && context.Request.HttpMethod == "GET") {
                     HandleReactionGetRequest(context);
                 } else if (path == "/api/history/clear" && context.Request.HttpMethod == "POST") {
                     HandleHistoryClearRequest(context);
                 } else if (path == "/api/history" && context.Request.HttpMethod == "GET") {
-                    HandleHistoryGetRequest(context);
+                    if (isRestricted) {
+                        context.Response.ContentType = "application/json";
+                        context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+                        byte[] emptyHist = System.Text.Encoding.UTF8.GetBytes("[]");
+                        context.Response.OutputStream.Write(emptyHist, 0, emptyHist.Length);
+                        context.Response.Close();
+                    } else {
+                        HandleHistoryGetRequest(context);
+                    }
                 } else if (path == "/api/status") {
                     HandleStatusRequest(context);
                 } else {
@@ -334,14 +393,81 @@ namespace Scrim.Server {
             }
         }
 
+        private string GetNormalizedMountPoint() {
+            string raw = _profileManager.CurrentProfile.StreamMountPoint?.Trim().TrimStart('/') ?? "stream";
+            if (string.IsNullOrEmpty(raw)) raw = "stream";
+            return raw.ToLowerInvariant();
+        }
+
+        private bool IsStreamPath(string path) {
+            string mount = GetNormalizedMountPoint();
+            string p = (path ?? "").Trim().ToLowerInvariant();
+            return p == $"/{mount}" || p == $"/{mount}.mp3" ||
+                   p == "/stream" || p == "/stream.mp3" ||
+                   p == "/live" || p == "/listen";
+        }
+
+        private bool IsLocalNetworkClient(HttpListenerContext context) {
+            var remoteEp = context.Request.RemoteEndPoint;
+            if (remoteEp == null) return true;
+            var ip = remoteEp.Address;
+
+            string? forwarded = context.Request.Headers["X-Forwarded-For"];
+            if (!string.IsNullOrEmpty(forwarded)) {
+                string firstIp = forwarded.Split(',')[0].Trim();
+                if (IPAddress.TryParse(firstIp, out var fIp)) {
+                    ip = fIp;
+                }
+            }
+
+            if (IPAddress.IsLoopback(ip)) return true;
+
+            if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) {
+                byte[] bytes = ip.GetAddressBytes();
+                if (bytes[0] == 10) return true;
+                if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) return true;
+                if (bytes[0] == 192 && bytes[1] == 168) return true;
+                if (bytes[0] == 169 && bytes[1] == 254) return true;
+                return false;
+            }
+
+            if (ip.IsIPv6LinkLocal || ip.IsIPv6SiteLocal) return true;
+            byte[] v6Bytes = ip.GetAddressBytes();
+            if ((v6Bytes[0] & 0xFE) == 0xFC) return true;
+
+            return false;
+        }
+
+        private string ResolveClientHostAndPort(HttpListenerContext context, out string portStr) {
+            var profile = _profileManager.CurrentProfile;
+            int port = profile.Port;
+            portStr = profile.UseReverseProxy ? "" : $":{port}";
+
+            if (!string.IsNullOrWhiteSpace(profile.CustomPublicUrl)) {
+                string c = profile.CustomPublicUrl.Trim();
+                if (c.StartsWith("http://", StringComparison.OrdinalIgnoreCase)) c = c.Substring(7);
+                else if (c.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) c = c.Substring(8);
+                int colon = c.LastIndexOf(':');
+                if (colon > 0 && int.TryParse(c.Substring(colon + 1), out int customPort)) {
+                    portStr = profile.UseReverseProxy ? "" : $":{customPort}";
+                    return c.Substring(0, colon);
+                }
+                return c;
+            }
+
+            string rawHost = context.Request.Headers["X-Forwarded-Host"] ?? context.Request.Url?.Host ?? "localhost";
+            return rawHost.Contains(':') ? rawHost.Split(':')[0] : rawHost;
+        }
+
         private void HandleM3uRequest(HttpListenerContext context) {
             var response = context.Response;
             response.ContentType = "audio/x-mpegurl; charset=utf-8";
             response.Headers.Add("Access-Control-Allow-Origin", "*");
-            string rawHost = context.Request.Headers["X-Forwarded-Host"] ?? context.Request.Url?.Host ?? "localhost";
-            string host = rawHost.Contains(':') ? rawHost.Split(':')[0] : rawHost;
-            int port = _profileManager.CurrentProfile.Port;
-            string m3uContent = $"#EXTM3U\r\n#EXTINF:-1,{_profileManager.CurrentProfile.StationName ?? "Scrim Broadcast"}\r\nhttp://{host}:{port}/stream\r\n";
+            var profile = _profileManager.CurrentProfile;
+            string host = ResolveClientHostAndPort(context, out string portStr);
+            string streamPath = GetNormalizedMountPoint();
+            string scheme = profile.UseHttps ? "https" : (string.Equals(context.Request.Headers["X-Forwarded-Proto"], "https", StringComparison.OrdinalIgnoreCase) ? "https" : "http");
+            string m3uContent = $"#EXTM3U\r\n#EXTINF:-1,{profile.StationName ?? "Scrim Broadcast"}\r\n{scheme}://{host}{portStr}/{streamPath}\r\n";
             byte[] bytes = System.Text.Encoding.UTF8.GetBytes(m3uContent);
             response.ContentLength64 = bytes.Length;
             response.OutputStream.Write(bytes, 0, bytes.Length);
@@ -352,10 +478,11 @@ namespace Scrim.Server {
             var response = context.Response;
             response.ContentType = "audio/x-scpls; charset=utf-8";
             response.Headers.Add("Access-Control-Allow-Origin", "*");
-            string rawHost = context.Request.Headers["X-Forwarded-Host"] ?? context.Request.Url?.Host ?? "localhost";
-            string host = rawHost.Contains(':') ? rawHost.Split(':')[0] : rawHost;
-            int port = _profileManager.CurrentProfile.Port;
-            string plsContent = $"[playlist]\r\nNumberOfEntries=1\r\nFile1=http://{host}:{port}/stream\r\nTitle1={_profileManager.CurrentProfile.StationName ?? "Scrim Broadcast"}\r\nLength1=-1\r\nVersion=2\r\n";
+            var profile = _profileManager.CurrentProfile;
+            string host = ResolveClientHostAndPort(context, out string portStr);
+            string streamPath = GetNormalizedMountPoint();
+            string scheme = profile.UseHttps ? "https" : (string.Equals(context.Request.Headers["X-Forwarded-Proto"], "https", StringComparison.OrdinalIgnoreCase) ? "https" : "http");
+            string plsContent = $"[playlist]\r\nNumberOfEntries=1\r\nFile1={scheme}://{host}{portStr}/{streamPath}\r\nTitle1={profile.StationName ?? "Scrim Broadcast"}\r\nLength1=-1\r\nVersion=2\r\n";
             byte[] bytes = System.Text.Encoding.UTF8.GetBytes(plsContent);
             response.ContentLength64 = bytes.Length;
             response.OutputStream.Write(bytes, 0, bytes.Length);
@@ -370,7 +497,9 @@ namespace Scrim.Server {
             var profile = _profileManager.CurrentProfile;
             string format = profile.AudioFormat?.ToUpperInvariant() ?? "MP3";
             int bitrate = profile.Bitrate;
-            string json = $"{{\"isLive\":{(isLive ? "true" : "false")},\"listeners\":{_hub.ActiveClientCount},\"format\":\"{EscapeJson(format)}\",\"bitrate\":{bitrate}}}";
+            bool isRestricted = profile.RestrictToLocalNetwork && !IsLocalNetworkClient(context);
+            string streamMount = GetNormalizedMountPoint();
+            string json = $"{{\"isLive\":{(isLive ? "true" : "false")},\"listeners\":{_hub.ActiveClientCount},\"format\":\"{EscapeJson(format)}\",\"bitrate\":{bitrate},\"streamUrl\":\"/{streamMount}\",\"isPrivate\":{(isRestricted ? "true" : "false")},\"restrictToLocal\":{(profile.RestrictToLocalNetwork ? "true" : "false")},\"useHttps\":{(profile.UseHttps ? "true" : "false")},\"useReverseProxy\":{(profile.UseReverseProxy ? "true" : "false")}}}";
             byte[] buffer = System.Text.Encoding.UTF8.GetBytes(json);
             response.ContentLength64 = buffer.Length;
             response.OutputStream.Write(buffer, 0, buffer.Length);
@@ -478,7 +607,8 @@ namespace Scrim.Server {
                 var profile = _profileManager.CurrentProfile;
                 string formatStr = profile.AudioFormat?.ToUpperInvariant() ?? "MP3";
                 int bitrateVal = profile.Bitrate;
-                return $"{{\"type\":\"stats\",\"listeners\":{_hub.ActiveClientCount},\"isLive\":{(isLive ? "true" : "false")},\"format\":\"{EscapeJson(formatStr)}\",\"bitrate\":{bitrateVal}}}";
+                string streamMount = GetNormalizedMountPoint();
+                return $"{{\"type\":\"stats\",\"listeners\":{_hub.ActiveClientCount},\"isLive\":{(isLive ? "true" : "false")},\"format\":\"{EscapeJson(formatStr)}\",\"bitrate\":{bitrateVal},\"streamUrl\":\"/{streamMount}\",\"isPrivate\":false}}";
             }
 
             string BuildQueueJson() {
@@ -490,7 +620,8 @@ namespace Scrim.Server {
                 var profile = _profileManager.CurrentProfile;
                 var navLinksArray = string.Join(",", profile.CustomNavLinks.Select(l => $"{{\"label\":\"{EscapeJson(l.Label)}\",\"url\":\"{EscapeJson(l.Url)}\"}}"));
                 string customThemeJson = GetCustomThemeJson(profile.WebTheme ?? "dark");
-                return $"{{\"type\":\"branding\",\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(profile.WebTheme ?? "dark")}\",\"customThemeVariables\":{customThemeJson},\"logoUrl\":\"{EscapeJson(profile.LogoUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}]}}";
+                string streamMount = GetNormalizedMountPoint();
+                return $"{{\"type\":\"branding\",\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(profile.WebTheme ?? "dark")}\",\"customThemeVariables\":{customThemeJson},\"logoUrl\":\"{EscapeJson(profile.LogoUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}],\"streamUrl\":\"/{streamMount}\",\"isPrivate\":false,\"restrictToLocal\":{(profile.RestrictToLocalNetwork ? "true" : "false")}}}";
             }
 
             EventHandler<MediaMetadata> onMetadata = (_, meta) => {
@@ -787,7 +918,9 @@ namespace Scrim.Server {
                 var profile = _profileManager.CurrentProfile;
                 var navLinksArray = string.Join(",", profile.CustomNavLinks.Select(l => $"{{\"label\":\"{EscapeJson(l.Label)}\",\"url\":\"{EscapeJson(l.Url)}\"}}"));
                 string customThemeJson = GetCustomThemeJson(profile.WebTheme ?? "dark");
-                string json = $"{{\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(profile.WebTheme ?? "dark")}\",\"customThemeVariables\":{customThemeJson},\"logoUrl\":\"{EscapeJson(profile.LogoUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}]}}";
+                bool isRestricted = profile.RestrictToLocalNetwork && !IsLocalNetworkClient(context);
+                string streamMount = GetNormalizedMountPoint();
+                string json = $"{{\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(profile.WebTheme ?? "dark")}\",\"customThemeVariables\":{customThemeJson},\"logoUrl\":\"{EscapeJson(profile.LogoUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}],\"streamUrl\":\"/{streamMount}\",\"isPrivate\":{(isRestricted ? "true" : "false")},\"restrictToLocal\":{(profile.RestrictToLocalNetwork ? "true" : "false")}}}";
                 byte[] buffer = System.Text.Encoding.UTF8.GetBytes(json);
                 context.Response.ContentType = "application/json";
                 context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
@@ -827,11 +960,31 @@ namespace Scrim.Server {
 
         private void HandleNetworkRequest(HttpListenerContext context) {
             try {
-                int port = _profileManager.CurrentProfile.Port;
+                var profile = _profileManager.CurrentProfile;
+                int port = profile.Port;
+                string scheme = profile.UseHttps ? "https" : "http";
+                string portStr = profile.UseReverseProxy ? "" : $":{port}";
                 var response = context.Response;
                 response.ContentType = "application/json";
                 response.Headers.Add("Access-Control-Allow-Origin", "*");
-                string json = $"{{\"localUrl\":\"{_networkDiscovery.GetLocalShareUrl(port)}\",\"publicUrl\":\"{_networkDiscovery.GetPublicShareUrl(port)}\",\"primaryLocalIp\":\"{_networkDiscovery.PrimaryLocalIp}\",\"publicIp\":\"{_networkDiscovery.PublicIp}\",\"upnpStatus\":\"{EscapeJson(_networkDiscovery.UpnpStatus)}\",\"isUpnpMapped\":{(_networkDiscovery.IsUpnpMapped ? "true" : "false")}}}";
+                string localUrl = $"{scheme}://{_networkDiscovery.PrimaryLocalIp}:{port}";
+                string publicUrl;
+                if (!string.IsNullOrEmpty(profile.CustomPublicUrl)) {
+                    string c = profile.CustomPublicUrl.Trim();
+                    if (c.StartsWith("http://", StringComparison.OrdinalIgnoreCase)) c = c.Substring(7);
+                    else if (c.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) c = c.Substring(8);
+                    if (profile.UseReverseProxy) {
+                        int colon = c.LastIndexOf(':');
+                        if (colon > 0 && int.TryParse(c.Substring(colon + 1), out _)) c = c.Substring(0, colon);
+                    }
+                    publicUrl = $"{scheme}://{c}";
+                } else {
+                    string ip = (!string.IsNullOrEmpty(_networkDiscovery.PublicIp) && _networkDiscovery.PublicIp != "Discovering..." && _networkDiscovery.PublicIp != "Unavailable")
+                        ? _networkDiscovery.PublicIp
+                        : _networkDiscovery.PrimaryLocalIp;
+                    publicUrl = $"{scheme}://{ip}{portStr}";
+                }
+                string json = $"{{\"localUrl\":\"{localUrl}\",\"publicUrl\":\"{publicUrl}\",\"primaryLocalIp\":\"{_networkDiscovery.PrimaryLocalIp}\",\"publicIp\":\"{_networkDiscovery.PublicIp}\",\"upnpStatus\":\"{EscapeJson(_networkDiscovery.UpnpStatus)}\",\"isUpnpMapped\":{(_networkDiscovery.IsUpnpMapped ? "true" : "false")},\"useHttps\":{(profile.UseHttps ? "true" : "false")},\"useReverseProxy\":{(profile.UseReverseProxy ? "true" : "false")}}}";
                 byte[] buffer = System.Text.Encoding.UTF8.GetBytes(json);
                 response.ContentLength64 = buffer.Length;
                 response.OutputStream.Write(buffer, 0, buffer.Length);

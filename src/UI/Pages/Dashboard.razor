@@ -188,15 +188,15 @@
                 <div style="background: #12141a; border: 1px solid #232731; border-radius: 8px; padding: 12px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                         <span style="font-size: 11px; font-weight: 700; color: #f59e0b; letter-spacing: 0.5px;">MEDIA PLAYERS (VLC, WINAMP, MPV)</span>
-                        <span style="font-size: 11px; color: #64748b;">Direct Stream Endpoint (/stream)</span>
+                        <span style="font-size: 11px; color: #64748b;">Direct Stream Endpoint (/@GetNormalizedMount())</span>
                     </div>
                     <div style="display: flex; gap: 8px; align-items: center;">
                         <div style="flex: 1; display: flex; align-items: center; background: #1a1d26; border: 1px solid #2d323e; border-radius: 6px; padding: 6px 10px; overflow: hidden;">
                             <span style="color: #f59e0b; font-family: monospace; font-size: 12px; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">
-                                @(GetLocalNetworkUrl())/stream
+                                @(GetLocalNetworkUrl())/@(GetNormalizedMount())
                             </span>
                         </div>
-                        <button class="scrim-btn-primary" style="padding: 6px 14px; font-size: 12px; white-space: nowrap; background: #f59e0b; border-color: #f59e0b;" @onclick='() => CopyUrl($"{GetLocalNetworkUrl()}/stream", "VLC")'>
+                        <button class="scrim-btn-primary" style="padding: 6px 14px; font-size: 12px; white-space: nowrap; background: #f59e0b; border-color: #f59e0b;" @onclick='() => CopyUrl($"{GetLocalNetworkUrl()}/{GetNormalizedMount()}", "VLC")'>
                             @(CopiedUrlTarget == "VLC" ? "✓ Copied!" : "Copy Stream URL")
                         </button>
                     </div>
@@ -530,8 +530,8 @@
                     ProfileManager.SaveProfile(p);
                 }
             }
-            MicService.SetVirtualOutputDevice(p.CaptureDeviceId);
         }
+        MicService.SetVirtualOutputDevice(null);
 
         Mixer.AppVolume = (float)ProfileManager.CurrentProfile.AppStreamVolume / 100f;
         CustomBitrateInput = ProfileManager.CurrentProfile.Bitrate;
@@ -613,16 +613,17 @@
 
     private void OnCaptureDeviceChanged() {
         ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
-        MicService.SetVirtualOutputDevice(ProfileManager.CurrentProfile.CaptureDeviceId);
+        MicService.SetVirtualOutputDevice(null);
         EnsureAudioMonitoring(SelectedProcessId);
         StateHasChanged();
     }
 
     private void EnsureAudioMonitoring(uint pid) {
         try {
-            Capture.StartCapture(pid, ProfileManager.CurrentProfile.CaptureDeviceId);
+            string? captureDevice = pid == 0 ? ProfileManager.CurrentProfile.CaptureDeviceId : null;
+            Capture.StartCapture(pid, captureDevice);
             MicService.StartCapture(SelectedDeviceId);
-            MicService.SetVirtualOutputDevice(ProfileManager.CurrentProfile.CaptureDeviceId);
+            MicService.SetVirtualOutputDevice(null);
             if (!Mixer.IsMixing) {
                 Mixer.StartMixing(Capture.AudioStream, MicService.MicrophoneStream, CancellationToken.None);
             }
@@ -794,13 +795,14 @@
         try {
             StreamServer.Start(ProfileManager.CurrentProfile.Port);
 
-            Capture.StartCapture(SelectedProcessId, ProfileManager.CurrentProfile.CaptureDeviceId);
+            string? captureDevice = SelectedProcessId == 0 ? ProfileManager.CurrentProfile.CaptureDeviceId : null;
+            Capture.StartCapture(SelectedProcessId, captureDevice);
             if (SelectedProcessId != 0) {
                 MetadataService.StartMonitoring(SelectedProcessId);
             }
 
             MicService.StartCapture(SelectedDeviceId);
-            MicService.SetVirtualOutputDevice(ProfileManager.CurrentProfile.CaptureDeviceId);
+            MicService.SetVirtualOutputDevice(null);
             Mixer.StartMixing(Capture.AudioStream, MicService.MicrophoneStream, token);
 
             var format = Enum.TryParse<AudioFormat>(ProfileManager.CurrentProfile.AudioFormat, true, out var parsed) 
@@ -933,7 +935,6 @@
         ProfileManager.CurrentProfile.SelectedMicrophoneId = SelectedDeviceId;
         ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
         MicService.StartCapture(SelectedDeviceId);
-        MicService.SetVirtualOutputDevice(ProfileManager.CurrentProfile.CaptureDeviceId);
     }
 
     private void OnVoiceEffectChanged() {
@@ -965,7 +966,6 @@
         if (!string.IsNullOrEmpty(targetId)) {
             ProfileManager.CurrentProfile.CaptureDeviceId = targetId;
             ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
-            MicService.SetVirtualOutputDevice(targetId);
             EnsureAudioMonitoring(SelectedProcessId);
             StateHasChanged();
         }
@@ -1008,7 +1008,6 @@
         if (!string.IsNullOrEmpty(targetDeviceId)) {
             ProfileManager.CurrentProfile.CaptureDeviceId = targetDeviceId;
             ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
-            MicService.SetVirtualOutputDevice(targetDeviceId);
             EnsureAudioMonitoring(SelectedProcessId);
 
             // Open Windows Sound App Volume Settings so the user can easily assign their music player
@@ -2421,6 +2420,50 @@
                 }
             </div>
 
+            <!-- Restrict to Local Network Only (Private Stream) Toggle -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; background: #12141a; border: 1px solid @(ProfileManager.CurrentProfile.RestrictToLocalNetwork ? "rgba(245, 158, 11, 0.5)" : "#232731"); border-radius: 8px; padding: 10px 14px; transition: border-color 0.2s ease;">
+                <div>
+                    <div style="font-size: 12px; font-weight: 600; color: #fff; display: flex; align-items: center; gap: 6px;">
+                        <span>Restrict to Local Network Only</span>
+                        @if (ProfileManager.CurrentProfile.RestrictToLocalNetwork) {
+                            <span style="font-size: 9px; font-weight: 700; color: #f59e0b; background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); padding: 1px 6px; border-radius: 4px;">PRIVATE (LAN ONLY)</span>
+                        }
+                    </div>
+                    <div style="font-size: 11px; color: #64748b;">When enabled, website users outside your Wi-Fi/LAN see only a "Private Stream" banner</div>
+                </div>
+                <label class="scrim-switch">
+                    <input type="checkbox" checked="@ProfileManager.CurrentProfile.RestrictToLocalNetwork" @onchange="ToggleRestrictToLocalNetwork" />
+                    <span class="scrim-slider"></span>
+                </label>
+            </div>
+
+            <!-- Stream URL Mount Point Configuration -->
+            <div style="margin-bottom: 14px; background: #12141a; border: 1px solid #232731; border-radius: 8px; padding: 12px 14px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <div>
+                        <div style="font-size: 12px; font-weight: 600; color: #fff;">Live Stream URL Path</div>
+                        <div style="font-size: 11px; color: #64748b;">Direct mount path for the live audio stream</div>
+                    </div>
+                    <span style="font-family: monospace; font-size: 12px; font-weight: 700; color: #10b981; background: #181b22; padding: 2px 8px; border-radius: 4px; border: 1px solid #2d3342;">
+                        /@(GetNormalizedMount())
+                    </span>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                    <div style="display: flex; align-items: center; background: #1a1d26; border: 1px solid #2d323e; border-radius: 6px; padding: 0 8px; flex: 1; min-width: 140px;">
+                        <span style="color: #64748b; font-family: monospace; font-size: 12px; margin-right: 2px;">/</span>
+                        <input type="text" class="scrim-input" style="border: none; background: transparent; padding: 6px 4px; font-family: monospace; font-size: 12px; color: #fff; width: 100%;" 
+                               value="@ProfileManager.CurrentProfile.StreamMountPoint" 
+                               @onchange="OnStreamMountPointChanged" 
+                               placeholder="stream" />
+                    </div>
+                    <!-- Quick preset mount pills -->
+                    <button class="pill-option @(GetNormalizedMount() == "stream" ? "active" : "")" style="padding: 4px 8px; font-size: 10px;" @onclick='() => SetPresetMount("stream")'>stream</button>
+                    <button class="pill-option @(GetNormalizedMount() == "live" ? "active" : "")" style="padding: 4px 8px; font-size: 10px;" @onclick='() => SetPresetMount("live")'>live</button>
+                    <button class="pill-option @(GetNormalizedMount() == "radio" ? "active" : "")" style="padding: 4px 8px; font-size: 10px;" @onclick='() => SetPresetMount("radio")'>radio</button>
+                    <button class="pill-option @(GetNormalizedMount() == "station" ? "active" : "")" style="padding: 4px 8px; font-size: 10px;" @onclick='() => SetPresetMount("station")'>station</button>
+                </div>
+            </div>
+
             <!-- Connection URLs List -->
             <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px;">
                 <!-- Localhost -->
@@ -2487,7 +2530,7 @@
                 </div>
 
                 <!-- Custom Public Domain / Host / IP (Optional) -->
-                <div style="background: #14171d; border: 1px solid #252a35; border-radius: 6px; padding: 8px 10px;">
+                <div style="background: #14171d; border: 1px solid #252a35; border-radius: 6px; padding: 10px 12px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
                         <span style="font-size: 11px; font-weight: 600; color: #cbd5e1;">Custom Domain / Public Host (Optional)</span>
                         @if (!string.IsNullOrWhiteSpace(ProfileManager.CurrentProfile.CustomPublicUrl)) {
@@ -2497,11 +2540,34 @@
                     <div style="font-size: 10px; color: #64748b; margin-bottom: 6px;">
                         Override public IP with your DDNS, domain name, or custom IP.
                     </div>
-                    <div style="display: flex; gap: 6px; align-items: center;">
+                    <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 8px;">
                         <input type="text" class="scrim-input" style="flex: 1; font-size: 11px; padding: 4px 8px; font-family: monospace; background: #0f1115; border-color: #2b303c;"
-                               placeholder="e.g. radio.mydomain.com:8080 or 123.45.67.89:8080"
+                               placeholder="@(ProfileManager.CurrentProfile.UseReverseProxy ? "e.g. radio.mydomain.com or 123.45.67.89" : "e.g. radio.mydomain.com:8080 or 123.45.67.89:8080")"
                                value="@ProfileManager.CurrentProfile.CustomPublicUrl"
                                @onchange="OnCustomPublicUrlChanged" />
+                    </div>
+
+                    <!-- HTTPS & Reverse Proxy Options -->
+                    <div style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap; padding-top: 6px; border-top: 1px solid #1f232c;">
+                        <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 11px; color: #cbd5e1; user-select: none;" title="Format generated share and VLC links with https:// instead of http://">
+                            <input type="checkbox" style="accent-color: #00d2ff; cursor: pointer;"
+                                   checked="@ProfileManager.CurrentProfile.UseHttps"
+                                   @onchange="ToggleUseHttps" />
+                            <span>Use HTTPS</span>
+                            @if (ProfileManager.CurrentProfile.UseHttps) {
+                                <span style="font-size: 8px; font-weight: 700; color: #10b981; background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.4); padding: 1px 4px; border-radius: 3px;">HTTPS</span>
+                            }
+                        </label>
+
+                        <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 11px; color: #cbd5e1; user-select: none;" title="Omit server port (e.g. :4242) from outside links when using Caddy, Nginx, or Cloudflare Tunnel">
+                            <input type="checkbox" style="accent-color: #00d2ff; cursor: pointer;"
+                                   checked="@ProfileManager.CurrentProfile.UseReverseProxy"
+                                   @onchange="ToggleUseReverseProxy" />
+                            <span>Using Reverse Proxy</span>
+                            @if (ProfileManager.CurrentProfile.UseReverseProxy) {
+                                <span style="font-size: 8px; font-weight: 700; color: #00d2ff; background: rgba(0,210,255,0.15); border: 1px solid rgba(0,210,255,0.4); padding: 1px 4px; border-radius: 3px;">NO PORT</span>
+                            }
+                        </label>
                     </div>
                 </div>
 
@@ -2509,15 +2575,15 @@
                 <div>
                     <div style="display: flex; justify-content: space-between; font-size: 11px; color: #94a3b8; margin-bottom: 3px;">
                         <span>VLC & Media Players Endpoint:</span>
-                        <span style="color: #f59e0b; font-size: 10px;">Direct Audio Stream</span>
+                        <span style="color: #f59e0b; font-size: 10px;">Direct Audio Stream (/@(GetNormalizedMount()))</span>
                     </div>
                     <div style="display: flex; gap: 6px; align-items: center;">
                         <div style="flex: 1; display: flex; align-items: center; background: #1a1d26; border: 1px solid #2d323e; border-radius: 6px; padding: 5px 8px; overflow: hidden;">
                             <span style="font-family: monospace; font-size: 11px; color: #f59e0b; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">
-                                @(GetOutsideNetworkUrl())/stream
+                                @(GetOutsideNetworkUrl())/@(GetNormalizedMount())
                             </span>
                         </div>
-                        <button class="scrim-btn-secondary" style="padding: 4px 10px; font-size: 11px; white-space: nowrap; color: #f59e0b; border-color: rgba(245, 158, 11, 0.4);" @onclick='() => CopyUrl($"{GetOutsideNetworkUrl()}/stream", "VLC_Card")'>
+                        <button class="scrim-btn-secondary" style="padding: 4px 10px; font-size: 11px; white-space: nowrap; color: #f59e0b; border-color: rgba(245, 158, 11, 0.4);" @onclick='() => CopyUrl($"{GetOutsideNetworkUrl()}/{GetNormalizedMount()}", "VLC_Card")'>
                             @(CopiedUrlTarget == "VLC_Card" ? "✓" : "Copy")
                         </button>
                     </div>
@@ -2834,14 +2900,47 @@
     private string GetLocalNetworkUrl() => NetworkDiscovery.GetLocalShareUrl(ProfileManager.CurrentProfile.Port);
 
     private string GetOutsideNetworkUrl() {
-        var custom = ProfileManager.CurrentProfile.CustomPublicUrl?.Trim();
+        var profile = ProfileManager.CurrentProfile;
+        string scheme = profile.UseHttps ? "https://" : "http://";
+        bool hidePort = profile.UseReverseProxy;
+        int port = profile.Port;
+
+        var custom = profile.CustomPublicUrl?.Trim();
         if (!string.IsNullOrEmpty(custom)) {
-            if (!custom.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !custom.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) {
-                custom = "http://" + custom;
+            if (custom.StartsWith("http://", StringComparison.OrdinalIgnoreCase)) {
+                custom = custom.Substring(7);
+            } else if (custom.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) {
+                custom = custom.Substring(8);
             }
-            return custom;
+
+            if (hidePort) {
+                int colonIdx = custom.LastIndexOf(':');
+                if (colonIdx > 0 && int.TryParse(custom.Substring(colonIdx + 1), out _)) {
+                    custom = custom.Substring(0, colonIdx);
+                }
+            }
+            return $"{scheme}{custom}";
         }
-        return NetworkDiscovery.GetPublicShareUrl(ProfileManager.CurrentProfile.Port);
+
+        string publicIp = NetworkDiscovery.PublicIp;
+        if (!string.IsNullOrEmpty(publicIp) && publicIp != "Discovering..." && publicIp != "Unavailable") {
+            return hidePort ? $"{scheme}{publicIp}" : $"{scheme}{publicIp}:{port}";
+        }
+
+        string localIp = NetworkDiscovery.PrimaryLocalIp;
+        return hidePort ? $"{scheme}{localIp}" : $"{scheme}{localIp}:{port}";
+    }
+
+    private void ToggleUseHttps() {
+        ProfileManager.CurrentProfile.UseHttps = !ProfileManager.CurrentProfile.UseHttps;
+        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        StateHasChanged();
+    }
+
+    private void ToggleUseReverseProxy() {
+        ProfileManager.CurrentProfile.UseReverseProxy = !ProfileManager.CurrentProfile.UseReverseProxy;
+        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        StateHasChanged();
     }
 
     private void OnCustomPublicUrlChanged(ChangeEventArgs e) {
@@ -2866,6 +2965,30 @@
                 await InvokeAsync(StateHasChanged);
             });
         } catch { }
+    }
+
+    private string GetNormalizedMount() {
+        var mount = ProfileManager.CurrentProfile.StreamMountPoint?.Trim().Trim('/') ?? "";
+        return string.IsNullOrEmpty(mount) ? "stream" : mount;
+    }
+
+    private void OnStreamMountPointChanged(ChangeEventArgs e) {
+        var val = e.Value?.ToString()?.Trim().Trim('/') ?? "";
+        ProfileManager.CurrentProfile.StreamMountPoint = string.IsNullOrEmpty(val) ? "stream" : val;
+        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        StateHasChanged();
+    }
+
+    private void SetPresetMount(string mount) {
+        ProfileManager.CurrentProfile.StreamMountPoint = mount;
+        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        StateHasChanged();
+    }
+
+    private void ToggleRestrictToLocalNetwork() {
+        ProfileManager.CurrentProfile.RestrictToLocalNetwork = !ProfileManager.CurrentProfile.RestrictToLocalNetwork;
+        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        StateHasChanged();
     }
 
     private void ToggleNetworkAccess() {

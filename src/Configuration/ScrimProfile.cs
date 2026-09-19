@@ -20,6 +20,10 @@ namespace Scrim.Configuration {
         public int AppStreamVolume { get; set; } = 100;
         public string CaptureDeviceId { get; set; } = "";
         public string CustomPublicUrl { get; set; } = "";
+        public bool UseHttps { get; set; } = false;
+        public bool UseReverseProxy { get; set; } = false;
+        public string StreamMountPoint { get; set; } = "stream";
+        public bool RestrictToLocalNetwork { get; set; } = false;
         public bool EnableChat { get; set; } = true;
         public System.Collections.Generic.List<string> NicknameBlacklist { get; set; } = new();
 

@@ -603,6 +603,22 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    let currentStreamEndpoint = '/stream';
+
+    function setPrivateStreamMode(isPrivate) {
+        const overlay = document.getElementById('privateStreamOverlay');
+        if (!overlay) return;
+        if (isPrivate) {
+            overlay.style.display = 'flex';
+            userExplicitlyStopped = true;
+            stopStream();
+        } else {
+            overlay.style.display = 'none';
+        }
+    }
+    window.setPrivateStreamMode = setPrivateStreamMode;
+    window.getCurrentStreamEndpoint = () => currentStreamEndpoint;
+
     function startStream(isAutoplay) {
         isUserPlaying = true;
         isConnecting = true;
@@ -619,7 +635,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         // Always load a fresh live connection with timestamp cache-buster so stream is real-time
-        audio.src = '/stream?t=' + Date.now();
+        audio.src = currentStreamEndpoint + (currentStreamEndpoint.includes('?') ? '&' : '?') + 't=' + Date.now();
         audio.load();
 
         var playPromise = audio.play();
@@ -761,6 +777,14 @@ document.addEventListener('DOMContentLoaded', function () {
     // Dynamic Branding Function
     function applyBranding(branding) {
         if (!branding) return;
+
+        if (branding.streamUrl) {
+            currentStreamEndpoint = branding.streamUrl;
+        }
+
+        if (branding.isPrivate !== undefined) {
+            setPrivateStreamMode(branding.isPrivate);
+        }
 
         if (branding.theme) {
             document.documentElement.setAttribute('data-theme', branding.theme);
@@ -921,6 +945,12 @@ document.addEventListener('DOMContentLoaded', function () {
         .then(res => res.json())
         .then(function (data) {
             if (data) {
+                if (data.streamUrl) {
+                    currentStreamEndpoint = data.streamUrl;
+                }
+                if (data.isPrivate !== undefined) {
+                    setPrivateStreamMode(data.isPrivate);
+                }
                 if (data.isLive !== undefined) {
                     updateLiveIndicator(data.isLive);
                     if (data.isLive) {
@@ -1134,6 +1164,14 @@ document.addEventListener('DOMContentLoaded', function () {
         evtSource.onmessage = function (event) {
             try {
                 const data = JSON.parse(event.data);
+
+                if (data.type === 'private_stream' || data.isPrivate) {
+                    setPrivateStreamMode(true);
+                }
+
+                if (data.streamUrl) {
+                    currentStreamEndpoint = data.streamUrl;
+                }
 
                 if (data.type === 'metadata') {
                     updateTrackMetadata(data.title, data.artist, data.album, data.albumArtUrl, data.hasArt, data.duration, data.position, data.isPlaying);

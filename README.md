@@ -37,8 +37,11 @@
 ### 🌐 Network & Internet Broadcasting
 - **Local Wi-Fi / LAN Sharing**: Share direct playback links for devices on your home network.
 - **Automatic UPnP Port Forwarding**: Effortlessly broadcast over the internet without manual router port configuration.
-- **Custom Domain / Host Override**: Enter custom domain names or DDNS hostnames (e.g. `radio.mydomain.com:8080`) that propagate across all share links.
-- **Direct Media Player Endpoint**: Native `/stream` endpoint for direct listening in VLC, Winamp, foobar2000, and mobile streaming apps.
+- **Configurable Stream Mount Path**: Customize the audio stream endpoint (e.g., `/live`, `/radio`, `/station`) directly in the console with automatic `/stream` fallback compatibility and live copy shortcuts.
+- **Local Network Only Restriction (Private Stream)**: Restrict broadcasts exclusively to home Wi-Fi/LAN listeners. When enabled, remote internet visitors see a clean "🔒 Private Stream" banner with complete lockout of audio, metadata, and chat.
+- **Reverse Proxy & HTTPS Support**: Checkboxes for **"Use HTTPS"** (generates `https://` links) and **"Using Reverse Proxy"** (strips port numbers for Caddy, Nginx, or Cloudflare Tunnel setups) for seamless copy/paste and one-click opening.
+- **Custom Domain / Host Override**: Enter custom domain names or DDNS hostnames (e.g. `radio.mydomain.com`) that propagate across all share links.
+- **Direct Media Player Endpoints**: Native stream endpoints (`/<mount>` and `/stream`) and `.m3u` / `.pls` playlists for direct listening in VLC, Winamp, foobar2000, and mobile streaming apps.
 
 ### 🎨 Modern Responsive Web Player & Live Chat
 - **Dark Glassmorphism Interface**: Real-time track metadata and album art synchronized via Windows System Media Transport Controls (SMTC).

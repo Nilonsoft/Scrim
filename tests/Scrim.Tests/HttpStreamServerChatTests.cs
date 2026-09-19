@@ -243,5 +243,202 @@ namespace Scrim.Tests {
                 server.Stop();
             }
         }
+
+        [Fact]
+        public async Task StreamServer_CustomMountPoint_ServesAudioAndPlaylists() {
+            int testPort = 19446;
+            var hub = new BroadcastHub();
+            var metaMock = new Mock<IMetadataService>();
+            metaMock.Setup(m => m.CurrentMetadata).Returns(new MediaMetadata());
+
+            var profileManagerMock = new Mock<IProfileManager>();
+            var profile = new ScrimProfile {
+                Port = testPort,
+                EnableNetworkAccess = true,
+                StreamMountPoint = "radio"
+            };
+            profileManagerMock.Setup(p => p.CurrentProfile).Returns(profile);
+
+            var networkMock = new Mock<INetworkDiscoveryService>();
+            var requestController = new SongRequestController();
+            var chatService = new LiveChatService();
+            var themeService = new ThemeService();
+
+            var server = new HttpStreamServer(hub, metaMock.Object, requestController, profileManagerMock.Object, networkMock.Object, themeService, chatService);
+
+            var audioChannel = System.Threading.Channels.Channel.CreateUnbounded<byte[]>();
+            hub.StartBroadcasting(audioChannel.Reader);
+            _ = audioChannel.Writer.WriteAsync(new byte[] { 0xFF, 0xFB, 0x90, 0x00 });
+
+            try {
+                server.Start(testPort);
+
+                using var client = new HttpClient();
+                client.Timeout = TimeSpan.FromSeconds(5);
+
+                // 1. Status API reports custom streamUrl
+                var statusRes = await client.GetAsync($"http://localhost:{testPort}/api/status");
+                Assert.Equal(HttpStatusCode.OK, statusRes.StatusCode);
+                var statusJson = await statusRes.Content.ReadAsStringAsync();
+                Assert.Contains("\"streamUrl\":\"/radio\"", statusJson);
+
+                // 2. Custom M3U playlist references /radio
+                var m3uRes = await client.GetAsync($"http://localhost:{testPort}/radio.m3u");
+                Assert.Equal(HttpStatusCode.OK, m3uRes.StatusCode);
+                var m3uText = await m3uRes.Content.ReadAsStringAsync();
+                Assert.Contains("/radio", m3uText);
+
+                // 3. Audio stream connects on custom path /radio
+                using var customStreamRes = await client.GetAsync($"http://localhost:{testPort}/radio", HttpCompletionOption.ResponseHeadersRead);
+                Assert.Equal(HttpStatusCode.OK, customStreamRes.StatusCode);
+                Assert.Equal("audio/mpeg", customStreamRes.Content.Headers.ContentType?.MediaType);
+
+                // 4. Fallback /stream also still connects
+                using var fallbackStreamRes = await client.GetAsync($"http://localhost:{testPort}/stream", HttpCompletionOption.ResponseHeadersRead);
+                Assert.Equal(HttpStatusCode.OK, fallbackStreamRes.StatusCode);
+                Assert.Equal("audio/mpeg", fallbackStreamRes.Content.Headers.ContentType?.MediaType);
+            } finally {
+                server.Stop();
+            }
+        }
+
+        [Fact]
+        public async Task StreamServer_LocalNetworkRestriction_EnforcesPrivateStream() {
+            int testPort = 19447;
+            var hub = new BroadcastHub();
+            var metaMock = new Mock<IMetadataService>();
+            metaMock.Setup(m => m.CurrentMetadata).Returns(new MediaMetadata { Title = "Secret Song" });
+
+            var profileManagerMock = new Mock<IProfileManager>();
+            var profile = new ScrimProfile {
+                Port = testPort,
+                EnableNetworkAccess = true,
+                RestrictToLocalNetwork = true,
+                StreamMountPoint = "live"
+            };
+            profileManagerMock.Setup(p => p.CurrentProfile).Returns(profile);
+
+            var networkMock = new Mock<INetworkDiscoveryService>();
+            var requestController = new SongRequestController();
+            var chatService = new LiveChatService();
+            var themeService = new ThemeService();
+
+            var server = new HttpStreamServer(hub, metaMock.Object, requestController, profileManagerMock.Object, networkMock.Object, themeService, chatService);
+
+            try {
+                server.Start(testPort);
+
+                using var client = new HttpClient();
+                client.Timeout = TimeSpan.FromSeconds(5);
+
+                // 1. Localhost client has full access
+                var localStatusRes = await client.GetAsync($"http://localhost:{testPort}/api/status");
+                Assert.Equal(HttpStatusCode.OK, localStatusRes.StatusCode);
+                var localStatusJson = await localStatusRes.Content.ReadAsStringAsync();
+                Assert.Contains("\"isPrivate\":false", localStatusJson);
+                Assert.Contains("\"restrictToLocal\":true", localStatusJson);
+
+                var localMetaRes = await client.GetAsync($"http://localhost:{testPort}/api/metadata");
+                Assert.Equal(HttpStatusCode.OK, localMetaRes.StatusCode);
+                var localMetaJson = await localMetaRes.Content.ReadAsStringAsync();
+                Assert.Contains("Secret Song", localMetaJson);
+
+                // 2. Remote / non-local client (simulated via X-Forwarded-For public IP)
+                using var remoteClient = new HttpClient();
+                remoteClient.DefaultRequestHeaders.Add("X-Forwarded-For", "203.0.113.195");
+                remoteClient.Timeout = TimeSpan.FromSeconds(5);
+
+                // Remote status reports isPrivate: true
+                var remoteStatusRes = await remoteClient.GetAsync($"http://localhost:{testPort}/api/status");
+                Assert.Equal(HttpStatusCode.OK, remoteStatusRes.StatusCode);
+                var remoteStatusJson = await remoteStatusRes.Content.ReadAsStringAsync();
+                Assert.Contains("\"isPrivate\":true", remoteStatusJson);
+
+                // Remote metadata returns 403
+                var remoteMetaRes = await remoteClient.GetAsync($"http://localhost:{testPort}/api/metadata");
+                Assert.Equal(HttpStatusCode.Forbidden, remoteMetaRes.StatusCode);
+
+                // Remote audio stream returns 403 Forbidden
+                var remoteAudioRes = await remoteClient.GetAsync($"http://localhost:{testPort}/live");
+                Assert.Equal(HttpStatusCode.Forbidden, remoteAudioRes.StatusCode);
+                var remoteAudioJson = await remoteAudioRes.Content.ReadAsStringAsync();
+                Assert.Contains("Private Stream", remoteAudioJson);
+
+                // Remote chat POST returns 403 Forbidden
+                var postContent = new StringContent("{\"sender\":\"RemoteUser\",\"text\":\"Hello\"}", System.Text.Encoding.UTF8, "application/json");
+                var remoteChatRes = await remoteClient.PostAsync($"http://localhost:{testPort}/api/chat", postContent);
+                Assert.Equal(HttpStatusCode.Forbidden, remoteChatRes.StatusCode);
+            } finally {
+                server.Stop();
+            }
+        }
+
+        [Fact]
+        public async Task StreamServer_HttpsAndReverseProxy_FormatsUrlsAndPlaylists() {
+            int testPort = 19449;
+            var hub = new BroadcastHub();
+            var metaMock = new Mock<IMetadataService>();
+            metaMock.Setup(m => m.CurrentMetadata).Returns(new MediaMetadata());
+
+            var profileManagerMock = new Mock<IProfileManager>();
+            var profile = new ScrimProfile {
+                Port = testPort,
+                EnableNetworkAccess = true,
+                StreamMountPoint = "radio",
+                UseHttps = true,
+                UseReverseProxy = true,
+                CustomPublicUrl = "stream.caddyradio.com:4242"
+            };
+            profileManagerMock.Setup(p => p.CurrentProfile).Returns(profile);
+
+            var networkMock = new Mock<INetworkDiscoveryService>();
+            networkMock.Setup(n => n.PrimaryLocalIp).Returns("192.168.1.50");
+            networkMock.Setup(n => n.PublicIp).Returns("203.0.113.88");
+            var requestController = new SongRequestController();
+            var chatService = new LiveChatService();
+            var themeService = new ThemeService();
+
+            var server = new HttpStreamServer(hub, metaMock.Object, requestController, profileManagerMock.Object, networkMock.Object, themeService, chatService);
+
+            try {
+                server.Start(testPort);
+
+                using var client = new HttpClient();
+                client.Timeout = TimeSpan.FromSeconds(5);
+
+                // 1. Status endpoint reflects useHttps and useReverseProxy flags
+                var statusRes = await client.GetAsync($"http://localhost:{testPort}/api/status");
+                Assert.Equal(HttpStatusCode.OK, statusRes.StatusCode);
+                var statusJson = await statusRes.Content.ReadAsStringAsync();
+                Assert.Contains("\"useHttps\":true", statusJson);
+                Assert.Contains("\"useReverseProxy\":true", statusJson);
+
+                // 2. Network endpoint formats publicUrl as https:// without port
+                var networkRes = await client.GetAsync($"http://localhost:{testPort}/api/network");
+                Assert.Equal(HttpStatusCode.OK, networkRes.StatusCode);
+                var networkJson = await networkRes.Content.ReadAsStringAsync();
+                Assert.Contains("\"publicUrl\":\"https://stream.caddyradio.com\"", networkJson);
+
+                // 3. M3U playlist omits port and uses https
+                var m3uReq = new HttpRequestMessage(HttpMethod.Get, $"http://localhost:{testPort}/radio.m3u");
+                m3uReq.Headers.Add("X-Forwarded-Host", "stream.caddyradio.com");
+                var m3uRes = await client.SendAsync(m3uReq);
+                Assert.Equal(HttpStatusCode.OK, m3uRes.StatusCode);
+                var m3uText = await m3uRes.Content.ReadAsStringAsync();
+                Assert.Contains("https://stream.caddyradio.com/radio", m3uText);
+                Assert.DoesNotContain(":19449", m3uText);
+                Assert.DoesNotContain(":4242", m3uText);
+
+                // 4. PLS playlist omits port and uses https
+                var plsReq = new HttpRequestMessage(HttpMethod.Get, $"http://localhost:{testPort}/radio.pls");
+                plsReq.Headers.Add("X-Forwarded-Host", "stream.caddyradio.com");
+                var plsRes = await client.SendAsync(plsReq);
+                Assert.Equal(HttpStatusCode.OK, plsRes.StatusCode);
+                var plsText = await plsRes.Content.ReadAsStringAsync();
+                Assert.Contains("https://stream.caddyradio.com/radio", plsText);
+            } finally {
+                server.Stop();
+            }
+        }
     }
 }
