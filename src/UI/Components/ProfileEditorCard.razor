@@ -34,6 +34,10 @@
             <label class="form-label text-muted">Broadcast Port</label>
             <input type="number" class="form-control bg-dark text-white border-secondary" @bind="CurrentProfile.Port" />
         </div>
+        <div class="mb-3 form-check">
+            <input type="checkbox" class="form-check-input" id="closeToTrayCheck" @bind="CurrentProfile.CloseToTray" />
+            <label class="form-check-label text-muted" for="closeToTrayCheck">Minimize/Close to System Tray</label>
+        </div>
         
         <button class="btn btn-outline-success btn-sm w-100" @onclick="SaveProfile">Save Configuration</button>
     }

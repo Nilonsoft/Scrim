@@ -6,14 +6,29 @@
         xmlns:blazor="clr-namespace:Microsoft.AspNetCore.Components.WebView.Wpf;assembly=Microsoft.AspNetCore.Components.WebView.Wpf"
         xmlns:local="clr-namespace:Scrim"
         xmlns:ui="clr-namespace:Scrim.UI"
+        xmlns:tb="http://www.hardcodet.net/taskbar"
         mc:Ignorable="d"
         Title="Scrim Console" Height="800" Width="1200"
-        Background="#121212">
+        Background="#121212"
+        StateChanged="Window_StateChanged"
+        Closing="Window_Closing">
     <Grid>
         <blazor:BlazorWebView HostPage="wwwroot\index.html" Services="{DynamicResource services}">
             <blazor:BlazorWebView.RootComponents>
                 <blazor:RootComponent Selector="#app" ComponentType="{x:Type ui:App}" />
             </blazor:BlazorWebView.RootComponents>
         </blazor:BlazorWebView>
+
+        <tb:TaskbarIcon x:Name="TrayIcon"
+                        ToolTipText="Scrim Console"
+                        IconSource="/favicon.ico"
+                        TrayMouseDoubleClick="TrayIcon_TrayMouseDoubleClick">
+            <tb:TaskbarIcon.ContextMenu>
+                <ContextMenu>
+                    <MenuItem Header="Show Scrim" Click="ShowApp_Click"/>
+                    <MenuItem Header="Exit" Click="ExitApp_Click"/>
+                </ContextMenu>
+            </tb:TaskbarIcon.ContextMenu>
+        </tb:TaskbarIcon>
     </Grid>
 </Window>

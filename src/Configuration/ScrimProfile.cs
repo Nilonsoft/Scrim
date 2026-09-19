@@ -7,6 +7,7 @@ namespace Scrim.Configuration {
         public string AudioFormat { get; set; } = "Mp3";
         public int Bitrate { get; set; } = 128;
         public int Port { get; set; } = 4242;
+        public bool CloseToTray { get; set; } = true;
     }
 
     public interface IProfileManager {
