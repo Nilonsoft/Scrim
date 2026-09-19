@@ -5,6 +5,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Runtime.InteropServices;
 using NAudio.CoreAudioApi;
 
 namespace Scrim.Audio {
@@ -161,6 +162,68 @@ namespace Scrim.Audio {
             } catch (Exception ex) {
                 Console.WriteLine($"[VirtualAudioDeviceService] Failed to open Windows Settings: {ex.Message}");
             }
+        }
+
+        [ComImport]
+        [Guid("870a63c4-aa25-42c2-94e7-94d79222be7e")]
+        private class PolicyConfigClient { }
+
+        [Guid("f8679f50-850a-41cf-9c72-430f290290c8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        private interface IPolicyConfig {
+            [PreserveSig] int GetMixFormat();
+            [PreserveSig] int GetDeviceFormat();
+            [PreserveSig] int SetDeviceFormat();
+            [PreserveSig] int GetProcessingPeriod();
+            [PreserveSig] int SetProcessingPeriod();
+            [PreserveSig] int GetShareMode();
+            [PreserveSig] int SetShareMode();
+            [PreserveSig] int GetPropertyValue();
+            [PreserveSig] int SetPropertyValue();
+            [PreserveSig] int SetDefaultEndpoint([MarshalAs(UnmanagedType.LPWStr)] string wszDeviceId, int eRole);
+            [PreserveSig] int SetEndpointVisibility();
+        }
+
+        public string? GetDefaultPlaybackDeviceId() {
+            try {
+                var enumerator = new MMDeviceEnumerator();
+                var def = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                return def?.ID;
+            } catch {
+                return null;
+            }
+        }
+
+        public string? GetDefaultPlaybackDeviceName() {
+            try {
+                var enumerator = new MMDeviceEnumerator();
+                var def = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                return def?.FriendlyName;
+            } catch {
+                return null;
+            }
+        }
+
+        public bool SetDefaultPlaybackDevice(string deviceId) {
+            try {
+                IPolicyConfig? policy = null;
+                try {
+                    policy = (IPolicyConfig)new PolicyConfigClient();
+                } catch {
+                    var type = Type.GetTypeFromCLSID(new Guid("870af99c-171d-4f9e-af0d-e63df40c2bc9"));
+                    if (type != null) {
+                        policy = (IPolicyConfig?)Activator.CreateInstance(type);
+                    }
+                }
+
+                if (policy != null) {
+                    policy.SetDefaultEndpoint(deviceId, 0); // eConsole
+                    policy.SetDefaultEndpoint(deviceId, 1); // eMultimedia
+                    return true;
+                }
+            } catch (Exception ex) {
+                Console.WriteLine($"[VirtualAudioDeviceService] Could not set default endpoint: {ex.Message}");
+            }
+            return false;
         }
     }
 }

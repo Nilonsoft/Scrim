@@ -377,6 +377,11 @@
     private string? VbCableDeviceName;
     private bool IsInstallingVirtualCable = false;
     private string? VirtualCableInstallStatus;
+    private string? OriginalDefaultDeviceId;
+    private string? OriginalDefaultDeviceName;
+    private bool IsVirtualDeviceActive => 
+        !string.IsNullOrEmpty(ProfileManager.CurrentProfile.CaptureDeviceId) &&
+        (ProfileManager.CurrentProfile.CaptureDeviceId == VbCableDeviceId || ProfileManager.CurrentProfile.CaptureDeviceId == DetectedVirtualDeviceId);
     private readonly WindowEnumerator _enumerator = new();
     private DotNetObjectReference<Dashboard>? _dotNetRef;
     private System.Timers.Timer? _refreshTimer;
@@ -906,25 +911,72 @@
         }
     }
 
-    private async Task InstallVirtualAudioCable() {
+    private async Task OneClickSetupVirtualAudio() {
         if (IsInstallingVirtualCable) return;
         IsInstallingVirtualCable = true;
-        VirtualCableInstallStatus = "Installing driver (please accept Windows UAC prompt)...";
+        VirtualCableInstallStatus = "Setting up virtual audio device...";
         StateHasChanged();
 
-        var result = await VirtualDeviceService.InstallVirtualCableAsync();
-        IsInstallingVirtualCable = false;
-        VirtualCableInstallStatus = result.Message;
+        if (string.IsNullOrEmpty(OriginalDefaultDeviceId)) {
+            OriginalDefaultDeviceId = VirtualDeviceService.GetDefaultPlaybackDeviceId();
+            OriginalDefaultDeviceName = VirtualDeviceService.GetDefaultPlaybackDeviceName();
+        }
+
+        string? targetDeviceId = null;
+        string? targetDeviceName = null;
+
+        if (!VirtualDeviceService.IsVbCableInstalled(out targetDeviceId, out targetDeviceName)) {
+            VirtualCableInstallStatus = "Installing driver (please accept Windows UAC prompt)...";
+            StateHasChanged();
+
+            var installResult = await VirtualDeviceService.InstallVirtualCableAsync();
+            if (!installResult.Success) {
+                IsInstallingVirtualCable = false;
+                VirtualCableInstallStatus = installResult.Message;
+                StateHasChanged();
+                return;
+            }
+            targetDeviceId = installResult.DeviceId;
+        }
 
         RefreshAudioAndWindows();
 
-        if (result.Success && !string.IsNullOrEmpty(result.DeviceId)) {
-            ProfileManager.CurrentProfile.CaptureDeviceId = result.DeviceId;
-            ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
-            EnsureAudioMonitoring(SelectedProcessId);
+        if (string.IsNullOrEmpty(targetDeviceId)) {
+            VirtualDeviceService.IsVirtualDeviceInstalled(out targetDeviceId, out targetDeviceName);
         }
 
+        if (!string.IsNullOrEmpty(targetDeviceId)) {
+            ProfileManager.CurrentProfile.CaptureDeviceId = targetDeviceId;
+            ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+            EnsureAudioMonitoring(SelectedProcessId);
+
+            bool defaultSet = VirtualDeviceService.SetDefaultPlaybackDevice(targetDeviceId);
+            if (defaultSet) {
+                VirtualCableInstallStatus = "✔ Ready! Windows audio is now routed through Virtual Cable into Scrim.";
+            } else {
+                VirtualCableInstallStatus = "✔ Scrim is now capturing Virtual Cable! (Click Windows Mixer to route specific apps).";
+            }
+        } else {
+            VirtualCableInstallStatus = "Driver installed. If device is not immediately visible, restart Scrim or check Windows Sound.";
+        }
+
+        IsInstallingVirtualCable = false;
         StateHasChanged();
+    }
+
+    private void RestoreOriginalAudioDevice() {
+        if (!string.IsNullOrEmpty(OriginalDefaultDeviceId)) {
+            VirtualDeviceService.SetDefaultPlaybackDevice(OriginalDefaultDeviceId);
+            ProfileManager.CurrentProfile.CaptureDeviceId = "";
+            ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+            EnsureAudioMonitoring(SelectedProcessId);
+            VirtualCableInstallStatus = $"✔ Restored Windows default playback to {OriginalDefaultDeviceName ?? "speakers"}.";
+            StateHasChanged();
+        }
+    }
+
+    private async Task InstallVirtualAudioCable() {
+        await OneClickSetupVirtualAudio();
     }
 
     private void OpenWindowsAppVolume() {
@@ -1356,68 +1408,40 @@
                     }
                 </select>
 
-                <!-- Virtual Audio Device Status & 1-Click Setup -->
-                <div style="margin-top: 8px;">
-                    @if (IsVbCableInstalled) {
-                        <div style="background: #14171d; border: 1px solid #252a35; border-radius: 8px; padding: 8px 10px;">
-                            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;">
-                                <div style="display: flex; align-items: center; gap: 6px;">
-                                    <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #10b981; box-shadow: 0 0 6px #10b981;"></span>
-                                    <span style="font-size: 11px; font-weight: 600; color: #e2e8f0;">VB-Audio Virtual Cable (Ready)</span>
-                                </div>
-                                <div style="display: flex; gap: 6px;">
-                                    @if (ProfileManager.CurrentProfile.CaptureDeviceId != VbCableDeviceId) {
-                                        <button class="pill-option" style="padding: 2px 8px; font-size: 10px; background: #00d2ff; color: #0b0d14; font-weight: 700;" @onclick="@(() => UseDetectedVirtualDevice(VbCableDeviceId))" title="Route Scrim stream capture to VB-Audio Cable">
-                                            🎯 Select for Stream
-                                        </button>
-                                    }
-                                    <button class="pill-option" style="padding: 2px 8px; font-size: 10px; color: #94a3b8;" @onclick="OpenWindowsAppVolume" title="Open Windows Volume Mixer to assign music apps to this device">
-                                        ⚙ Route App in Windows
-                                    </button>
-                                </div>
+                <!-- Virtual Audio Device 1-Click Setup -->
+                <div style="margin-top: 10px; background: linear-gradient(135deg, rgba(0, 210, 255, 0.08), rgba(99, 102, 241, 0.08)); border: 1px solid rgba(0, 210, 255, 0.35); border-radius: 10px; padding: 12px 14px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+                        <div>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span style="font-size: 16px;">⚡</span>
+                                <span style="font-size: 13px; font-weight: 700; color: #00d2ff; letter-spacing: 0.3px;">1-Click Virtual Audio Setup</span>
+                                @if (IsVirtualDeviceActive) {
+                                    <span style="font-size: 10px; background: #10b981; color: #0b0d14; font-weight: 700; padding: 1px 6px; border-radius: 10px;">ACTIVE</span>
+                                }
                             </div>
-                            <div style="font-size: 10px; color: #64748b; margin-top: 4px; line-height: 1.4;">
-                                💡 Click <b>Route App in Windows</b> to set your music app's output to CABLE Input for 100% silent local listening.
+                            <div style="font-size: 11px; color: #94a3b8; margin-top: 3px; max-width: 380px;">
+                                Automatically sets up a virtual device so your apps and music play directly into Scrim without manual routing.
                             </div>
-                        </div>
-                    } else {
-                        <div style="background: linear-gradient(135deg, rgba(0, 210, 255, 0.08), rgba(99, 102, 241, 0.08)); border: 1px solid rgba(0, 210, 255, 0.35); border-radius: 8px; padding: 10px 12px;">
-                            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
-                                <div>
-                                    <div style="display: flex; align-items: center; gap: 6px;">
-                                        <span style="font-size: 13px;">📥</span>
-                                        <span style="font-size: 12px; font-weight: 700; color: #00d2ff;">1-Click Install Virtual Audio Driver</span>
-                                    </div>
-                                    <div style="font-size: 10px; color: #94a3b8; margin-top: 2px;">
-                                        Install official WHQL VB-Audio Cable driver for silent background app streaming.
-                                    </div>
-                                </div>
-                                <button class="scrim-btn-primary" style="padding: 5px 12px; font-size: 11px; font-weight: 700;" @onclick="InstallVirtualAudioCable" disabled="@IsInstallingVirtualCable">
-                                    @(IsInstallingVirtualCable ? "⏳ Installing Driver..." : "📥 Install Virtual Driver")
-                                </button>
-                            </div>
-                            @if (!string.IsNullOrEmpty(VirtualCableInstallStatus)) {
-                                <div style="font-size: 10px; color: #38bdf8; margin-top: 6px; padding: 4px 8px; background: rgba(0,0,0,0.3); border-radius: 4px;">@VirtualCableInstallStatus</div>
-                            }
                         </div>
 
-                        @if (IsVirtualDeviceReady && !string.IsNullOrEmpty(DetectedVirtualDeviceName) && DetectedVirtualDeviceId != VbCableDeviceId) {
-                            <div style="margin-top: 6px; background: #14171d; border: 1px solid #252a35; border-radius: 6px; padding: 6px 10px; display: flex; align-items: center; justify-content: space-between; gap: 6px;">
-                                <div style="font-size: 11px; color: #94a3b8;">
-                                    Detected Device: <strong style="color: #cbd5e1;">@(DetectedVirtualDeviceName?.Replace("Speakers (", "").TrimEnd(')'))</strong>
-                                </div>
-                                <div style="display: flex; gap: 6px;">
-                                    @if (ProfileManager.CurrentProfile.CaptureDeviceId != DetectedVirtualDeviceId) {
-                                        <button class="pill-option" style="padding: 2px 8px; font-size: 10px; background: #00d2ff; color: #0b0d14; font-weight: 700;" @onclick="@(() => UseDetectedVirtualDevice(DetectedVirtualDeviceId))" title="Route Scrim stream capture to this device">
-                                            🎯 Select for Stream
-                                        </button>
-                                    }
-                                    <button class="pill-option" style="padding: 2px 8px; font-size: 10px; color: #94a3b8;" @onclick="OpenWindowsAppVolume" title="Open Windows Volume Mixer">
-                                        ⚙ Route App
-                                    </button>
-                                </div>
-                            </div>
-                        }
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            @if (IsVirtualDeviceActive && !string.IsNullOrEmpty(OriginalDefaultDeviceId)) {
+                                <button class="scrim-btn-secondary" style="padding: 6px 12px; font-size: 11px;" @onclick="RestoreOriginalAudioDevice" title="Switch Windows default playback back to your original speakers">
+                                    ↩ Restore Speakers
+                                </button>
+                            }
+                            <button class="scrim-btn-primary" style="padding: 7px 16px; font-size: 12px; font-weight: 700; box-shadow: 0 0 12px rgba(0, 210, 255, 0.3);" 
+                                    @onclick="OneClickSetupVirtualAudio" disabled="@IsInstallingVirtualCable">
+                                @(IsInstallingVirtualCable ? "⏳ Setting Up..." : (IsVirtualDeviceActive ? "✔ Virtual Audio Ready" : "⚡ Setup Virtual Device"))
+                            </button>
+                        </div>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(VirtualCableInstallStatus)) {
+                        <div style="font-size: 11px; color: #38bdf8; margin-top: 8px; padding: 6px 10px; background: rgba(0,0,0,0.35); border-radius: 6px; display: flex; align-items: center; justify-content: space-between;">
+                            <span>@VirtualCableInstallStatus</span>
+                            <button class="scrim-btn-secondary" style="padding: 2px 8px; font-size: 10px;" @onclick="OpenWindowsAppVolume" title="Open Windows Volume Mixer">⚙ Windows Mixer</button>
+                        </div>
                     }
                 </div>
             </div>
