@@ -344,6 +344,8 @@ namespace Scrim.Server {
                     }
                 } else if (path == "/api/branding") {
                     HandleBrandingRequest(context);
+                } else if (path == "/api/banner") {
+                    HandleBannerRequest(context);
                 } else if (path == "/api/requests" && context.Request.HttpMethod == "POST") {
                     if (isRestricted) {
                         context.Response.StatusCode = 403;
@@ -646,9 +648,11 @@ namespace Scrim.Server {
             string BuildBrandingJson() {
                 var profile = _profileManager.CurrentProfile;
                 var navLinksArray = string.Join(",", profile.CustomNavLinks.Select(l => $"{{\"label\":\"{EscapeJson(l.Label)}\",\"url\":\"{EscapeJson(l.Url)}\"}}"));
-                string customThemeJson = GetCustomThemeJson(profile.WebTheme ?? "dark");
+                string themeStr = profile.WebTheme ?? "dark";
+                string customThemeJson = GetCustomThemeJson(themeStr);
                 string streamMount = GetNormalizedMountPoint();
-                return $"{{\"type\":\"branding\",\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(profile.WebTheme ?? "dark")}\",\"customThemeVariables\":{customThemeJson},\"logoUrl\":\"{EscapeJson(profile.LogoUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}],\"streamUrl\":\"/{streamMount}\",\"isPrivate\":false,\"restrictToLocal\":{(profile.RestrictToLocalNetwork ? "true" : "false")}}}";
+                string bannerUrl = GetEffectiveBannerUrl();
+                return $"{{\"type\":\"branding\",\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(themeStr)}\",\"customThemeVariables\":{customThemeJson},\"logoUrl\":\"{EscapeJson(profile.LogoUrl)}\",\"bannerUrl\":\"{EscapeJson(bannerUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}],\"streamUrl\":\"/{streamMount}\",\"isPrivate\":false,\"restrictToLocal\":{(profile.RestrictToLocalNetwork ? "true" : "false")}}}";
             }
 
             EventHandler<MediaMetadata> onMetadata = (_, meta) => {
@@ -987,14 +991,62 @@ namespace Scrim.Server {
             return "[" + string.Join(",", elements) + "]";
         }
 
+        private string GetEffectiveBannerUrl() {
+            var profile = _profileManager.CurrentProfile;
+            if (string.IsNullOrWhiteSpace(profile.BannerUrl)) {
+                return "";
+            }
+            string val = profile.BannerUrl.Trim();
+            if (val.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                val.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+                val.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) {
+                return val;
+            }
+            if (File.Exists(val)) {
+                return "/api/banner";
+            }
+            return val;
+        }
+
+        private void HandleBannerRequest(HttpListenerContext context) {
+            try {
+                var response = context.Response;
+                response.Headers.Add("Access-Control-Allow-Origin", "*");
+                response.Headers.Add("Cache-Control", "public, max-age=60");
+
+                var profile = _profileManager.CurrentProfile;
+                if (!string.IsNullOrWhiteSpace(profile.BannerUrl) && File.Exists(profile.BannerUrl)) {
+                    string ext = Path.GetExtension(profile.BannerUrl).ToLowerInvariant();
+                    response.ContentType = ext switch {
+                        ".png" => "image/png",
+                        ".gif" => "image/gif",
+                        ".webp" => "image/webp",
+                        ".svg" => "image/svg+xml",
+                        _ => "image/jpeg"
+                    };
+                    byte[] bytes = File.ReadAllBytes(profile.BannerUrl);
+                    response.ContentLength64 = bytes.Length;
+                    response.OutputStream.Write(bytes, 0, bytes.Length);
+                } else {
+                    response.StatusCode = 404;
+                }
+            } catch {
+                context.Response.StatusCode = 500;
+            } finally {
+                context.Response.Close();
+            }
+        }
+
         private void HandleBrandingRequest(HttpListenerContext context) {
             try {
                 var profile = _profileManager.CurrentProfile;
                 var navLinksArray = string.Join(",", profile.CustomNavLinks.Select(l => $"{{\"label\":\"{EscapeJson(l.Label)}\",\"url\":\"{EscapeJson(l.Url)}\"}}"));
-                string customThemeJson = GetCustomThemeJson(profile.WebTheme ?? "dark");
+                string themeStr = profile.WebTheme ?? "dark";
+                string customThemeJson = GetCustomThemeJson(themeStr);
                 bool isRestricted = profile.RestrictToLocalNetwork && !IsLocalNetworkClient(context);
                 string streamMount = GetNormalizedMountPoint();
-                string json = $"{{\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(profile.WebTheme ?? "dark")}\",\"customThemeVariables\":{customThemeJson},\"logoUrl\":\"{EscapeJson(profile.LogoUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}],\"streamUrl\":\"/{streamMount}\",\"isPrivate\":{(isRestricted ? "true" : "false")},\"restrictToLocal\":{(profile.RestrictToLocalNetwork ? "true" : "false")}}}";
+                string bannerUrl = GetEffectiveBannerUrl();
+                string json = $"{{\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(themeStr)}\",\"customThemeVariables\":{customThemeJson},\"logoUrl\":\"{EscapeJson(profile.LogoUrl)}\",\"bannerUrl\":\"{EscapeJson(bannerUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}],\"streamUrl\":\"/{streamMount}\",\"isPrivate\":{(isRestricted ? "true" : "false")},\"restrictToLocal\":{(profile.RestrictToLocalNetwork ? "true" : "false")}}}";
                 byte[] buffer = System.Text.Encoding.UTF8.GetBytes(json);
                 context.Response.ContentType = "application/json";
                 context.Response.Headers.Add("Access-Control-Allow-Origin", "*");

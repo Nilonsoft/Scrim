@@ -2295,6 +2295,25 @@
                 <input type="text" class="scrim-input" @bind="ProfileManager.CurrentProfile.GenreTag" @bind:event="oninput" placeholder="e.g. Indie Alternative" />
             </div>
 
+            <div style="margin-bottom: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                    <label class="scrim-label" style="margin: 0;">Top Website Banner (Optional)</label>
+                    @if (!string.IsNullOrWhiteSpace(ProfileManager.CurrentProfile.BannerUrl)) {
+                        <button class="scrim-btn-secondary" style="padding: 1px 6px; font-size: 10px; color: #ef4444;" @onclick="@(() => { ProfileManager.CurrentProfile.BannerUrl = ""; SaveBranding(); })">✕ Remove Banner</button>
+                    }
+                </div>
+                <input type="text" class="scrim-input" @bind="ProfileManager.CurrentProfile.BannerUrl" @bind:event="oninput" placeholder="URL (https://...) or Local Image Path (C:\...)" />
+                <span style="font-size: 11px; color: var(--text-muted, #71717a); display: block; margin-top: 4px;">Displays a panoramic image banner across the top of the website. Leave blank to use the standard default header.</span>
+                @if (!string.IsNullOrWhiteSpace(ProfileManager.CurrentProfile.BannerUrl)) {
+                    <div style="margin-top: 8px; border-radius: 6px; overflow: hidden; height: 60px; background: #000; border: 1px solid var(--border-color, #252830); display: flex; align-items: center; justify-content: center;">
+                        <img src="@(ProfileManager.CurrentProfile.BannerUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? ProfileManager.CurrentProfile.BannerUrl : "/api/banner")" 
+                             alt="Banner Preview" 
+                             style="width: 100%; height: 100%; object-fit: cover;" 
+                             onerror="this.style.display='none'" />
+                    </div>
+                }
+            </div>
+
             <div style="margin-bottom: 14px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                     <label class="scrim-label" style="margin: 0;">Website Theme</label>

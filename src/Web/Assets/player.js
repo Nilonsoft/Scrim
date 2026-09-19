@@ -18,6 +18,8 @@ document.addEventListener('DOMContentLoaded', function () {
     const bottomTrackName = document.getElementById('bottomTrackName');
     const listenerCount = document.getElementById('listenerCount');
     const clockTime = document.getElementById('clockTime');
+    const stationBannerWrap = document.getElementById('stationBannerWrap');
+    const stationBannerImg = document.getElementById('stationBannerImg');
     const requestForm = document.getElementById('requestForm');
     const requestInput = document.getElementById('requestInput');
     const dedicationInput = document.getElementById('dedicationInput');
@@ -846,6 +848,20 @@ document.addEventListener('DOMContentLoaded', function () {
                 document.documentElement.style.setProperty('--accent-glow-subtle', `0 2px 8px rgba(${r}, ${g}, ${b}, 0.35)`);
                 document.documentElement.style.setProperty('--on-air-red', hex);
                 document.documentElement.style.setProperty('--on-air-glow', `0 0 20px rgba(${r}, ${g}, ${b}, 0.55)`);
+            }
+        }
+
+        // Top Station Banner
+        if (stationBannerWrap && stationBannerImg) {
+            if (branding.bannerUrl && branding.bannerUrl.trim()) {
+                stationBannerImg.src = branding.bannerUrl.trim();
+                stationBannerWrap.style.display = 'block';
+                stationBannerImg.onerror = function () {
+                    stationBannerWrap.style.display = 'none';
+                };
+            } else {
+                stationBannerWrap.style.display = 'none';
+                stationBannerImg.src = '';
             }
         }
 

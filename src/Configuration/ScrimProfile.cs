@@ -42,6 +42,7 @@ namespace Scrim.Configuration {
         public string AccentColor { get; set; } = "#ef4444";
         public string WebTheme { get; set; } = "dark";
         public string LogoUrl { get; set; } = "";
+        public string BannerUrl { get; set; } = "";
         public string NavLinks { get; set; } = "Discover,Schedule,Shows,About";
 
         public System.Collections.Generic.List<WebNavLink> CustomNavLinks { get; set; } = new() {

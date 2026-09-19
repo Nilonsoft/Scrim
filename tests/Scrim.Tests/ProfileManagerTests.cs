@@ -36,6 +36,40 @@ namespace Scrim.Tests {
             Assert.Contains(_testProfileName, available);
         }
 
+        [Fact]
+        public void BannerUrl_DefaultsToEmpty_AndPersistsProperly() {
+            var defaultProfile = new ScrimProfile();
+            Assert.Equal("", defaultProfile.BannerUrl);
+
+            var manager = new ProfileManager();
+            var profile = new ScrimProfile {
+                ProfileName = _testProfileName + "_Banner",
+                BannerUrl = "https://example.com/stream-banner.png"
+            };
+
+            manager.SaveProfile(profile);
+
+            var manager2 = new ProfileManager();
+            manager2.LoadProfile(profile.ProfileName);
+
+            Assert.Equal("https://example.com/stream-banner.png", manager2.CurrentProfile.BannerUrl);
+
+            // Clear banner
+            manager2.CurrentProfile.BannerUrl = "";
+            manager2.SaveProfile(manager2.CurrentProfile);
+
+            var manager3 = new ProfileManager();
+            manager3.LoadProfile(profile.ProfileName);
+            Assert.Equal("", manager3.CurrentProfile.BannerUrl);
+
+            // Cleanup
+            var appData = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var path = Path.Combine(appData, ".scrim", $"{profile.ProfileName}.json");
+            if (File.Exists(path)) {
+                File.Delete(path);
+            }
+        }
+
         public void Dispose() {
             // Cleanup the file that was created in the actual user directory
             var appData = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);

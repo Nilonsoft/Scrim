@@ -317,6 +317,46 @@ body {
     transition: background-color 0.35s ease, background-image 0.35s ease, color 0.35s ease;
 }
 
+/* Top Station Banner */
+.station-banner-wrap {
+    width: 100%;
+    position: relative;
+    overflow: hidden;
+    background: #08090b;
+    border-bottom: 1px solid var(--header-border, #1c1f26);
+}
+
+.station-banner-inner {
+    position: relative;
+    width: 100%;
+    height: 180px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.station-banner-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center;
+    display: block;
+}
+
+.station-banner-gradient {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(180deg, rgba(0, 0, 0, 0.05) 0%, rgba(16, 18, 22, 0.45) 70%, var(--header-bg, #101216) 100%);
+}
+
+@media (max-width: 768px) {
+    .station-banner-inner {
+        height: 120px;
+    }
+}
+
 /* Header */
 .player-header {
     display: flex;
