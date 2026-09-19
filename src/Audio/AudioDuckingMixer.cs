@@ -40,6 +40,8 @@ namespace Scrim.Audio {
             }
         }
 
+        public bool IsMixing => _mixingCts != null && !_mixingCts.IsCancellationRequested;
+
         public ChannelReader<byte[]> MixedStream => _mixedOutput.Reader;
 
         public AudioDuckingMixer() {

@@ -431,9 +431,10 @@
             await InvokeAsync(StateHasChanged);
         });
 
-        // Periodic UI poll for active listener updates
+        // Periodic UI poll for active listener updates and active applications
         _refreshTimer = new System.Timers.Timer(1500);
         _refreshTimer.Elapsed += (s, e) => {
+            RefreshWindows();
             InvokeAsync(StateHasChanged);
         };
         _refreshTimer.Start();
@@ -463,12 +464,17 @@
             ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
 
             if (ProfileManager.CurrentProfile.MuteAppLocally) {
+                LocalAudioRouting.RestoreAllMuted();
                 LocalAudioRouting.SetProcessMute(SelectedProcessId, true);
             }
         } else {
             ProfileManager.CurrentProfile.TargetProcessId = 0;
             ProfileManager.CurrentProfile.TargetProcessName = "System Audio";
             ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+
+            if (ProfileManager.CurrentProfile.MuteAppLocally) {
+                LocalAudioRouting.RestoreAllMuted();
+            }
         }
     }
 
@@ -476,7 +482,9 @@
         try {
             Capture.StartCapture(pid);
             MicService.StartCapture(SelectedDeviceId);
-            Mixer.StartMixing(Capture.AudioStream, MicService.MicrophoneStream, CancellationToken.None);
+            if (!Mixer.IsMixing) {
+                Mixer.StartMixing(Capture.AudioStream, MicService.MicrophoneStream, CancellationToken.None);
+            }
         } catch { }
     }
 
@@ -583,7 +591,21 @@
     }
 
     private void RefreshWindows() {
-        Windows = _enumerator.GetActiveWindows();
+        try {
+            var newWindows = _enumerator.GetActiveWindows().ToList();
+            bool changed = newWindows.Count != Windows.Count() ||
+                !newWindows.Select(w => (w.ProcessId, w.Title)).SequenceEqual(Windows.Select(w => (w.ProcessId, w.Title)));
+            if (changed) {
+                Windows = newWindows;
+            }
+        } catch { }
+    }
+
+    private void ForceRefreshWindows() {
+        try {
+            Windows = _enumerator.GetActiveWindows().ToList();
+            StateHasChanged();
+        } catch { }
     }
 
     private void ToggleBroadcast() {
@@ -1049,7 +1071,7 @@
             
             <div style="margin-bottom: 14px;">
                 <label class="scrim-label">Application Window</label>
-                <select class="scrim-select" @bind="SelectedProcessId" @bind:after="OnProcessChanged" disabled="@IsLive">
+                <select class="scrim-select" @bind="SelectedProcessId" @bind:after="OnProcessChanged" @onfocus="ForceRefreshWindows" @onclick="ForceRefreshWindows">
                     <option value="0">System Audio (All Apps / Master Desktop Mix)</option>
                     @foreach (var w in Windows) {
                         <option value="@w.ProcessId">@w.Title</option>

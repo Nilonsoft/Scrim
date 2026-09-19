@@ -167,22 +167,34 @@ namespace Scrim.Audio {
 
         public void StopCapture() {
             _cts?.Cancel();
-            _captureTask?.Wait();
-            _audioClient?.Stop();
+            try {
+                _captureTask?.Wait(200);
+            } catch { }
+            try {
+                _audioClient?.Stop();
+            } catch { }
+            if (_pActivationParams != nint.Zero) {
+                try {
+                    Marshal.FreeHGlobal(_pActivationParams);
+                } catch { }
+                _pActivationParams = nint.Zero;
+            }
+            if (_audioClient != null && Marshal.IsComObject(_audioClient)) {
+                try {
+                    Marshal.ReleaseComObject(_audioClient);
+                } catch { }
+                _audioClient = null;
+            }
+            if (_captureClient != null && Marshal.IsComObject(_captureClient)) {
+                try {
+                    Marshal.ReleaseComObject(_captureClient);
+                } catch { }
+                _captureClient = null;
+            }
         }
 
         public void Dispose() {
             StopCapture();
-            if (_pActivationParams != nint.Zero) {
-                Marshal.FreeHGlobal(_pActivationParams);
-                _pActivationParams = nint.Zero;
-            }
-            if (_audioClient != null && Marshal.IsComObject(_audioClient)) {
-                Marshal.ReleaseComObject(_audioClient);
-            }
-            if (_captureClient != null && Marshal.IsComObject(_captureClient)) {
-                Marshal.ReleaseComObject(_captureClient);
-            }
         }
     }
 }
