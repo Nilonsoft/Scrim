@@ -150,5 +150,36 @@ namespace Scrim.Tests {
             Assert.False(service.IsUserBanned("u3"));
             Assert.Equal(2, service.GetBannedUsers().Count);
         }
+
+        [Fact]
+        public void RemoveMessage_DeletesSpecificMessageAndFiresEvent() {
+            var service = new LiveChatService();
+            var m1 = service.AddMessage("Listener1", "First message");
+            var m2 = service.AddMessage("DJ Host", "Host message", isHost: true);
+            var m3 = service.AddMessage("Listener2", "Third message");
+
+            Assert.Equal(3, service.GetRecentMessages().Count);
+
+            string? removedId = null;
+            service.MessageRemoved += id => removedId = id;
+
+            // Remove host message
+            bool removedHost = service.RemoveMessage(m2.Id);
+            Assert.True(removedHost);
+            Assert.Equal(m2.Id, removedId);
+            Assert.Equal(2, service.GetRecentMessages().Count);
+            Assert.DoesNotContain(service.GetRecentMessages(), m => m.Id == m2.Id);
+
+            // Remove listener message
+            bool removedListener = service.RemoveMessage(m1.Id);
+            Assert.True(removedListener);
+            Assert.Equal(m1.Id, removedId);
+            Assert.Single(service.GetRecentMessages());
+            Assert.Equal(m3.Id, service.GetRecentMessages().First().Id);
+
+            // Removing non-existent message returns false
+            bool removedNonExistent = service.RemoveMessage("non-existent-id");
+            Assert.False(removedNonExistent);
+        }
     }
 }

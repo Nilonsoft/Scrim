@@ -575,6 +575,10 @@ namespace Scrim.Server {
                 immediateChannel.Writer.TryWrite($"data: {chatJson}\n\n");
             };
 
+            Action<string> onMessageRemoved = (msgId) => {
+                immediateChannel.Writer.TryWrite($"data: {{\"type\":\"chat_message_deleted\",\"id\":\"{EscapeJson(msgId)}\"}}\n\n");
+            };
+
             Action onClear = () => {
                 immediateChannel.Writer.TryWrite("data: {\"type\":\"chat_clear\"}\n\n");
             };
@@ -664,6 +668,7 @@ namespace Scrim.Server {
             };
 
             _chatService.MessagePosted += onMessage;
+            _chatService.MessageRemoved += onMessageRemoved;
             _chatService.ChatCleared += onClear;
             _chatService.ChatStatusChanged += onStatus;
             _chatService.NicknameAssigned += onAssign;
@@ -735,6 +740,7 @@ namespace Scrim.Server {
             } catch {
             } finally {
                 _chatService.MessagePosted -= onMessage;
+                _chatService.MessageRemoved -= onMessageRemoved;
                 _chatService.ChatCleared -= onClear;
                 _chatService.ChatStatusChanged -= onStatus;
                 _chatService.NicknameAssigned -= onAssign;

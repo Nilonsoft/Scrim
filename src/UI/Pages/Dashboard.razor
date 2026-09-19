@@ -472,6 +472,7 @@
 
         ConsoleChatMessages = ChatService.GetRecentMessages().ToList();
         ChatService.MessagePosted += OnChatMessageReceived;
+        ChatService.MessageRemoved += OnChatMessageRemoved;
         ChatService.ChatCleared += OnChatCleared;
         ChatService.ChatStatusChanged += OnChatStatusChanged;
         ChatService.UserBanned += OnUserBanned;
@@ -1561,6 +1562,7 @@
         Hub.BroadcastingStateChanged -= OnHubBroadcastingStateChanged;
         MetadataService.MetadataChanged -= OnMetadataReceived;
         ChatService.MessagePosted -= OnChatMessageReceived;
+        ChatService.MessageRemoved -= OnChatMessageRemoved;
         ChatService.ChatCleared -= OnChatCleared;
         ChatService.ChatStatusChanged -= OnChatStatusChanged;
         ChatService.UserBanned -= OnUserBanned;
@@ -2789,7 +2791,14 @@
                                         </button>
                                     }
                                 </div>
-                                <span style="font-size: 9px; color: #64748b; font-family: monospace;">@msg.Timestamp.ToLocalTime().ToString("HH:mm:ss")</span>
+                                <div style="display: flex; align-items: center; gap: 6px;">
+                                    <span style="font-size: 9px; color: #64748b; font-family: monospace;">@msg.Timestamp.ToLocalTime().ToString("HH:mm:ss")</span>
+                                    <button class="scrim-dots-btn" style="color: #94a3b8; font-size: 11px; padding: 0 4px; line-height: 1; border-radius: 4px;" 
+                                            title="Delete this message" 
+                                            @onclick="@(() => DeleteChatMessage(msg))">
+                                        ✕
+                                    </button>
+                                </div>
                             </div>
                             <div style="color: #e2e8f0; word-break: break-word;">@msg.Text</div>
                         </div>
@@ -2882,6 +2891,20 @@
                 await AutoScrollChatAsync();
             }
         });
+    }
+
+    private void OnChatMessageRemoved(string messageId) {
+        InvokeAsync(() => {
+            ConsoleChatMessages.RemoveAll(m => m.Id.Equals(messageId, StringComparison.OrdinalIgnoreCase));
+            StateHasChanged();
+        });
+    }
+
+    private void DeleteChatMessage(ChatMessage msg) {
+        if (msg == null || string.IsNullOrWhiteSpace(msg.Id)) return;
+        ChatService.RemoveMessage(msg.Id);
+        ConsoleChatMessages.RemoveAll(m => m.Id == msg.Id);
+        StateHasChanged();
     }
 
     private void OnChatCleared() {

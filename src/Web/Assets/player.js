@@ -1234,6 +1234,10 @@ document.addEventListener('DOMContentLoaded', function () {
                     }
                 }
 
+                if (data.type === 'chat_message_deleted' && data.id) {
+                    removeChatMessage(data.id);
+                }
+
                 if (data.type === 'chat_clear') {
                     clearChatMessages();
                 }
@@ -1513,6 +1517,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
         const msgDiv = document.createElement('div');
         msgDiv.className = 'chat-msg' + (msg.isHost ? ' host-msg' : '');
+        if (msg.id) {
+            msgDiv.id = `chatMsg_${msg.id}`;
+            msgDiv.setAttribute('data-msg-id', msg.id);
+        }
         const timeStr = formatMessageTime(msg.timestamp);
         const senderColor = msg.color || (msg.isHost ? '#ef4444' : '#00d2ff');
 
@@ -1532,6 +1540,22 @@ document.addEventListener('DOMContentLoaded', function () {
         // Auto-scroll to bottom smoothly
         if (chatMessagesContainer) {
             chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+        }
+    }
+
+    function removeChatMessage(id) {
+        if (!id || !chatMessagesList) return;
+        const el = document.getElementById(`chatMsg_${id}`) || chatMessagesList.querySelector(`[data-msg-id="${id}"]`);
+        if (el && el.parentNode) {
+            el.parentNode.removeChild(el);
+        }
+        if (seenMessageIds.has(id)) {
+            seenMessageIds.delete(id);
+        }
+        const remaining = chatMessagesList.querySelectorAll('.chat-msg');
+        if (remaining.length === 0 && chatEmptyHint) {
+            chatEmptyHint.style.display = 'block';
+            chatMessagesList.appendChild(chatEmptyHint);
         }
     }
 

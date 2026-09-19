@@ -16,7 +16,9 @@ namespace Scrim.Metadata {
         bool IsUserBanned(string userId);
         IReadOnlyList<BannedChatUser> GetBannedUsers();
         void SyncBannedUsers(IEnumerable<BannedChatUser> bannedUsers);
+        bool RemoveMessage(string messageId);
         event Action<ChatMessage>? MessagePosted;
+        event Action<string>? MessageRemoved;
         event Action? ChatCleared;
         event Action<bool>? ChatStatusChanged;
         event Action<string, string>? NicknameAssigned;
@@ -36,6 +38,7 @@ namespace Scrim.Metadata {
         };
 
         public event Action<ChatMessage>? MessagePosted;
+        public event Action<string>? MessageRemoved;
         public event Action? ChatCleared;
         public event Action<bool>? ChatStatusChanged;
         public event Action<string, string>? NicknameAssigned;
@@ -159,6 +162,19 @@ namespace Scrim.Metadata {
             lock (_lock) {
                 return _messages.ToList();
             }
+        }
+
+        public bool RemoveMessage(string messageId) {
+            if (string.IsNullOrWhiteSpace(messageId)) return false;
+            bool removed = false;
+            string cleanId = messageId.Trim();
+            lock (_lock) {
+                removed = _messages.RemoveAll(m => m.Id.Equals(cleanId, StringComparison.OrdinalIgnoreCase)) > 0;
+            }
+            if (removed) {
+                MessageRemoved?.Invoke(cleanId);
+            }
+            return removed;
         }
 
         public void Clear() {
