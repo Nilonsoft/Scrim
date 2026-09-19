@@ -41,6 +41,7 @@ namespace Scrim.Configuration {
         public string GenreTag { get; set; } = "Indie Alternative";
         public string AccentColor { get; set; } = "#ef4444";
         public string WebTheme { get; set; } = "dark";
+        public bool SyncConsoleThemeWithWeb { get; set; } = true;
         public string LogoUrl { get; set; } = "";
         public string BannerUrl { get; set; } = "";
         public string NavLinks { get; set; } = "Discover,Schedule,Shows,About";

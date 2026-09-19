@@ -441,5 +441,41 @@ namespace Scrim.Tests {
                 server.Stop();
             }
         }
+
+        [Fact]
+        public void ThemeService_BuiltInThemes_ResolveCompleteConsoleTokens() {
+            var themeService = new ThemeService();
+            var themes = themeService.GetAvailableThemes();
+
+            Assert.True(themes.Count >= 11);
+
+            // Test Synthwave 80s
+            var synthwave = themeService.GetTheme("synthwave");
+            Assert.NotNull(synthwave);
+            Assert.Equal("#f43f5e", synthwave.AccentColor);
+            Assert.Equal("#0d041a", synthwave.BgDark);
+
+            var synthVars = synthwave.GetConsoleCssVariables();
+            Assert.Equal("#0d041a", synthVars["--bg-main"]);
+            Assert.Equal("#170b2e", synthVars["--card-bg"]);
+            Assert.Equal("#f43f5e", synthVars["--accent-blue"]);
+            Assert.Contains("--card-bg-gradient", synthVars.Keys);
+
+            // Test custom accent override
+            var customAccentVars = synthwave.GetConsoleCssVariables("#00ffaa");
+            Assert.Equal("#00ffaa", customAccentVars["--accent-blue"]);
+            Assert.Equal("#00ffaa", customAccentVars["--accent-color"]);
+
+            // Test Goth theme
+            var goth = themeService.GetTheme("goth");
+            Assert.NotNull(goth);
+            Assert.Equal("#e11d48", goth.AccentColor);
+            Assert.Equal("#050608", goth.BgDark);
+
+            var gothVars = goth.GetConsoleCssVariables();
+            Assert.Equal("#050608", gothVars["--bg-main"]);
+            Assert.Equal("#0b0d11", gothVars["--card-bg"]);
+            Assert.Equal("#e11d48", gothVars["--accent-blue"]);
+        }
     }
 }

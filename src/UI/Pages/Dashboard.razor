@@ -31,6 +31,20 @@
 @inject ISongHistoryService HistoryService
 @inject IFFmpegService FFmpegService
 
+@if (ProfileManager.CurrentProfile.SyncConsoleThemeWithWeb) {
+    var activeTheme = ThemeService.GetTheme(ProfileManager.CurrentProfile.WebTheme);
+    if (activeTheme != null) {
+        var themeVars = activeTheme.GetConsoleCssVariables(ProfileManager.CurrentProfile.AccentColor);
+        <style>
+            :root {
+                @foreach (var kv in themeVars) {
+                    @($"{kv.Key}: {kv.Value} !important;\n")
+                }
+            }
+        </style>
+    }
+}
+
 <!-- Top Header Bar -->
 <header class="scrim-topbar">
     <div style="display: flex; align-items: center; gap: 14px;">
@@ -1263,6 +1277,7 @@
     private void SetAccentColor(string hex) {
         ProfileManager.CurrentProfile.AccentColor = hex;
         SaveBranding();
+        StateHasChanged();
     }
 
     private void SetWebTheme(string themeKey, string? defaultAccent = null) {
@@ -1271,6 +1286,15 @@
             ProfileManager.CurrentProfile.AccentColor = defaultAccent;
         }
         SaveBranding();
+        StateHasChanged();
+    }
+
+    private void ToggleSyncConsoleTheme(ChangeEventArgs e) {
+        if (bool.TryParse(e.Value?.ToString(), out bool val)) {
+            ProfileManager.CurrentProfile.SyncConsoleThemeWithWeb = val;
+            ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+            StateHasChanged();
+        }
     }
 
     private void ToggleBroadcastOnOpen(ChangeEventArgs e) {
@@ -2475,6 +2499,15 @@
                             @(theme.Icon) @(theme.Name)@(theme.IsCustom ? " (User)" : "")
                         </button>
                     }
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px; margin-top: 10px;">
+                    <input type="checkbox" id="syncConsoleThemeCheck"
+                           checked="@ProfileManager.CurrentProfile.SyncConsoleThemeWithWeb"
+                           @onchange="ToggleSyncConsoleTheme"
+                           style="accent-color: var(--accent-blue, #00d2ff); width: 15px; height: 15px; cursor: pointer;" />
+                    <label for="syncConsoleThemeCheck" style="font-size: 11.5px; color: var(--text-muted, #94a3b8); cursor: pointer; user-select: none; margin: 0;">
+                        Sync Scrim Console with Website Theme (desktop console updates colors to match)
+                    </label>
                 </div>
             </div>
 

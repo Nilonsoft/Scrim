@@ -33,6 +33,7 @@ body {
     padding: 0;
     user-select: none;
     overflow-x: hidden;
+    transition: background-color 0.25s ease, color 0.25s ease;
 }
 
 /* Scrollbars */
@@ -57,11 +58,12 @@ body {
     align-items: center;
     justify-content: space-between;
     padding: 14px 28px;
-    background: #141519;
-    border-bottom: 1px solid #20232a;
+    background: var(--topbar-bg, #141519);
+    border-bottom: 1px solid var(--topbar-border, #20232a);
     position: sticky;
     top: 0;
     z-index: 100;
+    transition: background-color 0.25s ease, border-color 0.25s ease;
 }
 
 .scrim-menu-btn {
@@ -260,14 +262,14 @@ body {
 
 .scrim-select, .scrim-input {
     width: 100%;
-    background-color: #14151a;
-    border: 1px solid #2a2d36;
-    color: #ffffff;
+    background-color: var(--pill-bg, #14151a);
+    border: 1px solid var(--pill-border, #2a2d36);
+    color: var(--text-main, #ffffff);
     padding: 10px 14px;
     border-radius: 10px;
     font-size: 13px;
     outline: none;
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.25s ease;
     appearance: none;
     background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238e95a5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
     background-repeat: no-repeat;
@@ -276,8 +278,8 @@ body {
 }
 
 .scrim-select:focus, .scrim-input:focus {
-    border-color: #434958;
-    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.08);
+    border-color: var(--accent-blue, #434958);
+    box-shadow: 0 0 0 2px rgba(0, 210, 255, 0.15);
 }
 
 /* Retro Analog Twin VU Meters */
