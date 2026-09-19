@@ -13,5 +13,8 @@ namespace Scrim.Metadata {
         event EventHandler<MediaMetadata>? MetadataChanged;
         void StartMonitoring(uint targetProcessId);
         void StopMonitoring();
+        System.Threading.Tasks.Task<bool> TogglePlayPauseAsync();
+        System.Threading.Tasks.Task<bool> SkipNextAsync();
+        System.Threading.Tasks.Task<bool> SkipPreviousAsync();
     }
 }

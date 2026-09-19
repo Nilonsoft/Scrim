@@ -74,6 +74,45 @@ namespace Scrim.Metadata {
             _cts?.Cancel();
         }
 
+        public async Task<bool> TogglePlayPauseAsync() {
+            try {
+                if (_sessionManager == null) {
+                    _sessionManager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
+                }
+                var session = _sessionManager?.GetCurrentSession();
+                if (session != null) {
+                    return await session.TryTogglePlayPauseAsync();
+                }
+            } catch { }
+            return false;
+        }
+
+        public async Task<bool> SkipNextAsync() {
+            try {
+                if (_sessionManager == null) {
+                    _sessionManager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
+                }
+                var session = _sessionManager?.GetCurrentSession();
+                if (session != null) {
+                    return await session.TrySkipNextAsync();
+                }
+            } catch { }
+            return false;
+        }
+
+        public async Task<bool> SkipPreviousAsync() {
+            try {
+                if (_sessionManager == null) {
+                    _sessionManager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
+                }
+                var session = _sessionManager?.GetCurrentSession();
+                if (session != null) {
+                    return await session.TrySkipPreviousAsync();
+                }
+            } catch { }
+            return false;
+        }
+
         public void Dispose() {
             StopMonitoring();
         }
