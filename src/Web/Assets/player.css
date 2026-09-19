@@ -1409,73 +1409,106 @@ body {
 .song-reactions-bar {
     display: inline-flex;
     align-items: center;
-    gap: 12px;
-    margin: 10px 0 14px 0;
-    padding: 6px 14px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid var(--card-border, rgba(255, 255, 255, 0.08));
-    border-radius: 30px;
-    backdrop-filter: blur(10px);
+    gap: 8px;
+    margin: 8px 0 16px 0;
+    padding: 3px 4px 3px 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 9999px;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     width: fit-content;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
 }
 
 .reactions-label {
-    font-size: 11px;
-    font-weight: 600;
+    font-size: 10px;
+    font-weight: 700;
     color: var(--text-dim, #64748b);
-    letter-spacing: 0.5px;
+    letter-spacing: 1px;
     text-transform: uppercase;
+    user-select: none;
+    margin-right: 2px;
 }
 
 .reactions-buttons {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
 }
 
 .reaction-btn {
+    appearance: none;
+    -webkit-appearance: none;
+    outline: none;
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    background: var(--input-bg, #101216);
-    border: 1px solid var(--card-border, #232730);
-    color: var(--text-bright, #fff);
-    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--text-bright, #f8fafc);
+    border-radius: 9999px;
     padding: 5px 12px;
     font-size: 12px;
-    font-weight: 700;
+    font-weight: 600;
+    font-family: inherit;
     cursor: pointer;
-    transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transition: all 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
     position: relative;
     user-select: none;
+    line-height: 1;
 }
 
 .reaction-btn:hover {
-    border-color: var(--accent-color, #00d2ff);
-    box-shadow: 0 0 12px var(--accent-glow-subtle, rgba(0, 210, 255, 0.25));
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.2);
     transform: translateY(-2px) scale(1.05);
+}
+
+.reaction-btn[data-reaction="thumbs_up"]:hover {
+    background: rgba(56, 189, 248, 0.12);
+    border-color: rgba(56, 189, 248, 0.45);
+    box-shadow: 0 4px 16px rgba(56, 189, 248, 0.25);
+    color: #38bdf8;
+}
+
+.reaction-btn[data-reaction="heart"]:hover,
+.reaction-btn.reaction-love:hover {
+    background: rgba(244, 63, 94, 0.14);
+    border-color: rgba(244, 63, 94, 0.5);
+    box-shadow: 0 4px 16px rgba(244, 63, 94, 0.3);
+    color: #f43f5e;
+}
+
+.reaction-btn[data-reaction="thumbs_down"]:hover {
+    background: rgba(148, 163, 184, 0.12);
+    border-color: rgba(148, 163, 184, 0.4);
+    box-shadow: 0 4px 14px rgba(148, 163, 184, 0.2);
+    color: #94a3b8;
 }
 
 .reaction-btn:active, .reaction-btn.pop {
     transform: scale(1.22);
 }
 
-.reaction-btn.reaction-love:hover {
-    border-color: #f43f5e;
-    box-shadow: 0 0 12px rgba(244, 63, 94, 0.35);
-}
-
 .reaction-emoji {
     font-size: 14px;
     line-height: 1;
     display: inline-block;
+    filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.4));
+    transition: transform 0.2s ease;
+}
+
+.reaction-btn:hover .reaction-emoji {
+    transform: scale(1.15);
 }
 
 .reaction-count {
-    font-size: 11px;
+    font-size: 11.5px;
     font-variant-numeric: tabular-nums;
     color: var(--text-muted, #94a3b8);
     font-weight: 700;
+    transition: color 0.2s ease;
 }
 
 .reaction-btn:hover .reaction-count {
@@ -1487,8 +1520,9 @@ body {
     position: fixed;
     pointer-events: none;
     z-index: 9999;
-    font-size: 24px;
-    animation: floatParticle 1.8s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    font-size: 26px;
+    filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.5));
+    animation: floatParticle 1.25s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 @keyframes floatParticle {
@@ -1496,17 +1530,17 @@ body {
         opacity: 1;
         transform: translateY(0) scale(0.6) rotate(0deg);
     }
-    40% {
+    30% {
         opacity: 1;
-        transform: translateY(-50px) scale(1.3) rotate(-8deg);
+        transform: translateY(-40px) scale(1.3) rotate(-8deg);
     }
-    80% {
-        opacity: 0.8;
-        transform: translateY(-110px) scale(1.1) rotate(6deg);
+    75% {
+        opacity: 0.85;
+        transform: translateY(-90px) scale(1.1) rotate(6deg);
     }
     100% {
         opacity: 0;
-        transform: translateY(-150px) scale(0.8) rotate(-4deg);
+        transform: translateY(-130px) scale(0.8) rotate(-4deg);
     }
 }
 
