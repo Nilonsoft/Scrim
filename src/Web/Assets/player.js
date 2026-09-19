@@ -2201,12 +2201,6 @@ document.addEventListener('DOMContentLoaded', function () {
     const directStreamM3uLink = document.getElementById('directStreamM3uLink');
     const directStreamMetaNote = document.getElementById('directStreamMetaNote');
 
-    const sidebarStreamUrlInput = document.getElementById('sidebarStreamUrlInput');
-    const sidebarStreamCopyBtn = document.getElementById('sidebarStreamCopyBtn');
-    const sidebarStreamCopyBtnText = document.getElementById('sidebarStreamCopyBtnText');
-    const sidebarOpenGuideBtn = document.getElementById('sidebarOpenGuideBtn');
-    const sidebarM3uLink = document.getElementById('sidebarM3uLink');
-
     function getAbsoluteStreamUrl() {
         const mount = currentStreamEndpoint ? (currentStreamEndpoint.startsWith('/') ? currentStreamEndpoint : ('/' + currentStreamEndpoint)) : '/stream';
         const loc = window.location;
@@ -2250,12 +2244,6 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         if (directStreamM3uLink) {
             directStreamM3uLink.href = m3uUrl;
-        }
-        if (sidebarStreamUrlInput) {
-            sidebarStreamUrlInput.value = absUrl;
-        }
-        if (sidebarM3uLink) {
-            sidebarM3uLink.href = m3uUrl;
         }
         if (directStreamMetaNote) {
             const fmt = (streamFormat && streamFormat.textContent) ? streamFormat.textContent : 'MP3';
@@ -2332,9 +2320,6 @@ document.addEventListener('DOMContentLoaded', function () {
     if (directStreamDoneBtn) {
         directStreamDoneBtn.addEventListener('click', closeDirectStreamModal);
     }
-    if (sidebarOpenGuideBtn) {
-        sidebarOpenGuideBtn.addEventListener('click', openDirectStreamModal);
-    }
 
     if (directStreamModal) {
         directStreamModal.addEventListener('click', function (e) {
@@ -2349,23 +2334,11 @@ document.addEventListener('DOMContentLoaded', function () {
             this.select();
         });
     }
-    if (sidebarStreamUrlInput) {
-        sidebarStreamUrlInput.addEventListener('click', function () {
-            this.select();
-        });
-    }
 
     if (directStreamCopyBtn && directStreamUrlInput) {
         directStreamCopyBtn.addEventListener('click', function () {
             const urlToCopy = directStreamUrlInput.value || getAbsoluteStreamUrl();
             copyTextToClipboard(urlToCopy, directStreamCopyBtn, directStreamCopyBtnText, 'Copy URL');
-        });
-    }
-
-    if (sidebarStreamCopyBtn && sidebarStreamUrlInput) {
-        sidebarStreamCopyBtn.addEventListener('click', function () {
-            const urlToCopy = sidebarStreamUrlInput.value || getAbsoluteStreamUrl();
-            copyTextToClipboard(urlToCopy, sidebarStreamCopyBtn, sidebarStreamCopyBtnText, 'Copy');
         });
     }
 
