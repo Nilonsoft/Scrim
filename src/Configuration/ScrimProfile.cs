@@ -17,6 +17,7 @@ namespace Scrim.Configuration {
         public CloseToTrayMode CloseMode { get; set; } = CloseToTrayMode.MinimizeToTray;
         public bool MuteAppLocally { get; set; } = false;
         public int AppStreamVolume { get; set; } = 100;
+        public string CaptureDeviceId { get; set; } = "";
 
         // Web Player Branding Customization
         public string StationName { get; set; } = "GLOBAL INDIE RADIO";

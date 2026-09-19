@@ -109,24 +109,20 @@
                     <h2 class="track-artist" id="trackArtist">LIVE BROADCAST</h2>
                     <div class="show-subtitle" id="showSubtitle">Live Studio Transmission</div>
 
-                    <!-- Live Ambient Waveform Graphic -->
-                    <div class="waveform-container">
-                        <div class="wave-bar"></div>
-                        <div class="wave-bar"></div>
-                        <div class="wave-bar"></div>
-                        <div class="wave-bar"></div>
-                        <div class="wave-bar"></div>
-                        <div class="wave-bar"></div>
-                        <div class="wave-bar"></div>
-                        <div class="wave-bar"></div>
-                        <div class="wave-bar"></div>
-                        <div class="wave-bar"></div>
-                        <div class="wave-bar"></div>
-                        <div class="wave-bar"></div>
-                        <div class="wave-bar"></div>
-                        <div class="wave-bar"></div>
-                        <div class="wave-bar"></div>
-                        <div class="wave-bar"></div>
+                    <!-- Live Visualizer & Multi-Mode Reaction Offers -->
+                    <div class="visualizer-wrapper">
+                        <div class="visualizer-toolbar">
+                            <span class="visualizer-title">Audio Reaction</span>
+                            <div class="vis-modes-group" id="visModeGroup">
+                                <button class="vis-mode-btn active" data-mode="bars" title="Classic Dynamic Equalizer Bars">📊 Bars</button>
+                                <button class="vis-mode-btn" data-mode="wave" title="Smooth Oscilloscope Waveform">📈 Wave</button>
+                                <button class="vis-mode-btn" data-mode="spectrum" title="Multi-Frequency Harmonic Spectrum">🌈 Spectrum</button>
+                                <button class="vis-mode-btn" data-mode="pulse" title="Rhythmic Radial Bass Pulse">✨ Pulse</button>
+                            </div>
+                        </div>
+                        <div class="waveform-container" id="visualizerContainer">
+                            <canvas id="visualizerCanvas"></canvas>
+                        </div>
                     </div>
                 </div>
             </div>

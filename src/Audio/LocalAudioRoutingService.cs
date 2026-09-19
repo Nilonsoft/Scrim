@@ -13,34 +13,49 @@ namespace Scrim.Audio {
 
             lock (_lock) {
                 try {
-                    var enumerator = new MMDeviceEnumerator();
-                    var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
-                    var sessionManager = device.AudioSessionManager;
-                    var sessions = sessionManager.Sessions;
-
-                    bool foundAny = false;
-                    var targetPids = GetProcessTreePids(processId);
-
-                    for (int i = 0; i < sessions.Count; i++) {
-                        var session = sessions[i];
-                        uint sessionPid = (uint)session.GetProcessID;
-
-                        if (targetPids.Contains(sessionPid)) {
-                            session.SimpleAudioVolume.Mute = mute;
-                            foundAny = true;
-                        }
-                    }
-
-                    if (mute) {
-                        _mutedProcessIds.Add(processId);
-                    } else {
+                    // If un-muting, restore audio session volume mute flag in Windows CoreAudio
+                    if (!mute) {
+                        UnmuteProcess(processId);
                         _mutedProcessIds.Remove(processId);
+                        return true;
                     }
 
-                    return foundAny;
+                    // Windows CoreAudio Architecture Note:
+                    // Setting session.SimpleAudioVolume.Mute = true stops the Windows Audio Engine
+                    // from rendering samples to the endpoint, which causes loopback capture to receive silence (muting the stream too).
+                    // Audio isolation without stream muting is achieved by routing the app to an isolated playback device.
+                    // We record the flag here for state tracking without destructively silencing the audio engine.
+                    _mutedProcessIds.Add(processId);
+                    return true;
                 } catch {
                     return false;
                 }
+            }
+        }
+
+        public void UnmuteProcess(uint processId) {
+            if (processId == 0) return;
+
+            lock (_lock) {
+                try {
+                    var enumerator = new MMDeviceEnumerator();
+                    var devices = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
+                    var targetPids = GetProcessTreePids(processId);
+
+                    foreach (var device in devices) {
+                        try {
+                            var sessions = device.AudioSessionManager.Sessions;
+                            for (int i = 0; i < sessions.Count; i++) {
+                                var session = sessions[i];
+                                uint sessionPid = (uint)session.GetProcessID;
+                                if (targetPids.Contains(sessionPid)) {
+                                    session.SimpleAudioVolume.Mute = false;
+                                }
+                            }
+                        } catch { }
+                    }
+                    _mutedProcessIds.Remove(processId);
+                } catch { }
             }
         }
 
@@ -48,43 +63,53 @@ namespace Scrim.Audio {
             if (processId == 0) return false;
 
             lock (_lock) {
-                try {
-                    var enumerator = new MMDeviceEnumerator();
-                    var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
-                    var sessions = device.AudioSessionManager.Sessions;
-
-                    for (int i = 0; i < sessions.Count; i++) {
-                        var session = sessions[i];
-                        if (session.GetProcessID == (int)processId) {
-                            return session.SimpleAudioVolume.Mute;
-                        }
-                    }
-                } catch { }
                 return _mutedProcessIds.Contains(processId);
             }
         }
 
         public void RestoreAllMuted() {
             lock (_lock) {
-                if (_mutedProcessIds.Count == 0) return;
-
                 try {
                     var enumerator = new MMDeviceEnumerator();
-                    var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
-                    var sessions = device.AudioSessionManager.Sessions;
+                    var devices = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
 
-                    for (int i = 0; i < sessions.Count; i++) {
-                        var session = sessions[i];
-                        uint pid = (uint)session.GetProcessID;
-
-                        if (_mutedProcessIds.Contains(pid)) {
-                            try {
-                                session.SimpleAudioVolume.Mute = false;
-                            } catch { }
-                        }
+                    foreach (var device in devices) {
+                        try {
+                            var sessions = device.AudioSessionManager.Sessions;
+                            for (int i = 0; i < sessions.Count; i++) {
+                                var session = sessions[i];
+                                uint pid = (uint)session.GetProcessID;
+                                if (_mutedProcessIds.Contains(pid)) {
+                                    try {
+                                        session.SimpleAudioVolume.Mute = false;
+                                    } catch { }
+                                }
+                            }
+                        } catch { }
                     }
                 } catch { }
 
+                _mutedProcessIds.Clear();
+            }
+        }
+
+        public void UnmuteAllSessions() {
+            lock (_lock) {
+                try {
+                    var enumerator = new MMDeviceEnumerator();
+                    var devices = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
+
+                    foreach (var device in devices) {
+                        try {
+                            var sessions = device.AudioSessionManager.Sessions;
+                            for (int i = 0; i < sessions.Count; i++) {
+                                try {
+                                    sessions[i].SimpleAudioVolume.Mute = false;
+                                } catch { }
+                            }
+                        } catch { }
+                    }
+                } catch { }
                 _mutedProcessIds.Clear();
             }
         }
@@ -94,14 +119,19 @@ namespace Scrim.Audio {
 
             try {
                 var allProcs = Process.GetProcesses();
-                foreach (var p in allProcs) {
-                    try {
-                        // Check if process name matches the root process (handles multi-process apps like Chrome, Spotify, Edge)
-                        var rootProc = Process.GetProcessById((int)rootPid);
-                        if (p.ProcessName.Equals(rootProc.ProcessName, StringComparison.OrdinalIgnoreCase)) {
-                            set.Add((uint)p.Id);
-                        }
-                    } catch { }
+                string? rootName = null;
+                try {
+                    rootName = Process.GetProcessById((int)rootPid).ProcessName;
+                } catch { }
+
+                if (!string.IsNullOrEmpty(rootName)) {
+                    foreach (var p in allProcs) {
+                        try {
+                            if (p.ProcessName.Equals(rootName, StringComparison.OrdinalIgnoreCase)) {
+                                set.Add((uint)p.Id);
+                            }
+                        } catch { }
+                    }
                 }
             } catch { }
 

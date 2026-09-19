@@ -73,7 +73,15 @@ namespace Scrim.Audio {
                     // Sidetone / Headphone monitoring
                     if (IsMonitoring || IsMicTestMode) {
                         EnsureMonitorPlayback();
-                        _monitorBuffer?.AddSamples(buffer, 0, buffer.Length);
+                        if (_monitorBuffer != null) {
+                            // Avoid sudden DC step truncations from clock drift by maintaining healthy headroom
+                            if (_monitorBuffer.BufferedBytes > _monitorBuffer.BufferLength * 0.75) {
+                                _monitorBuffer.ClearBuffer();
+                            }
+                            _monitorBuffer.AddSamples(buffer, 0, buffer.Length);
+                        }
+                    } else if (_monitorOut != null) {
+                        StopMonitoringPlayback();
                     }
 
                     // Only send to mixer and live broadcast stream when NOT in private test mode
@@ -90,11 +98,11 @@ namespace Scrim.Audio {
             lock (_monitorLock) {
                 if (_monitorOut == null) {
                     try {
-                        _monitorBuffer = new BufferedWaveProvider(new WaveFormat(44100, 16, 2), TimeSpan.FromMilliseconds(200)) {
+                        _monitorBuffer = new BufferedWaveProvider(new WaveFormat(44100, 16, 2), TimeSpan.FromMilliseconds(800)) {
                             DiscardOnBufferOverflow = true
                         };
 #pragma warning disable CS0618 // Type or member is obsolete
-                        _monitorOut = new WasapiOut(AudioClientShareMode.Shared, 25);
+                        _monitorOut = new WasapiOut(AudioClientShareMode.Shared, 50);
 #pragma warning restore CS0618 // Type or member is obsolete
                         _monitorOut.Init(_monitorBuffer);
                         _monitorOut.Play();

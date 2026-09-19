@@ -64,7 +64,33 @@ document.addEventListener('DOMContentLoaded', function () {
     let gainNode = null;
     let sourceNode = null;
     let freqData = null;
-    const waveBars = document.querySelectorAll('.waveform-container .wave-bar');
+    let timeData = null;
+
+    const canvas = document.getElementById('visualizerCanvas');
+    const ctx = canvas ? canvas.getContext('2d') : null;
+    const modeButtons = document.querySelectorAll('.vis-mode-btn');
+    let currentVisMode = localStorage.getItem('scrim_vis_mode') || 'bars';
+
+    function setVisMode(mode) {
+        currentVisMode = mode;
+        try {
+            localStorage.setItem('scrim_vis_mode', mode);
+        } catch (e) {}
+        modeButtons.forEach(btn => {
+            if (btn.dataset.mode === mode) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+    }
+
+    modeButtons.forEach(btn => {
+        btn.addEventListener('click', function () {
+            setVisMode(this.dataset.mode);
+        });
+    });
+    setVisMode(currentVisMode);
 
     function initAudioVisualizer() {
         if (sourceNode || !audio) return;
@@ -79,9 +105,12 @@ document.addEventListener('DOMContentLoaded', function () {
             }
             if (!analyser) {
                 analyser = audioCtx.createAnalyser();
-                analyser.fftSize = 64;
-                analyser.smoothingTimeConstant = 0.75;
+                analyser.fftSize = 256;
+                analyser.smoothingTimeConstant = 0.82;
+                analyser.minDecibels = -90;
+                analyser.maxDecibels = -10;
                 freqData = new Uint8Array(analyser.frequencyBinCount);
+                timeData = new Uint8Array(analyser.fftSize);
             }
             if (!gainNode) {
                 gainNode = audioCtx.createGain();
@@ -141,50 +170,285 @@ document.addEventListener('DOMContentLoaded', function () {
 
     updateVolumeUI();
 
-    function animateWaveform() {
-        requestAnimationFrame(animateWaveform);
-        if (!waveBars || waveBars.length === 0) return;
+    // Multi-Mode Audio Visualizer Engine
+    const BAR_COUNT = 28;
+    const peakCaps = new Float32Array(BAR_COUNT);
+    const barValues = new Float32Array(BAR_COUNT);
+    let idleAngle = 0;
 
-        let hasData = false;
-        if (isPlaying && analyser && freqData) {
-            analyser.getByteFrequencyData(freqData);
-            
-            // Check if analyser has non-zero audio signal
-            let total = 0;
-            for (let k = 1; k < Math.min(20, freqData.length); k++) {
-                total += freqData[k];
+    function syncCanvasDimensions() {
+        if (!canvas) return { w: 0, h: 0, dpr: 1 };
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        const displayW = Math.round(rect.width * dpr);
+        const displayH = Math.round(rect.height * dpr);
+        if (canvas.width !== displayW || canvas.height !== displayH) {
+            canvas.width = displayW;
+            canvas.height = displayH;
+        }
+        return { w: canvas.width, h: canvas.height, dpr: dpr };
+    }
+
+    function renderBarsMode(ctx, w, h, dpr, accent, hasData) {
+        const spacing = 3 * dpr;
+        const totalSpacing = spacing * (BAR_COUNT - 1);
+        const barWidth = Math.max(2, (w - totalSpacing) / BAR_COUNT);
+
+        for (let i = 0; i < BAR_COUNT; i++) {
+            let target = 0.04;
+            if (hasData && freqData) {
+                // Logarithmic frequency bin spread across 128 bins
+                const binIndex = Math.min(
+                    Math.floor(Math.pow(i / (BAR_COUNT - 1), 1.6) * (freqData.length - 2)) + 1,
+                    freqData.length - 1
+                );
+                const raw = freqData[binIndex] || 0;
+                // Frequency weighting: scale down booming sub-bass so it doesn't max out, boost highs
+                const weight = i < 4 ? 0.70 : (i < 14 ? 0.95 : 1.35);
+                target = Math.min(0.90, Math.max(0.04, (raw / 255.0) * weight * 0.82));
+            } else {
+                // Calm idle sine bounce
+                target = 0.05 + Math.sin(idleAngle + i * 0.28) * 0.035;
             }
 
-            if (total > 0) {
-                hasData = true;
-                for (let i = 0; i < waveBars.length; i++) {
-                    const binIndex = Math.min(i + 1, freqData.length - 1);
-                    const val = freqData[binIndex] || 0;
-                    const norm = val / 255.0;
-                    // Dynamic logarithmic scaling for lively, music-reactive bounce
-                    const scaled = Math.min(1.0, Math.pow(norm, 0.65) * 1.55);
-                    const h = Math.max(4, Math.round(scaled * 42 + 4));
-                    waveBars[i].style.height = h + 'px';
-                    if (scaled > 0.05) {
-                        waveBars[i].style.background = 'rgba(0, 210, 255, ' + (0.45 + scaled * 0.55) + ')';
-                    } else {
-                        waveBars[i].style.background = 'rgba(255, 255, 255, 0.25)';
-                    }
+            barValues[i] += (target - barValues[i]) * 0.35;
+            if (barValues[i] > peakCaps[i]) {
+                peakCaps[i] = barValues[i];
+            } else {
+                peakCaps[i] = Math.max(0.04, peakCaps[i] - 0.012);
+            }
+
+            const barH = Math.max(3 * dpr, barValues[i] * (h - 8 * dpr));
+            const x = i * (barWidth + spacing);
+            const y = h - barH;
+
+            // Gradient bar fill
+            const grad = ctx.createLinearGradient(0, y, 0, h);
+            grad.addColorStop(0, '#ffffff');
+            grad.addColorStop(0.25, accent);
+            grad.addColorStop(1, 'rgba(0, 0, 0, 0.4)');
+
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.roundRect(x, y, barWidth, barH, [2 * dpr, 2 * dpr, 0, 0]);
+            ctx.fill();
+
+            // Floating peak cap dot
+            const peakY = Math.max(2 * dpr, h - peakCaps[i] * (h - 8 * dpr) - 2 * dpr);
+            ctx.fillStyle = hasData ? '#ffffff' : 'rgba(255, 255, 255, 0.4)';
+            ctx.fillRect(x, peakY, barWidth, 2 * dpr);
+        }
+    }
+
+    function renderWaveMode(ctx, w, h, dpr, accent, hasData) {
+        const centerY = h / 2;
+
+        // Draw center baseline
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+        ctx.lineWidth = 1 * dpr;
+        ctx.beginPath();
+        ctx.moveTo(0, centerY);
+        ctx.lineTo(w, centerY);
+        ctx.stroke();
+
+        ctx.beginPath();
+        if (hasData && timeData) {
+            const step = Math.max(1, Math.floor(timeData.length / w));
+            const pointsCount = Math.floor(timeData.length / step);
+            for (let i = 0; i < pointsCount; i++) {
+                const x = (i / (pointsCount - 1)) * w;
+                const v = (timeData[i * step] - 128) / 128.0;
+                // Leave headroom (0.42) so wave never clips the canvas borders
+                const y = centerY + v * (h * 0.42);
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+        } else {
+            // Idle ambient oscilloscope wave
+            const points = 80;
+            for (let i = 0; i <= points; i++) {
+                const x = (i / points) * w;
+                const y = centerY + Math.sin(idleAngle * 0.8 + (i / points) * Math.PI * 4) * (h * 0.14);
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
                 }
             }
         }
 
-        if (!hasData) {
-            // Decay bars smoothly back to resting 4px baseline
-            for (let i = 0; i < waveBars.length; i++) {
-                const currentH = parseFloat(waveBars[i].style.height) || 4;
-                if (currentH > 4.1) {
-                    waveBars[i].style.height = Math.max(4, (currentH * 0.85)).toFixed(1) + 'px';
-                } else {
-                    waveBars[i].style.height = '4px';
-                    waveBars[i].style.background = 'rgba(255, 255, 255, 0.25)';
-                }
+        // Radiant glow pass
+        ctx.save();
+        ctx.shadowBlur = 12 * dpr;
+        ctx.shadowColor = accent;
+        ctx.strokeStyle = accent;
+        ctx.lineWidth = 2.5 * dpr;
+        ctx.stroke();
+        ctx.restore();
+
+        // Crisp inner core stroke
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.2 * dpr;
+        ctx.stroke();
+    }
+
+    function renderSpectrumMode(ctx, w, h, dpr, accent, hasData) {
+        const points = 48;
+        const pts = [];
+
+        for (let i = 0; i < points; i++) {
+            const x = (i / (points - 1)) * w;
+            let val = 0.05;
+            if (hasData && freqData) {
+                const binIndex = Math.min(
+                    Math.floor(Math.pow(i / (points - 1), 1.5) * (freqData.length - 2)) + 1,
+                    freqData.length - 1
+                );
+                const raw = freqData[binIndex] || 0;
+                const weight = i < 6 ? 0.72 : (i < 24 ? 0.95 : 1.30);
+                val = Math.min(0.88, Math.max(0.04, (raw / 255.0) * weight * 0.80));
+            } else {
+                val = 0.06 + Math.sin(idleAngle + i * 0.22) * 0.035;
             }
+            const y = h - val * (h - 6 * dpr);
+            pts.push({ x: x, y: y });
+        }
+
+        // Fill area under the curve
+        const grad = ctx.createLinearGradient(0, 0, 0, h);
+        grad.addColorStop(0, accent + 'b3'); // ~70% opacity
+        grad.addColorStop(0.6, accent + '33'); // ~20% opacity
+        grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+        ctx.beginPath();
+        ctx.moveTo(0, h);
+        for (let i = 0; i < pts.length; i++) {
+            ctx.lineTo(pts[i].x, pts[i].y);
+        }
+        ctx.lineTo(w, h);
+        ctx.closePath();
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        // Glowing contour line
+        ctx.save();
+        ctx.shadowBlur = 10 * dpr;
+        ctx.shadowColor = accent;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2 * dpr;
+        ctx.beginPath();
+        for (let i = 0; i < pts.length; i++) {
+            if (i === 0) {
+                ctx.moveTo(pts[i].x, pts[i].y);
+            } else {
+                ctx.lineTo(pts[i].x, pts[i].y);
+            }
+        }
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function renderPulseMode(ctx, w, h, dpr, accent, hasData) {
+        const cx = w / 2;
+        const cy = h / 2;
+        let bassNorm = 0.05;
+
+        if (hasData && freqData) {
+            let sum = 0;
+            for (let i = 1; i <= 6; i++) {
+                sum += freqData[i];
+            }
+            bassNorm = Math.min(0.88, Math.max(0.05, (sum / (6 * 255.0)) * 0.85));
+        } else {
+            bassNorm = 0.06 + Math.sin(idleAngle * 1.2) * 0.03;
+        }
+
+        const maxR = Math.min(cx, cy) * 0.95;
+        const baseR = maxR * 0.35 + bassNorm * (maxR * 0.60);
+
+        // Outer ripple ring
+        ctx.save();
+        ctx.shadowBlur = 14 * dpr;
+        ctx.shadowColor = accent;
+        ctx.strokeStyle = accent + '66';
+        ctx.lineWidth = 1.5 * dpr;
+        ctx.beginPath();
+        ctx.arc(cx, cy, Math.min(maxR, baseR * 1.35), 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Mid pulse ring
+        ctx.strokeStyle = accent;
+        ctx.lineWidth = 2 * dpr;
+        ctx.beginPath();
+        ctx.arc(cx, cy, baseR, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Center glowing core
+        const coreGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, baseR * 0.7);
+        coreGrad.addColorStop(0, '#ffffff');
+        coreGrad.addColorStop(0.5, accent);
+        coreGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = coreGrad;
+        ctx.beginPath();
+        ctx.arc(cx, cy, baseR * 0.7, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // Horizontal sound rays
+        const rayCount = 18;
+        const rayWidth = (cx - maxR * 0.6) / rayCount;
+        for (let i = 0; i < rayCount; i++) {
+            const raw = (hasData && freqData) ? (freqData[i * 2 + 6] || 0) / 255.0 : 0.1;
+            const rayH = Math.max(2 * dpr, raw * (h * 0.35));
+            const leftX = cx - maxR * 0.55 - (i + 1) * rayWidth;
+            const rightX = cx + maxR * 0.55 + i * rayWidth;
+
+            ctx.fillStyle = accent + '80';
+            ctx.fillRect(leftX, cy - rayH / 2, rayWidth * 0.65, rayH);
+            ctx.fillRect(rightX, cy - rayH / 2, rayWidth * 0.65, rayH);
+        }
+    }
+
+    function animateWaveform() {
+        requestAnimationFrame(animateWaveform);
+        if (!canvas || !ctx) return;
+
+        const dims = syncCanvasDimensions();
+        const w = dims.w;
+        const h = dims.h;
+        if (w === 0 || h === 0) return;
+
+        ctx.clearRect(0, 0, w, h);
+
+        const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent-color').trim() || '#00d2ff';
+
+        let hasData = false;
+        if (isPlaying && analyser && freqData && timeData) {
+            analyser.getByteFrequencyData(freqData);
+            analyser.getByteTimeDomainData(timeData);
+
+            let sum = 0;
+            for (let i = 2; i < 35; i++) {
+                sum += freqData[i];
+            }
+            if (sum > 8) {
+                hasData = true;
+            }
+        }
+
+        idleAngle += 0.035;
+
+        if (currentVisMode === 'bars') {
+            renderBarsMode(ctx, w, h, dims.dpr, accent, hasData);
+        } else if (currentVisMode === 'wave') {
+            renderWaveMode(ctx, w, h, dims.dpr, accent, hasData);
+        } else if (currentVisMode === 'spectrum') {
+            renderSpectrumMode(ctx, w, h, dims.dpr, accent, hasData);
+        } else if (currentVisMode === 'pulse') {
+            renderPulseMode(ctx, w, h, dims.dpr, accent, hasData);
         }
     }
 

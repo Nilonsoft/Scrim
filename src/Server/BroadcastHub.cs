@@ -12,12 +12,14 @@ namespace Scrim.Server {
 
         public int ActiveClientCount => _clients.Count;
         public bool IsBroadcasting { get; private set; } = false;
+        public event EventHandler<bool>? BroadcastingStateChanged;
 
         public void StartBroadcasting(ChannelReader<byte[]> encodedStream) {
             StopBroadcasting();
             _cts = new CancellationTokenSource();
             var token = _cts.Token;
             IsBroadcasting = true;
+            BroadcastingStateChanged?.Invoke(this, true);
 
             Task.Run(async () => {
                 while (!token.IsCancellationRequested) {
@@ -50,12 +52,16 @@ namespace Scrim.Server {
         }
 
         public void StopBroadcasting() {
+            bool wasBroadcasting = IsBroadcasting;
             IsBroadcasting = false;
             _cts?.Cancel();
             foreach (var client in _clients.Values) {
                 client.Dispose();
             }
             _clients.Clear();
+            if (wasBroadcasting) {
+                BroadcastingStateChanged?.Invoke(this, false);
+            }
         }
     }
 }

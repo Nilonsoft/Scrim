@@ -138,9 +138,25 @@ namespace Scrim.Server {
                 }
 
                 string path = context.Request.Url?.AbsolutePath ?? "/";
+                string userAgent = context.Request.UserAgent ?? "";
+                bool isMediaPlayer = userAgent.Contains("VLC", StringComparison.OrdinalIgnoreCase) ||
+                                     userAgent.Contains("LibVLC", StringComparison.OrdinalIgnoreCase) ||
+                                     userAgent.Contains("foobar2000", StringComparison.OrdinalIgnoreCase) ||
+                                     userAgent.Contains("Winamp", StringComparison.OrdinalIgnoreCase) ||
+                                     userAgent.Contains("Lavf", StringComparison.OrdinalIgnoreCase) ||
+                                     userAgent.Contains("mpv", StringComparison.OrdinalIgnoreCase) ||
+                                     userAgent.Contains("Audacious", StringComparison.OrdinalIgnoreCase) ||
+                                     userAgent.Contains("iTunes", StringComparison.OrdinalIgnoreCase) ||
+                                     userAgent.Contains("QuickTime", StringComparison.OrdinalIgnoreCase) ||
+                                     userAgent.Contains("Wget", StringComparison.OrdinalIgnoreCase) ||
+                                     userAgent.Contains("curl", StringComparison.OrdinalIgnoreCase);
 
-                if (path == "/stream") {
+                if (path == "/stream" || path == "/stream.mp3" || path == "/live" || path == "/listen" || (path == "/" && isMediaPlayer)) {
                     _ = HandleStreamClient(context, token);
+                } else if (path == "/listen.m3u" || path == "/playlist.m3u") {
+                    HandleM3uRequest(context);
+                } else if (path == "/listen.pls") {
+                    HandlePlsRequest(context);
                 } else if (path == "/api/events") {
                     _ = HandleSseClient(context, token);
                 } else if (path == "/api/network") {
@@ -162,6 +178,32 @@ namespace Scrim.Server {
             }
         }
 
+        private void HandleM3uRequest(HttpListenerContext context) {
+            var response = context.Response;
+            response.ContentType = "audio/x-mpegurl; charset=utf-8";
+            response.Headers.Add("Access-Control-Allow-Origin", "*");
+            string host = context.Request.Url?.Host ?? "localhost";
+            int port = context.Request.Url?.Port ?? _profileManager.CurrentProfile.Port;
+            string m3uContent = $"#EXTM3U\r\n#EXTINF:-1,{_profileManager.CurrentProfile.StationName ?? "Scrim Broadcast"}\r\nhttp://{host}:{port}/stream\r\n";
+            byte[] bytes = System.Text.Encoding.UTF8.GetBytes(m3uContent);
+            response.ContentLength64 = bytes.Length;
+            response.OutputStream.Write(bytes, 0, bytes.Length);
+            response.Close();
+        }
+
+        private void HandlePlsRequest(HttpListenerContext context) {
+            var response = context.Response;
+            response.ContentType = "audio/x-scpls; charset=utf-8";
+            response.Headers.Add("Access-Control-Allow-Origin", "*");
+            string host = context.Request.Url?.Host ?? "localhost";
+            int port = context.Request.Url?.Port ?? _profileManager.CurrentProfile.Port;
+            string plsContent = $"[playlist]\r\nNumberOfEntries=1\r\nFile1=http://{host}:{port}/stream\r\nTitle1={_profileManager.CurrentProfile.StationName ?? "Scrim Broadcast"}\r\nLength1=-1\r\nVersion=2\r\n";
+            byte[] bytes = System.Text.Encoding.UTF8.GetBytes(plsContent);
+            response.ContentLength64 = bytes.Length;
+            response.OutputStream.Write(bytes, 0, bytes.Length);
+            response.Close();
+        }
+
         private void HandleStatusRequest(HttpListenerContext context) {
             var response = context.Response;
             response.ContentType = "application/json";
@@ -181,6 +223,9 @@ namespace Scrim.Server {
             response.Headers.Add("Pragma", "no-cache");
             response.Headers.Add("Expires", "0");
             response.Headers.Add("Accept-Ranges", "none");
+            response.Headers.Add("icy-name", _profileManager.CurrentProfile.StationName ?? "Scrim Broadcast Station");
+            response.Headers.Add("icy-genre", "Live Stream");
+            response.Headers.Add("icy-br", _profileManager.CurrentProfile.Bitrate.ToString());
 
             if (!_hub.IsBroadcasting) {
                 response.StatusCode = 503;

@@ -178,6 +178,27 @@
                         <button class="pill-option" style="padding: 2px 8px; font-size: 10px;" @onclick="RefreshNetworkStatus">↻ Refresh</button>
                     </div>
                 </div>
+
+                <!-- Media Players URL (VLC, Winamp, foobar2000, mpv) -->
+                <div style="background: #12141a; border: 1px solid #232731; border-radius: 8px; padding: 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <span style="font-size: 11px; font-weight: 700; color: #f59e0b; letter-spacing: 0.5px;">MEDIA PLAYERS (VLC, WINAMP, MPV)</span>
+                        <span style="font-size: 11px; color: #64748b;">Direct Stream Endpoint (/stream)</span>
+                    </div>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <div style="flex: 1; display: flex; align-items: center; background: #1a1d26; border: 1px solid #2d323e; border-radius: 6px; padding: 6px 10px; overflow: hidden;">
+                            <span style="color: #f59e0b; font-family: monospace; font-size: 12px; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">
+                                @(GetLocalNetworkUrl())/stream
+                            </span>
+                        </div>
+                        <button class="scrim-btn-primary" style="padding: 6px 14px; font-size: 12px; white-space: nowrap; background: #f59e0b; border-color: #f59e0b;" @onclick='() => CopyUrl($"{GetLocalNetworkUrl()}/stream", "VLC")'>
+                            @(CopiedUrlTarget == "VLC" ? "✓ Copied!" : "Copy Stream URL")
+                        </button>
+                    </div>
+                    <div style="font-size: 11px; color: #8e95a5; margin-top: 6px;">
+                        💡 In VLC: <em>Media → Open Network Stream (Ctrl+N)</em> → paste this URL.
+                    </div>
+                </div>
             </div>
             
             <div style="margin-top: 18px; text-align: right;">
@@ -346,6 +367,7 @@
     private string SelectedDeviceId = "";
     private IEnumerable<WindowInfo> Windows = Array.Empty<WindowInfo>();
     private IEnumerable<MicrophoneDevice> Devices = Array.Empty<MicrophoneDevice>();
+    private List<(string Id, string Name)> RenderDevices = new();
     private readonly WindowEnumerator _enumerator = new();
     private DotNetObjectReference<Dashboard>? _dotNetRef;
     private System.Timers.Timer? _refreshTimer;
@@ -391,6 +413,8 @@
     protected override void OnInitialized() {
         RefreshWindows();
         Devices = MicService.GetDevices();
+        RenderDevices = ProcessLoopbackCapture.GetRenderDevices().ToList();
+        LocalAudioRouting.RestoreAllMuted();
 
         // Load persisted card layout from current profile (card-playlist removed by default)
         var p = ProfileManager.CurrentProfile;
@@ -455,9 +479,6 @@
         if (initialWin != null) {
             SelectedProcessId = initialWin.ProcessId;
             EnsureAudioMonitoring(SelectedProcessId);
-            if (ProfileManager.CurrentProfile.MuteAppLocally) {
-                LocalAudioRouting.SetProcessMute(SelectedProcessId, true);
-            }
         } else {
             SelectedProcessId = 0;
             EnsureAudioMonitoring(0);
@@ -471,6 +492,9 @@
         try {
             StreamServer.Start(ProfileManager.CurrentProfile.Port);
         } catch { }
+
+        IsLive = Hub.IsBroadcasting;
+        Hub.BroadcastingStateChanged += OnHubBroadcastingStateChanged;
 
         Task.Run(async () => {
             await NetworkDiscovery.RefreshPublicIpAsync();
@@ -526,24 +550,23 @@
             }
             ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
 
-            if (ProfileManager.CurrentProfile.MuteAppLocally) {
-                LocalAudioRouting.RestoreAllMuted();
-                LocalAudioRouting.SetProcessMute(SelectedProcessId, true);
-            }
         } else {
             ProfileManager.CurrentProfile.TargetProcessId = 0;
             ProfileManager.CurrentProfile.TargetProcessName = "System Audio";
             ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
-
-            if (ProfileManager.CurrentProfile.MuteAppLocally) {
-                LocalAudioRouting.RestoreAllMuted();
-            }
         }
+        EnsureAudioMonitoring(SelectedProcessId);
+    }
+
+    private void OnCaptureDeviceChanged() {
+        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        EnsureAudioMonitoring(SelectedProcessId);
+        StateHasChanged();
     }
 
     private void EnsureAudioMonitoring(uint pid) {
         try {
-            Capture.StartCapture(pid);
+            Capture.StartCapture(pid, ProfileManager.CurrentProfile.CaptureDeviceId);
             MicService.StartCapture(SelectedDeviceId);
             if (!Mixer.IsMixing) {
                 Mixer.StartMixing(Capture.AudioStream, MicService.MicrophoneStream, CancellationToken.None);
@@ -684,9 +707,15 @@
         }
     }
 
+    private void OnHubBroadcastingStateChanged(object? sender, bool isBroadcasting) {
+        InvokeAsync(() => {
+            IsLive = isBroadcasting;
+            StateHasChanged();
+        });
+    }
+
     private void StartBroadcast() {
         if (IsLive) return;
-        IsLive = true;
 
         _broadcastCts = new CancellationTokenSource();
         var token = _broadcastCts.Token;
@@ -694,7 +723,7 @@
         try {
             StreamServer.Start(ProfileManager.CurrentProfile.Port);
 
-            Capture.StartCapture(SelectedProcessId);
+            Capture.StartCapture(SelectedProcessId, ProfileManager.CurrentProfile.CaptureDeviceId);
             if (SelectedProcessId != 0) {
                 MetadataService.StartMonitoring(SelectedProcessId);
             }
@@ -709,17 +738,20 @@
             Transcoder.StartTranscoding(Mixer.MixedStream);
 
             Hub.StartBroadcasting(Transcoder.OutputStream);
+            IsLive = true;
 
             _ = JSRuntime.InvokeVoidAsync("eval", "document.body.setAttribute('data-broadcasting', 'true')");
         } catch (Exception ex) {
             Console.WriteLine($"Error starting broadcast: {ex.Message}");
+            IsLive = false;
+            StopBroadcast();
         }
 
         StateHasChanged();
     }
 
     private void StopBroadcast() {
-        if (!IsLive) return;
+        if (!IsLive && !Hub.IsBroadcasting) return;
         IsLive = false;
 
         try {
@@ -835,14 +867,17 @@
         ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
     }
 
-    private void ToggleMuteAppLocally() {
-        ProfileManager.CurrentProfile.MuteAppLocally = !ProfileManager.CurrentProfile.MuteAppLocally;
+    private void UnmuteAllLocalApps() {
+        LocalAudioRouting.UnmuteAllSessions();
+        ProfileManager.CurrentProfile.MuteAppLocally = false;
         ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
-
-        if (SelectedProcessId != 0) {
-            LocalAudioRouting.SetProcessMute(SelectedProcessId, ProfileManager.CurrentProfile.MuteAppLocally);
-        }
         StateHasChanged();
+    }
+
+    private void RefreshAudioAndWindows() {
+        RefreshWindows();
+        Devices = MicService.GetDevices();
+        RenderDevices = ProcessLoopbackCapture.GetRenderDevices().ToList();
     }
 
     private int _previousNonZeroAppVolume = 100;
@@ -1193,6 +1228,7 @@
     }
 
     public void Dispose() {
+        Hub.BroadcastingStateChanged -= OnHubBroadcastingStateChanged;
         MetadataService.MetadataChanged -= OnMetadataReceived;
         _dotNetRef?.Dispose();
         _refreshTimer?.Dispose();
@@ -1208,7 +1244,7 @@
             <div class="scrim-card-header scrim-drag-handle">
                 <h3 class="scrim-card-title">Audio Routing</h3>
                 <div style="display: flex; align-items: center; gap: 6px;">
-                    <button class="scrim-dots-btn" @onclick="RefreshWindows" title="Refresh Applications">
+                    <button class="scrim-dots-btn" @onclick="RefreshAudioAndWindows" title="Refresh Applications & Audio Devices">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <polyline points="23 4 23 10 17 10"></polyline>
                             <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
@@ -1256,21 +1292,22 @@
                 </div>
             </div>
 
-            <!-- Local Output Speaker Playback vs Stream Only Toggle -->
-            <div style="margin-bottom: 14px; background: #14171d; border: 1px solid #252a35; border-radius: 10px; padding: 10px 12px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                    <label class="scrim-label" style="margin: 0; font-size: 11px;">Local Speaker Audio</label>
-                    <button class="pill-option @(ProfileManager.CurrentProfile.MuteAppLocally ? "active" : "")"
-                            style="@(ProfileManager.CurrentProfile.MuteAppLocally ? "background: #ef4444; border-color: #ef4444; color: white; padding: 3px 10px; font-size: 10px;" : "padding: 3px 10px; font-size: 10px;")"
-                            @onclick="ToggleMuteAppLocally"
-                            title="Click to toggle whether this application plays out loud on your local PC speakers">
-                        @(ProfileManager.CurrentProfile.MuteAppLocally ? "🔇 Stream Only (Muted Locally)" : "🔊 Play Locally & Stream")
+            <!-- Audio Output Capture Device -->
+            <div style="margin-bottom: 14px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                    <label class="scrim-label" style="margin: 0;">Audio Output / Stream Device</label>
+                    <button class="pill-option" style="padding: 2px 8px; font-size: 10px; color: #38bdf8;" @onclick="UnmuteAllLocalApps" title="Ensure all Windows application audio sessions are unmuted">
+                        🔊 Restore All Local Volumes
                     </button>
                 </div>
-                <div style="font-size: 11px; color: #727988; line-height: 1.4;">
-                    @(ProfileManager.CurrentProfile.MuteAppLocally
-                        ? "The application is silenced on your local PC speakers/headphones and only streams out to your listeners."
-                        : "The application plays normally through your local PC speakers/headphones while being broadcast.")
+                <select class="scrim-select" @bind="ProfileManager.CurrentProfile.CaptureDeviceId" @bind:after="OnCaptureDeviceChanged">
+                    <option value="">(Default Playback Device - Speakers / Headphones)</option>
+                    @foreach (var rd in RenderDevices) {
+                        <option value="@rd.Id">@rd.Name</option>
+                    }
+                </select>
+                <div style="font-size: 10px; color: #64748b; margin-top: 4px; line-height: 1.4;">
+                    💡 <b>Stream-Only / Local Mute Tip:</b> To stream music without hearing it through your headphones, route the music app's output in Windows Settings to a virtual device (e.g. <i>Steam Streaming Speakers</i>), then select that device here.
                 </div>
             </div>
 
@@ -1581,9 +1618,31 @@
                 </div>
             </div>
 
-            <div style="display: flex; gap: 8px; margin-top: 14px;">
-                <button class="scrim-btn-primary" style="flex: 1;" @onclick="StartBroadcast" disabled="@IsLive">Start Broadcast</button>
-                <button class="scrim-btn-secondary" @onclick="StopBroadcast" disabled="@(!IsLive)">Stop</button>
+            <!-- Synchronized Broadcast Control & On Air Status -->
+            <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid #232731;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <span style="font-size: 10px; font-weight: 700; color: #8e95a5; letter-spacing: 0.5px;">BROADCAST STATUS</span>
+                    <div class="on-air-badge @(IsLive ? "" : "offline")" style="padding: 2px 10px; font-size: 10px; cursor: pointer;" @onclick="ToggleBroadcast" title="Click to toggle broadcast (synchronized with top bar)">
+                        <span class="on-air-dot"></span>
+                        <span>@(IsLive ? "ON AIR" : "OFFLINE")</span>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 8px;">
+                    @if (IsLive) {
+                        <button class="scrim-btn-danger" style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 700; background: linear-gradient(135deg, #ef4444, #dc2626); border: 1px solid #ef4444; box-shadow: 0 0 12px rgba(239, 68, 68, 0.35); padding: 8px 14px; border-radius: 6px; color: #fff; cursor: pointer;" @onclick="StopBroadcast" title="Stop live broadcasting">
+                            <span class="on-air-dot" style="width: 7px; height: 7px; background: #fff; box-shadow: 0 0 6px #fff;"></span>
+                            <span>Stop Broadcasting (ON AIR)</span>
+                        </button>
+                    } else {
+                        <button class="scrim-btn-primary" style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 700; padding: 8px 14px; border-radius: 6px; cursor: pointer;" @onclick="StartBroadcast" title="Start live broadcasting">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                            </svg>
+                            <span>Start Broadcasting (Go ON AIR)</span>
+                        </button>
+                    }
+                </div>
             </div>
         </div>,
 
@@ -1907,6 +1966,24 @@
                         </button>
                         <button class="scrim-btn-secondary" style="padding: 4px 10px; font-size: 11px; white-space: nowrap;" @onclick='() => CopyUrl(GetOutsideNetworkUrl(), "WAN")'>
                             @(CopiedUrlTarget == "WAN" ? "✓" : "Copy")
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Direct Stream Endpoint for VLC / Media Players -->
+                <div>
+                    <div style="display: flex; justify-content: space-between; font-size: 11px; color: #94a3b8; margin-bottom: 3px;">
+                        <span>VLC & Media Players Endpoint:</span>
+                        <span style="color: #f59e0b; font-size: 10px;">Direct Audio Stream</span>
+                    </div>
+                    <div style="display: flex; gap: 6px; align-items: center;">
+                        <div style="flex: 1; display: flex; align-items: center; background: #1a1d26; border: 1px solid #2d323e; border-radius: 6px; padding: 5px 8px; overflow: hidden;">
+                            <span style="font-family: monospace; font-size: 11px; color: #f59e0b; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">
+                                @(GetLocalNetworkUrl())/stream
+                            </span>
+                        </div>
+                        <button class="scrim-btn-secondary" style="padding: 4px 10px; font-size: 11px; white-space: nowrap; color: #f59e0b; border-color: rgba(245, 158, 11, 0.4);" @onclick='() => CopyUrl($"{GetLocalNetworkUrl()}/stream", "VLC_Card")'>
+                            @(CopiedUrlTarget == "VLC_Card" ? "✓" : "Copy")
                         </button>
                     </div>
                 </div>

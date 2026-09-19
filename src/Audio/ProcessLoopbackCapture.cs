@@ -34,18 +34,35 @@ namespace Scrim.Audio {
             });
         }
 
+        private string? _captureDeviceId;
+
+        public static System.Collections.Generic.IEnumerable<(string Id, string Name)> GetRenderDevices() {
+            var enumerator = new NAudio.CoreAudioApi.MMDeviceEnumerator();
+            var devices = enumerator.EnumerateAudioEndPoints(NAudio.CoreAudioApi.DataFlow.Render, NAudio.CoreAudioApi.DeviceState.Active);
+            var list = new System.Collections.Generic.List<(string Id, string Name)>();
+            foreach (var d in devices) {
+                list.Add((d.ID, d.FriendlyName));
+            }
+            return list;
+        }
+
         public void StartCapture(uint processId) {
+            StartCapture(processId, null);
+        }
+
+        public void StartCapture(uint processId, string? deviceId) {
             lock (_captureLock) {
-                if (_processId == processId && (_wasapiLoopback != null || (_captureTask != null && !_captureTask.IsCompleted))) {
+                if (_processId == processId && _captureDeviceId == deviceId && (_wasapiLoopback != null || (_captureTask != null && !_captureTask.IsCompleted))) {
                     return;
                 }
                 StopCapture();
                 _processId = processId;
+                _captureDeviceId = deviceId;
                 _cts = new CancellationTokenSource();
 
-                if (processId == 0) {
-                    // System-wide Audio: Use battle-tested WASAPI render loopback
-                    StartWasapiLoopback();
+                if (processId == 0 || !string.IsNullOrEmpty(deviceId)) {
+                    // System-wide Audio or Targeted Output Device Loopback:
+                    StartWasapiLoopback(deviceId);
                     return;
                 }
 
@@ -72,16 +89,22 @@ namespace Scrim.Audio {
                         out _);
                 } catch {
                     // Fall back to system audio loopback if process activation fails
-                    StartWasapiLoopback();
+                    StartWasapiLoopback(_captureDeviceId);
                 }
             }
         }
 
-        private void StartWasapiLoopback() {
+        private void StartWasapiLoopback(string? deviceId = null) {
             try {
                 StopWasapiLoopback();
 #pragma warning disable CS0618
-                _wasapiLoopback = new NAudio.Wave.WasapiLoopbackCapture();
+                if (string.IsNullOrEmpty(deviceId)) {
+                    _wasapiLoopback = new NAudio.Wave.WasapiLoopbackCapture();
+                } else {
+                    var enumerator = new NAudio.CoreAudioApi.MMDeviceEnumerator();
+                    var device = enumerator.GetDevice(deviceId);
+                    _wasapiLoopback = new NAudio.Wave.WasapiLoopbackCapture(device);
+                }
 #pragma warning restore CS0618
                 var inFormat = _wasapiLoopback.WaveFormat;
                 _wasapiLoopback.DataAvailable += (s, e) => {
@@ -118,7 +141,7 @@ namespace Scrim.Audio {
             activateOperation.GetActivateResult(out int hr, out object activatedInterface);
             if (hr < 0 || activatedInterface == null) {
                 // Fall back to system-wide loopback
-                StartWasapiLoopback();
+                StartWasapiLoopback(_captureDeviceId);
                 return hr;
             }
 
@@ -160,7 +183,7 @@ namespace Scrim.Audio {
             }
 
             if (initResult < 0) {
-                StartWasapiLoopback();
+                StartWasapiLoopback(_captureDeviceId);
                 return initResult;
             }
 
