@@ -28,7 +28,17 @@
         </div>
         <div class="mb-3">
             <label class="form-label text-muted">Bitrate (kbps)</label>
-            <input type="number" class="form-control bg-dark text-white border-secondary" @bind="CurrentProfile.Bitrate" />
+            <div class="input-group">
+                <select class="form-select bg-dark text-white border-secondary" @bind="CurrentProfile.Bitrate" style="max-width: 120px;">
+                    <option value="64">64 kbps</option>
+                    <option value="96">96 kbps</option>
+                    <option value="128">128 kbps</option>
+                    <option value="192">192 kbps</option>
+                    <option value="256">256 kbps</option>
+                    <option value="320">320 kbps</option>
+                </select>
+                <input type="number" class="form-control bg-dark text-white border-secondary" @bind="CurrentProfile.Bitrate" placeholder="Custom..." />
+            </div>
         </div>
         <div class="mb-3">
             <label class="form-label text-muted">Broadcast Port</label>
