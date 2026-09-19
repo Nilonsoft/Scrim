@@ -1,27 +1,48 @@
+using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
-using Scrim.Interop;
 
 namespace Scrim.Windows {
     public class WindowEnumerator : IWindowEnumerator {
-        public IEnumerable<WindowInfo> GetOpenWindows() {
+        private delegate bool EnumWindowsProc(nint hWnd, nint lParam);
+
+        [DllImport("user32.dll")]
+        private static extern bool EnumWindows(EnumWindowsProc enumProc, nint lParam);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern int GetWindowText(nint hWnd, StringBuilder strText, int maxCount);
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(nint hWnd, out uint processId);
+
+        [DllImport("user32.dll")]
+        private static extern bool IsWindowVisible(nint hWnd);
+
+        public IEnumerable<WindowInfo> GetActiveWindows() {
             var windows = new List<WindowInfo>();
+            EnumWindows((hWnd, lParam) => {
+                if (IsWindowVisible(hWnd)) {
+                    var sb = new StringBuilder(256);
+                    GetWindowText(hWnd, sb, sb.Capacity);
+                    string title = sb.ToString();
 
-            NativeMethods.EnumWindows((hWnd, lParam) => {
-                if (NativeMethods.IsWindowVisible(hWnd)) {
-                    int length = NativeMethods.GetWindowTextLength(hWnd);
-                    if (length > 0) {
-                        StringBuilder sb = new StringBuilder(length + 1);
-                        NativeMethods.GetWindowText(hWnd, sb, sb.Capacity);
-                        string title = sb.ToString();
-
-                        NativeMethods.GetWindowThreadProcessId(hWnd, out uint processId);
+                    if (!string.IsNullOrWhiteSpace(title)) {
+                        GetWindowThreadProcessId(hWnd, out uint processId);
                         
-                        windows.Add(new WindowInfo(hWnd, title, processId));
+                        try {
+                            var process = Process.GetProcessById((int)processId);
+                            windows.Add(new WindowInfo {
+                                ProcessId = processId,
+                                Title = title,
+                                ProcessName = process.ProcessName
+                            });
+                        } catch { }
                     }
                 }
                 return true;
-            }, 0);
+            }, nint.Zero);
 
             return windows;
         }

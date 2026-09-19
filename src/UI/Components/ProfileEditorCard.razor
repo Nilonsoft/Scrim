@@ -1,0 +1,42 @@
+@using Scrim.Configuration
+@inject IProfileManager ProfileManager
+
+<div class="card p-3 mb-3" style="background-color: #181818; border: 1px solid #383838; border-radius: 8px;">
+    <h4 style="color: white; margin-top: 0;">Stream Profile</h4>
+
+    @if (CurrentProfile != null) {
+        <div class="mb-3">
+            <label class="form-label text-muted">Profile Name</label>
+            <input type="text" class="form-control bg-dark text-white border-secondary" @bind="CurrentProfile.ProfileName" />
+        </div>
+        <div class="mb-3">
+            <label class="form-label text-muted">Format</label>
+            <select class="form-select bg-dark text-white border-secondary" @bind="CurrentProfile.AudioFormat">
+                <option value="Mp3">MP3</option>
+                <option value="Aac">AAC</option>
+                <option value="Opus">Opus</option>
+            </select>
+        </div>
+        <div class="mb-3">
+            <label class="form-label text-muted">Bitrate (kbps)</label>
+            <input type="number" class="form-control bg-dark text-white border-secondary" @bind="CurrentProfile.Bitrate" />
+        </div>
+        
+        <button class="btn btn-outline-success btn-sm w-100" @onclick="SaveProfile">Save Configuration</button>
+    }
+</div>
+
+@code {
+    private ScrimProfile? CurrentProfile;
+
+    protected override void OnInitialized() {
+        // Just bind to the current active profile
+        CurrentProfile = ProfileManager.CurrentProfile;
+    }
+
+    private void SaveProfile() {
+        if (CurrentProfile != null) {
+            ProfileManager.SaveProfile(CurrentProfile);
+        }
+    }
+}

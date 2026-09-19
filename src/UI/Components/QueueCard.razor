@@ -1,0 +1,67 @@
+@using Scrim.Metadata
+@using System.Timers
+@inject SongRequestController RequestController
+
+<div class="card p-3 mb-3" style="background-color: #181818; border: 1px solid #383838; border-radius: 8px;">
+    <h4 style="color: white; margin-top: 0;">Song Request Queue</h4>
+    
+    @if (!Requests.Any()) {
+        <p style="color: #9E9E9E; font-style: italic;">No pending requests.</p>
+    } else {
+        <ul class="list-group list-group-flush" style="background: transparent;">
+            @foreach (var req in Requests) {
+                <li class="list-group-item d-flex justify-content-between align-items-center" style="background: #242424; border: 1px solid #383838; margin-bottom: 5px; border-radius: 4px; color: white;">
+                    <div>
+                        <strong style="font-size: 1.1rem;">@req.Query</strong>
+                        <div style="font-size: 0.8rem; color: #9E9E9E;">Requested at @req.RequestedAt.ToLocalTime().ToString("t")</div>
+                    </div>
+                    <div>
+                        <span class="badge @(req.Status == "Pending" ? "bg-warning text-dark" : req.Status == "Accepted" ? "bg-success" : "bg-danger") me-2">@req.Status</span>
+                        @if (req.Status == "Pending") {
+                            <button class="btn btn-sm btn-success me-1" @onclick="@(() => UpdateStatus(req.Id, "Accepted"))">Accept</button>
+                            <button class="btn btn-sm btn-danger me-1" @onclick="@(() => UpdateStatus(req.Id, "Declined"))">Decline</button>
+                        }
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="@(() => Dismiss(req.Id))">X</button>
+                    </div>
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+@code {
+    private IEnumerable<SongRequest> Requests = Array.Empty<SongRequest>();
+    private Timer _timer = null!;
+
+    protected override void OnInitialized() {
+        RefreshQueue();
+        
+        // Poll for updates since HttpStreamServer is doing the heavy lifting without SignalR
+        _timer = new Timer(2000);
+        _timer.Elapsed += (s, e) => {
+            InvokeAsync(() => {
+                RefreshQueue();
+                StateHasChanged();
+            });
+        };
+        _timer.Start();
+    }
+
+    private void RefreshQueue() {
+        Requests = RequestController.GetLiveQueue().ToList();
+    }
+
+    private void UpdateStatus(string id, string status) {
+        RequestController.UpdateStatus(id, status);
+        RefreshQueue();
+    }
+
+    private void Dismiss(string id) {
+        RequestController.RemoveRequest(id);
+        RefreshQueue();
+    }
+
+    public void Dispose() {
+        _timer?.Dispose();
+    }
+}

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scrim Radio</title>
+    <link rel="stylesheet" href="/assets/player.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="glass-container">
+        <header>
+            <div class="on-air-indicator" id="onAirBadge">ON AIR</div>
+            <h1>Scrim Radio</h1>
+            <div class="listener-count"><span id="listenerCount">0</span> listeners</div>
+        </header>
+        
+        <main>
+            <div class="player-card">
+                <div class="album-art-container">
+                    <!-- Placeholder gradient if no art -->
+                    <div class="album-art-placeholder" id="albumArt"></div>
+                </div>
+                
+                <div class="track-info">
+                    <h2 id="trackTitle">Awaiting Track...</h2>
+                    <h3 id="trackArtist">Scrim DJ</h3>
+                </div>
+
+                <div class="controls">
+                    <button id="playBtn" class="play-btn">
+                        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                    </button>
+                    <div class="volume-control">
+                        <input type="range" id="volumeSlider" min="0" max="1" step="0.01" value="1">
+                    </div>
+                </div>
+                <audio id="audioElement" src="/stream" preload="none"></audio>
+            </div>
+
+            <aside class="queue-section">
+                <h3>Song Requests</h3>
+                <form id="requestForm">
+                    <input type="text" id="requestInput" placeholder="Artist - Song" required>
+                    <button type="submit">Request</button>
+                </form>
+                <ul id="requestQueue">
+                    <!-- Requests populate here -->
+                </ul>
+            </aside>
+        </main>
+    </div>
+    <script src="/assets/player.js"></script>
+</body>
+</html>

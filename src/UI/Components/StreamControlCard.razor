@@ -1,29 +1,52 @@
 @using Scrim.Server
 @using Scrim.Audio
 @using Scrim.Encoding
+@using Scrim.Windows
 @using System.Threading
+@using System.Collections.Generic
 @inject HttpStreamServer StreamServer
 @inject ProcessLoopbackCapture Capture
 @inject MultiFormatTranscoder Transcoder
 
 <div class="card p-3 mb-3" style="background-color: #181818; border: 1px solid #383838; border-radius: 8px;">
     <h4 style="color: white; margin-top: 0;">Broadcast Status</h4>
+    
+    <div class="mb-3">
+        <label class="form-label" style="color: #ccc;">Target Application</label>
+        <select class="form-select bg-dark text-white border-secondary" @bind="SelectedProcessId" disabled="@IsLive">
+            <option value="0">(Select an application)</option>
+            @foreach (var w in Windows) {
+                <option value="@w.ProcessId">@w.Title (@w.ProcessName)</option>
+            }
+        </select>
+        <button class="btn btn-sm btn-outline-secondary mt-2" @onclick="RefreshWindows" disabled="@IsLive">Refresh</button>
+    </div>
+
     <p style="color: #ccc;">Status: <strong style="color: @(IsLive ? "#ff4444" : "#44ff44")">@(IsLive ? "ON AIR" : "OFFLINE")</strong></p>
     <div class="d-flex">
-        <button class="btn btn-success me-2" @onclick="StartStream" disabled="@IsLive">Start Stream</button>
+        <button class="btn btn-success me-2" @onclick="StartStream" disabled="@(IsLive || SelectedProcessId == 0)">Start Stream</button>
         <button class="btn btn-danger" @onclick="StopStream" disabled="@(!IsLive)">Stop Stream</button>
     </div>
 </div>
 
 @code {
     private bool IsLive;
+    private uint SelectedProcessId;
+    private IEnumerable<WindowInfo> Windows = Array.Empty<WindowInfo>();
+    private readonly WindowEnumerator _enumerator = new WindowEnumerator();
+
+    protected override void OnInitialized() {
+        RefreshWindows();
+    }
+
+    private void RefreshWindows() {
+        Windows = _enumerator.GetActiveWindows();
+    }
 
     private void StartStream() { 
         IsLive = true; 
         StreamServer.Start(8080);
-        // We'll need a target PID. Let's just pass 0 for now as a placeholder
-        // or let the backend discover it.
-        Capture.StartCapture(0);
+        Capture.StartCapture(SelectedProcessId);
         Transcoder.StartTranscoding(Capture.AudioStream);
     }
     

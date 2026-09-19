@@ -10,6 +10,8 @@ namespace Scrim.Server {
         private readonly PreRollBuffer _preRollBuffer = new PreRollBuffer();
         private CancellationTokenSource? _cts;
 
+        public int ActiveClientCount => _clients.Count;
+
         public void StartBroadcasting(ChannelReader<byte[]> encodedStream) {
             _cts = new CancellationTokenSource();
             var token = _cts.Token;

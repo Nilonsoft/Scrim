@@ -3,15 +3,20 @@ using System.IO;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
+using Scrim.Metadata;
 
 namespace Scrim.Server {
     public class HttpStreamServer : IStreamServer {
         private readonly BroadcastHub _hub;
+        private readonly IMetadataService _metadataService;
+        private readonly SongRequestController _requestController;
         private HttpListener? _listener;
         private CancellationTokenSource? _cts;
 
-        public HttpStreamServer(BroadcastHub hub) {
+        public HttpStreamServer(BroadcastHub hub, IMetadataService metadataService, SongRequestController requestController) {
             _hub = hub;
+            _metadataService = metadataService;
+            _requestController = requestController;
         }
 
         public void Start(int port) {
@@ -30,10 +35,12 @@ namespace Scrim.Server {
                 
                 if (context.Request.Url!.AbsolutePath == "/stream") {
                     _ = HandleStreamClient(context, token);
-                } else if (context.Request.Url!.AbsolutePath == "/") {
-                    ServeWebPlayer(context);
+                } else if (context.Request.Url!.AbsolutePath == "/" || context.Request.Url!.AbsolutePath.StartsWith("/assets/")) {
+                    Scrim.Web.EmbeddedWebPlayer.ServeAsync(context);
                 } else if (context.Request.Url!.AbsolutePath == "/api/events") {
                     _ = HandleSseClient(context, token);
+                } else if (context.Request.Url!.AbsolutePath == "/api/requests" && context.Request.HttpMethod == "POST") {
+                    HandleSongRequest(context);
                 } else {
                     context.Response.StatusCode = 404;
                     context.Response.Close();
@@ -70,8 +77,19 @@ namespace Scrim.Server {
             try {
                 using var writer = new StreamWriter(response.OutputStream);
                 while (!token.IsCancellationRequested) {
-                    await Task.Delay(5000, token);
-                    await writer.WriteAsync("data: {\"ping\":true}\n\n");
+                    await Task.Delay(2000, token);
+                    
+                    var meta = _metadataService.CurrentMetadata;
+                    string metaJson = $"{{\"type\":\"metadata\",\"title\":\"{EscapeJson(meta.Title)}\",\"artist\":\"{EscapeJson(meta.Artist)}\"}}";
+                    await writer.WriteAsync($"data: {metaJson}\n\n");
+
+                    string statsJson = $"{{\"type\":\"stats\",\"listeners\":{_hub.ActiveClientCount}}}";
+                    await writer.WriteAsync($"data: {statsJson}\n\n");
+
+                    var requests = _requestController.GetLiveQueue().Select(r => $"{{\"query\":\"{EscapeJson(r.Query)}\",\"status\":\"{EscapeJson(r.Status)}\"}}");
+                    string queueJson = $"{{\"type\":\"queue\",\"requests\":[{string.Join(",", requests)}]}}";
+                    await writer.WriteAsync($"data: {queueJson}\n\n");
+
                     await writer.FlushAsync();
                 }
             } catch {
@@ -80,15 +98,29 @@ namespace Scrim.Server {
             }
         }
 
-        private void ServeWebPlayer(HttpListenerContext context) {
-            var response = context.Response;
-            response.ContentType = "text/html";
-            string html = "<html><head><title>Scrim Radio</title></head><body style='background:#121212;color:white;'><h1>Scrim Radio</h1><audio controls src='/stream'></audio></body></html>";
-            byte[] buffer = System.Text.Encoding.UTF8.GetBytes(html);
-            response.ContentLength64 = buffer.Length;
-            response.OutputStream.Write(buffer, 0, buffer.Length);
-            response.Close();
+        private void HandleSongRequest(HttpListenerContext context) {
+            try {
+                using var reader = new StreamReader(context.Request.InputStream);
+                string body = reader.ReadToEnd();
+                // Simple JSON extraction: {"query":"Artist - Song"}
+                var match = System.Text.RegularExpressions.Regex.Match(body, "\"query\"\\s*:\\s*\"(.*?)\"");
+                if (match.Success) {
+                    _requestController.SubmitRequest(match.Groups[1].Value);
+                }
+                context.Response.StatusCode = 200;
+            } catch {
+                context.Response.StatusCode = 400;
+            } finally {
+                context.Response.Close();
+            }
         }
+
+        private string EscapeJson(string? value) {
+            if (string.IsNullOrEmpty(value)) return "";
+            return value.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        }
+
+        // ServeWebPlayer removed in favor of EmbeddedWebPlayer
 
         public void Stop() {
             _cts?.Cancel();
