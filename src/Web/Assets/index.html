@@ -94,7 +94,14 @@
                 <!-- Track & Show Metadata + Live Waveform -->
                 <div class="meta-and-waveform meta-loading" id="metaContainer">
                     <div class="meta-header-icons">
-                        <span class="genre-tag" id="trackGenre">Live Radio</span>
+                        <div class="meta-tags-group">
+                            <span class="genre-tag" id="trackGenre">Live Radio</span>
+                            <span class="stream-quality-pill" id="streamQualityPill" title="Broadcast Format & Bitrate">
+                                <span class="quality-format" id="streamFormat">MP3</span>
+                                <span class="quality-separator">•</span>
+                                <span class="quality-bitrate" id="streamBitrate">128 kbps</span>
+                            </span>
+                        </div>
                         <div class="top-action-icons">
                             <button class="action-icon-btn" title="Live Radio Stream">
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

@@ -28,6 +28,7 @@ namespace Scrim.Configuration {
         public string StationTagline { get; set; } = "Indie Rock & Modern Anthems";
         public string GenreTag { get; set; } = "Indie Alternative";
         public string AccentColor { get; set; } = "#ef4444";
+        public string WebTheme { get; set; } = "dark";
         public string LogoUrl { get; set; } = "";
         public string NavLinks { get; set; } = "Discover,Schedule,Shows,About";
 

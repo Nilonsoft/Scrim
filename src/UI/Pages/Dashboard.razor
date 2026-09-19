@@ -1063,6 +1063,14 @@
         SaveBranding();
     }
 
+    private void SetWebTheme(string themeKey, string? defaultAccent = null) {
+        ProfileManager.CurrentProfile.WebTheme = themeKey;
+        if (!string.IsNullOrEmpty(defaultAccent)) {
+            ProfileManager.CurrentProfile.AccentColor = defaultAccent;
+        }
+        SaveBranding();
+    }
+
     private void AddNavLink() {
         ProfileManager.CurrentProfile.CustomNavLinks.Add(new WebNavLink { Label = "New Link", Url = "https://" });
     }
@@ -1930,6 +1938,30 @@
             <div style="margin-bottom: 12px;">
                 <label class="scrim-label">Station Tagline / Genre</label>
                 <input type="text" class="scrim-input" @bind="ProfileManager.CurrentProfile.GenreTag" @bind:event="oninput" placeholder="e.g. Indie Alternative" />
+            </div>
+
+            <div style="margin-bottom: 14px;">
+                <label class="scrim-label">Website Theme Preset</label>
+                <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                    <button class="pill-option @(ProfileManager.CurrentProfile.WebTheme == "dark" ? "active" : "")" 
+                            style="padding: 4px 10px; font-size: 11px;" 
+                            @onclick='@(() => SetWebTheme("dark", "#00d2ff"))'>🌙 Dark</button>
+                    <button class="pill-option @(ProfileManager.CurrentProfile.WebTheme == "goth" ? "active" : "")" 
+                            style="padding: 4px 10px; font-size: 11px;" 
+                            @onclick='@(() => SetWebTheme("goth", "#e11d48"))'>🦇 Goth</button>
+                    <button class="pill-option @(ProfileManager.CurrentProfile.WebTheme == "pink" ? "active" : "")" 
+                            style="padding: 4px 10px; font-size: 11px;" 
+                            @onclick='@(() => SetWebTheme("pink", "#ec4899"))'>💖 Pink</button>
+                    <button class="pill-option @(ProfileManager.CurrentProfile.WebTheme == "flowers" ? "active" : "")" 
+                            style="padding: 4px 10px; font-size: 11px;" 
+                            @onclick='@(() => SetWebTheme("flowers", "#10b981"))'>🌸 Flowers</button>
+                    <button class="pill-option @(ProfileManager.CurrentProfile.WebTheme == "light" ? "active" : "")" 
+                            style="padding: 4px 10px; font-size: 11px;" 
+                            @onclick='@(() => SetWebTheme("light", "#0284c7"))'>☀️ Light</button>
+                    <button class="pill-option @(ProfileManager.CurrentProfile.WebTheme == "rock" ? "active" : "")" 
+                            style="padding: 4px 10px; font-size: 11px;" 
+                            @onclick='@(() => SetWebTheme("rock", "#ea580c"))'>🎸 Rock & Roll</button>
+                </div>
             </div>
 
             <div style="margin-bottom: 14px;">

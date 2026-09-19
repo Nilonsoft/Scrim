@@ -576,6 +576,10 @@ document.addEventListener('DOMContentLoaded', function () {
     function applyBranding(branding) {
         if (!branding) return;
 
+        if (branding.theme) {
+            document.documentElement.setAttribute('data-theme', branding.theme);
+        }
+
         if (branding.pageTitle) {
             document.title = branding.pageTitle;
             const titleEl = document.getElementById('webTitle');
@@ -674,6 +678,38 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    let lastQualityKey = '';
+    function updateStreamQuality(format, bitrate) {
+        const streamQualityPill = document.getElementById('streamQualityPill');
+        const streamFormatEl = document.getElementById('streamFormat');
+        const streamBitrateEl = document.getElementById('streamBitrate');
+        if (!streamFormatEl || !streamBitrateEl) return;
+
+        const fmt = (format || 'MP3').toString().toUpperCase();
+        let brText = '';
+        if (fmt === 'FLAC' || !bitrate || bitrate === 0) {
+            brText = 'LOSSLESS';
+        } else {
+            brText = `${bitrate} kbps`;
+        }
+
+        const currentKey = `${fmt}-${brText}`;
+        const hasChanged = lastQualityKey && lastQualityKey !== currentKey;
+        lastQualityKey = currentKey;
+
+        streamFormatEl.textContent = fmt;
+        streamBitrateEl.textContent = brText;
+
+        if (streamQualityPill && hasChanged) {
+            streamQualityPill.classList.remove('updated');
+            void streamQualityPill.offsetWidth;
+            streamQualityPill.classList.add('updated');
+            setTimeout(function () {
+                streamQualityPill.classList.remove('updated');
+            }, 1200);
+        }
+    }
+
     // Initial branding and status load
     fetch('/api/branding')
         .then(res => res.json())
@@ -683,10 +719,16 @@ document.addEventListener('DOMContentLoaded', function () {
     fetch('/api/status')
         .then(res => res.json())
         .then(function (data) {
-            if (data && data.isLive !== undefined) {
-                updateLiveIndicator(data.isLive);
+            if (data) {
+                if (data.isLive !== undefined) {
+                    updateLiveIndicator(data.isLive);
+                }
+                if (data.format !== undefined) {
+                    updateStreamQuality(data.format, data.bitrate);
+                }
             }
         })
+        .catch(e => console.warn("Could not fetch status", e));
     // Live Song Tracker State
     let currentDurationSec = 0;
     let currentPositionSec = 0;
@@ -860,6 +902,9 @@ document.addEventListener('DOMContentLoaded', function () {
                     if (listenerCount) listenerCount.textContent = data.listeners || '1';
                     if (data.isLive !== undefined) {
                         updateLiveIndicator(data.isLive);
+                    }
+                    if (data.format !== undefined) {
+                        updateStreamQuality(data.format, data.bitrate);
                     }
                 }
 

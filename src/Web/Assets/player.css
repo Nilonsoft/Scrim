@@ -1,17 +1,21 @@
 /* Scrim Web Player - Matching Global Indie Radio Studio Broadcast Web Mockup */
 
-:root {
+:root, html[data-theme="dark"] {
     --bg-dark: #0d0f12;
     --card-bg: #16181d;
     --card-border: #232730;
     --card-border-hover: #313744;
+    --header-bg: #101216;
+    --header-border: #1c1f26;
+    --input-bg: #101216;
+    --card-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
     --text-bright: #ffffff;
     --text-muted: #8c93a4;
     --text-dim: #5c6374;
-    --accent-color: #ef4444;
-    --accent-contrast: #ffffff;
-    --accent-glow: 0 0 20px rgba(239, 68, 68, 0.55);
-    --accent-glow-subtle: 0 2px 8px rgba(239, 68, 68, 0.3);
+    --accent-color: #00d2ff;
+    --accent-contrast: #0b0d14;
+    --accent-glow: 0 0 20px rgba(0, 210, 255, 0.55);
+    --accent-glow-subtle: 0 2px 8px rgba(0, 210, 255, 0.3);
     --on-air-red: #ef4444;
     --on-air-glow: 0 0 20px rgba(239, 68, 68, 0.55);
     --amber-pill-bg: #29170e;
@@ -20,6 +24,136 @@
     --amber-glow: 0 0 22px rgba(245, 158, 11, 0.35);
     --play-cream: #f4f1e6;
     --play-cream-glow: 0 0 32px rgba(244, 241, 230, 0.45);
+}
+
+html[data-theme="goth"] {
+    --bg-dark: #050608;
+    --card-bg: #0b0d11;
+    --card-border: #1d212b;
+    --card-border-hover: #2e3442;
+    --header-bg: #08090d;
+    --header-border: #171a22;
+    --input-bg: #08090d;
+    --card-shadow: 0 14px 45px rgba(0, 0, 0, 0.9);
+    --text-bright: #f8fafc;
+    --text-muted: #94a3b8;
+    --text-dim: #64748b;
+    --accent-color: #e11d48;
+    --accent-contrast: #ffffff;
+    --accent-glow: 0 0 24px rgba(225, 29, 72, 0.65);
+    --accent-glow-subtle: 0 2px 10px rgba(225, 29, 72, 0.4);
+    --on-air-red: #e11d48;
+    --on-air-glow: 0 0 22px rgba(225, 29, 72, 0.7);
+    --amber-pill-bg: #1f0b12;
+    --amber-pill-border: rgba(225, 29, 72, 0.35);
+    --amber-color: #fb7185;
+    --amber-glow: 0 0 20px rgba(225, 29, 72, 0.35);
+    --play-cream: #e2e8f0;
+    --play-cream-glow: 0 0 32px rgba(225, 29, 72, 0.5);
+}
+
+html[data-theme="pink"] {
+    --bg-dark: #130a17;
+    --card-bg: #1e0f23;
+    --card-border: #3b1c44;
+    --card-border-hover: #582966;
+    --header-bg: #170c1b;
+    --header-border: #34183d;
+    --input-bg: #160b1b;
+    --card-shadow: 0 12px 42px rgba(236, 72, 153, 0.16);
+    --text-bright: #ffffff;
+    --text-muted: #f472b6;
+    --text-dim: #a855f7;
+    --accent-color: #ec4899;
+    --accent-contrast: #ffffff;
+    --accent-glow: 0 0 22px rgba(236, 72, 153, 0.65);
+    --accent-glow-subtle: 0 2px 10px rgba(236, 72, 153, 0.35);
+    --on-air-red: #ec4899;
+    --on-air-glow: 0 0 20px rgba(236, 72, 153, 0.6);
+    --amber-pill-bg: #2d0e26;
+    --amber-pill-border: rgba(244, 114, 182, 0.4);
+    --amber-color: #f472b6;
+    --amber-glow: 0 0 20px rgba(244, 114, 182, 0.35);
+    --play-cream: #fdf2f8;
+    --play-cream-glow: 0 0 32px rgba(236, 72, 153, 0.55);
+}
+
+html[data-theme="flowers"] {
+    --bg-dark: #09130e;
+    --card-bg: #111f18;
+    --card-border: #213a2e;
+    --card-border-hover: #2f5442;
+    --header-bg: #0c1812;
+    --header-border: #1d3228;
+    --input-bg: #0e1914;
+    --card-shadow: 0 12px 40px rgba(16, 185, 129, 0.13);
+    --text-bright: #f0fdf4;
+    --text-muted: #86efac;
+    --text-dim: #4ade80;
+    --accent-color: #10b981;
+    --accent-contrast: #064e3b;
+    --accent-glow: 0 0 22px rgba(16, 185, 129, 0.6);
+    --accent-glow-subtle: 0 2px 10px rgba(16, 185, 129, 0.35);
+    --on-air-red: #f43f5e;
+    --on-air-glow: 0 0 20px rgba(244, 63, 94, 0.55);
+    --amber-pill-bg: #0f291e;
+    --amber-pill-border: rgba(52, 211, 153, 0.4);
+    --amber-color: #34d399;
+    --amber-glow: 0 0 20px rgba(52, 211, 153, 0.35);
+    --play-cream: #ecfdf5;
+    --play-cream-glow: 0 0 32px rgba(16, 185, 129, 0.45);
+}
+
+html[data-theme="light"] {
+    --bg-dark: #f8fafc;
+    --card-bg: #ffffff;
+    --card-border: #e2e8f0;
+    --card-border-hover: #cbd5e1;
+    --header-bg: #ffffff;
+    --header-border: #e2e8f0;
+    --input-bg: #f1f5f9;
+    --card-shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
+    --text-bright: #0f172a;
+    --text-muted: #475569;
+    --text-dim: #94a3b8;
+    --accent-color: #0284c7;
+    --accent-contrast: #ffffff;
+    --accent-glow: 0 0 20px rgba(2, 132, 199, 0.35);
+    --accent-glow-subtle: 0 2px 8px rgba(2, 132, 199, 0.25);
+    --on-air-red: #ef4444;
+    --on-air-glow: 0 0 16px rgba(239, 68, 68, 0.35);
+    --amber-pill-bg: #fef3c7;
+    --amber-pill-border: rgba(245, 158, 11, 0.4);
+    --amber-color: #b45309;
+    --amber-glow: 0 0 16px rgba(245, 158, 11, 0.2);
+    --play-cream: #0f172a;
+    --play-cream-glow: 0 0 24px rgba(15, 23, 42, 0.25);
+}
+
+html[data-theme="rock"] {
+    --bg-dark: #120d09;
+    --card-bg: #1c140e;
+    --card-border: #3b281b;
+    --card-border-hover: #583b27;
+    --header-bg: #16100b;
+    --header-border: #2e1d13;
+    --input-bg: #150f09;
+    --card-shadow: 0 12px 42px rgba(234, 88, 12, 0.16);
+    --text-bright: #fef3c7;
+    --text-muted: #fbbf24;
+    --text-dim: #d97706;
+    --accent-color: #ea580c;
+    --accent-contrast: #ffffff;
+    --accent-glow: 0 0 22px rgba(234, 88, 12, 0.65);
+    --accent-glow-subtle: 0 2px 10px rgba(234, 88, 12, 0.35);
+    --on-air-red: #ea580c;
+    --on-air-glow: 0 0 22px rgba(234, 88, 12, 0.65);
+    --amber-pill-bg: #2d1808;
+    --amber-pill-border: rgba(245, 158, 11, 0.45);
+    --amber-color: #f59e0b;
+    --amber-glow: 0 0 22px rgba(245, 158, 11, 0.4);
+    --play-cream: #fffbeb;
+    --play-cream-glow: 0 0 32px rgba(234, 88, 12, 0.5);
 }
 
 * {
@@ -36,6 +170,7 @@ body {
     display: flex;
     flex-direction: column;
     overflow-x: hidden;
+    transition: background-color 0.35s ease, color 0.35s ease;
 }
 
 /* Header */
@@ -44,8 +179,9 @@ body {
     align-items: center;
     justify-content: space-between;
     padding: 16px 36px;
-    background: #101216;
-    border-bottom: 1px solid #1c1f26;
+    background: var(--header-bg, #101216);
+    border-bottom: 1px solid var(--header-border, #1c1f26);
+    transition: background-color 0.35s ease, border-color 0.35s ease;
 }
 
 .header-left {
@@ -190,10 +326,11 @@ body {
     border: 1px solid var(--card-border);
     border-radius: 20px;
     padding: 32px 36px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+    box-shadow: var(--card-shadow, 0 12px 40px rgba(0, 0, 0, 0.5));
     display: flex;
     flex-direction: column;
     justify-content: space-between;
+    transition: background-color 0.35s ease, border-color 0.35s ease, box-shadow 0.35s ease;
 }
 
 .player-top-row {
@@ -376,10 +513,58 @@ body {
     margin-bottom: 12px;
 }
 
+.meta-tags-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
 .genre-tag {
     font-size: 13px;
     color: var(--accent-color, var(--text-muted));
     font-weight: 600;
+}
+
+.stream-quality-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: #cbd5e1;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.stream-quality-pill.updated {
+    border-color: var(--accent-color, #00d2ff);
+    box-shadow: var(--accent-glow-subtle, 0 0 10px rgba(0, 210, 255, 0.35));
+    transform: scale(1.06);
+}
+
+.quality-format {
+    color: var(--accent-color, #00d2ff);
+    text-transform: uppercase;
+    font-weight: 800;
+    letter-spacing: 0.8px;
+}
+
+.quality-separator {
+    color: var(--text-dim);
+    font-size: 9px;
+    opacity: 0.8;
+}
+
+.quality-bitrate {
+    color: #94a3b8;
+    font-size: 10.5px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
 }
 
 .top-action-icons {
@@ -721,14 +906,14 @@ body {
 }
 
 .request-input {
-    background: #101216;
-    border: 1px solid #232730;
-    color: #ffffff;
+    background: var(--input-bg, #101216);
+    border: 1px solid var(--card-border, #232730);
+    color: var(--text-bright);
     border-radius: 10px;
     padding: 12px 14px;
     font-size: 13px;
     outline: none;
-    transition: border-color 0.15s ease;
+    transition: border-color 0.15s ease, background-color 0.35s ease;
 }
 
 .request-input:focus {
