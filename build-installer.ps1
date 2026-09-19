@@ -50,17 +50,22 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "Publish completed successfully." -ForegroundColor Green
 
-# Package documentation and README into publish directory for MSI inclusion
-$docsSource = Join-Path $scriptRoot "docs"
-$docsDest = Join-Path $publishDir "docs"
-if (Test-Path $docsSource) {
-    Copy-Item -Path $docsSource -Destination $docsDest -Recurse -Force
-    Write-Host "Copied docs/ to publish directory." -ForegroundColor Gray
+# Clean up any leftover developer documentation in publish directory
+$oldDocs = Join-Path $publishDir "docs"
+if (Test-Path $oldDocs) {
+    Remove-Item -Path $oldDocs -Recurse -Force
 }
-$readmeSource = Join-Path $scriptRoot "README.md"
-if (Test-Path $readmeSource) {
-    Copy-Item -Path $readmeSource -Destination $publishDir -Force
-    Write-Host "Copied README.md to publish directory." -ForegroundColor Gray
+$oldReadme = Join-Path $publishDir "README.md"
+if (Test-Path $oldReadme) {
+    Remove-Item -Path $oldReadme -Force
+}
+
+# Package ONLY the end-user guide (no developer specs, git links, or repository docs)
+$userGuideSource = Join-Path $scriptRoot "docs\user-guide.md"
+$userGuideDest = Join-Path $publishDir "UserGuide.md"
+if (Test-Path $userGuideSource) {
+    Copy-Item -Path $userGuideSource -Destination $userGuideDest -Force
+    Write-Host "Packaged clean UserGuide.md for installer." -ForegroundColor Gray
 }
 
 Write-Host "`n[3/3] Compiling WiX MSI Installer: $outputMsi..." -ForegroundColor Yellow

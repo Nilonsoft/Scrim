@@ -1,6 +1,27 @@
-# Scrim Broadcast Console — Comprehensive User & Feature Guide
+# Scrim Broadcast Station — User & Setup Guide
 
-Scrim is a state-of-the-art Windows desktop radio broadcast console built with C# and Blazor Hybrid. It allows you to intercept application audio, mix live DJ microphone audio with automated sidechain ducking, apply real-time DSP voice changers, transcode live audio into multiple formats with zero latency, and stream high-fidelity audio over your local network and the internet.
+Welcome to **Scrim**! Scrim turns your Windows PC into a personal live radio broadcast station. You can capture and stream music from any app (Spotify, Chrome, media players, or games), talk on air with your microphone, use real-time voice effects, play soundboard clips, and broadcast high-quality live audio to your friends, community, or local network.
+
+---
+
+## ⚡ Quick Start in 3 Easy Steps
+
+1. **Step 1: Check FFmpeg**
+   - Scrim uses FFmpeg for high-quality audio streaming (MP3, AAC, FLAC, Opus).
+   - If Scrim displays an alert that FFmpeg is missing, open PowerShell and run:
+     ```powershell
+     winget install ffmpeg
+     ```
+   - Restart Scrim once installed and it will detect FFmpeg automatically.
+
+2. **Step 2: 1-Click Audio Routing**
+   - In the **Audio Routing** card, click **`[ ⚡ Setup Virtual Device ]`**.
+   - If prompted by Windows, accept to install the included virtual audio driver.
+   - All PC audio (Spotify, games, browser) will automatically route into Scrim cleanly without echo!
+
+3. **Step 3: Go On Air!**
+   - Click the glowing **`🔴 ON AIR`** button at the top of the console.
+   - Click **`Share Stream`** in the top bar to copy your station link and share it with listeners!
 
 ---
 
