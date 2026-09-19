@@ -47,23 +47,26 @@ namespace Scrim.Server {
             if (_listener != null && _listener.IsListening) return;
 
             int targetPort = FindAvailablePort(port);
+            var profile = _profileManager.CurrentProfile;
 
             for (int attempt = 0; attempt < 10; attempt++) {
                 var listener = new HttpListener();
                 listener.Prefixes.Add($"http://localhost:{targetPort}/");
                 listener.Prefixes.Add($"http://127.0.0.1:{targetPort}/");
 
-                var profile = _profileManager.CurrentProfile;
+                bool addedNetworkPrefixes = false;
                 if (profile.EnableNetworkAccess) {
+                    try {
+                        listener.Prefixes.Add($"http://+:{targetPort}/");
+                        addedNetworkPrefixes = true;
+                    } catch { }
+
                     foreach (var ip in _networkDiscovery.GetAllLocalIps()) {
                         try {
                             listener.Prefixes.Add($"http://{ip}:{targetPort}/");
+                            addedNetworkPrefixes = true;
                         } catch { }
                     }
-
-                    try {
-                        listener.Prefixes.Add($"http://+:{targetPort}/");
-                    } catch { }
                 }
 
                 try {
@@ -78,12 +81,17 @@ namespace Scrim.Server {
                     }
                     break;
                 } catch (Exception) {
-                    // Try removing wildcard prefix first
-                    if (listener.Prefixes.Contains($"http://+:{targetPort}/")) {
-                        listener.Prefixes.Remove($"http://+:{targetPort}/");
+                    try { listener.Close(); } catch { }
+
+                    // If network / wildcard prefixes failed (e.g. Access is Denied without admin rights),
+                    // fall back IMMEDIATELY to a clean loopback-only listener on the SAME targetPort!
+                    if (addedNetworkPrefixes) {
+                        var loopbackListener = new HttpListener();
+                        loopbackListener.Prefixes.Add($"http://localhost:{targetPort}/");
+                        loopbackListener.Prefixes.Add($"http://127.0.0.1:{targetPort}/");
                         try {
-                            listener.Start();
-                            _listener = listener;
+                            loopbackListener.Start();
+                            _listener = loopbackListener;
                             if (targetPort != port) {
                                 profile.Port = targetPort;
                                 _profileManager.SaveProfile(profile);
@@ -92,9 +100,12 @@ namespace Scrim.Server {
                                 Task.Run(() => _networkDiscovery.TryMapUpnpPort(targetPort));
                             }
                             break;
-                        } catch { }
+                        } catch {
+                            try { loopbackListener.Close(); } catch { }
+                        }
                     }
-                    try { listener.Close(); } catch { }
+
+                    // Only advance port if even loopback failed (truly occupied by another application)
                     targetPort++;
                 }
             }
@@ -102,35 +113,51 @@ namespace Scrim.Server {
             if (_listener == null || !_listener.IsListening) return;
 
             _cts = new CancellationTokenSource();
-            
             Task.Run(() => AcceptLoop(_cts.Token));
         }
 
         private async Task AcceptLoop(CancellationToken token) {
             while (!token.IsCancellationRequested) {
-                var context = await _listener!.GetContextAsync();
-                
-                if (context.Request.Url!.AbsolutePath == "/stream") {
+                HttpListenerContext context;
+                try {
+                    context = await _listener!.GetContextAsync();
+                } catch {
+                    break;
+                }
+
+                // Global CORS preflight OPTIONS handling
+                if (context.Request.HttpMethod == "OPTIONS") {
+                    try {
+                        context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+                        context.Response.Headers.Add("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+                        context.Response.Headers.Add("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization");
+                        context.Response.StatusCode = 200;
+                        context.Response.Close();
+                    } catch { }
+                    continue;
+                }
+
+                string path = context.Request.Url?.AbsolutePath ?? "/";
+
+                if (path == "/stream") {
                     _ = HandleStreamClient(context, token);
-                } else if (context.Request.Url!.AbsolutePath == "/" || context.Request.Url!.AbsolutePath.StartsWith("/assets/")) {
-                    Scrim.Web.EmbeddedWebPlayer.ServeAsync(context);
-                } else if (context.Request.Url!.AbsolutePath == "/api/events") {
+                } else if (path == "/api/events") {
                     _ = HandleSseClient(context, token);
-                } else if (context.Request.Url!.AbsolutePath == "/api/network") {
+                } else if (path == "/api/network") {
                     HandleNetworkRequest(context);
-                } else if (context.Request.Url!.AbsolutePath == "/api/albumart") {
+                } else if (path == "/api/albumart") {
                     HandleAlbumArtRequest(context);
-                } else if (context.Request.Url!.AbsolutePath == "/api/metadata") {
+                } else if (path == "/api/metadata") {
                     HandleMetadataRequest(context);
-                } else if (context.Request.Url!.AbsolutePath == "/api/branding") {
+                } else if (path == "/api/branding") {
                     HandleBrandingRequest(context);
-                } else if (context.Request.Url!.AbsolutePath == "/api/requests" && context.Request.HttpMethod == "POST") {
+                } else if (path == "/api/requests" && context.Request.HttpMethod == "POST") {
                     HandleSongRequest(context);
-                } else if (context.Request.Url!.AbsolutePath == "/api/status") {
+                } else if (path == "/api/status") {
                     HandleStatusRequest(context);
                 } else {
-                    context.Response.StatusCode = 404;
-                    context.Response.Close();
+                    // Serve Web Player assets: /, /index.html, /player.css, /player.js, /assets/*, etc.
+                    Scrim.Web.EmbeddedWebPlayer.ServeAsync(context);
                 }
             }
         }
@@ -192,6 +219,7 @@ namespace Scrim.Server {
         private async Task HandleSseClient(HttpListenerContext context, CancellationToken token) {
             var response = context.Response;
             response.ContentType = "text/event-stream";
+            response.Headers.Add("Access-Control-Allow-Origin", "*");
             response.Headers.Add("Cache-Control", "no-cache");
             response.Headers.Add("Connection", "keep-alive");
 
@@ -233,6 +261,7 @@ namespace Scrim.Server {
                 string json = $"{{\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"logoUrl\":\"{EscapeJson(profile.LogoUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}]}}";
                 byte[] buffer = System.Text.Encoding.UTF8.GetBytes(json);
                 context.Response.ContentType = "application/json";
+                context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
                 context.Response.ContentLength64 = buffer.Length;
                 context.Response.OutputStream.Write(buffer, 0, buffer.Length);
             } catch {
@@ -251,6 +280,7 @@ namespace Scrim.Server {
                 if (match.Success) {
                     _requestController.SubmitRequest(match.Groups[1].Value);
                 }
+                context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
                 context.Response.StatusCode = 200;
             } catch {
                 context.Response.StatusCode = 400;

@@ -13,7 +13,7 @@
         StateChanged="Window_StateChanged"
         Closing="Window_Closing">
     <Grid>
-        <blazor:BlazorWebView HostPage="wwwroot\index.html" Services="{DynamicResource services}">
+        <blazor:BlazorWebView HostPage="wwwroot\index.html" Services="{DynamicResource services}" BlazorWebViewInitialized="BlazorWebView_Initialized">
             <blazor:BlazorWebView.RootComponents>
                 <blazor:RootComponent Selector="#app" ComponentType="{x:Type ui:App}" />
             </blazor:BlazorWebView.RootComponents>

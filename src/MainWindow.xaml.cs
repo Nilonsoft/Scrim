@@ -40,6 +40,26 @@ public partial class MainWindow : Window
         }
     }
 
+    private void BlazorWebView_Initialized(object? sender, Microsoft.AspNetCore.Components.WebView.BlazorWebViewInitializedEventArgs e)
+    {
+        e.WebView.CoreWebView2.NewWindowRequested += (s, args) =>
+        {
+            args.Handled = true;
+            if (!string.IsNullOrEmpty(args.Uri))
+            {
+                try
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = args.Uri,
+                        UseShellExecute = true
+                    });
+                }
+                catch { }
+            }
+        };
+    }
+
     private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
     {
         if (_isExplicitClose) return;

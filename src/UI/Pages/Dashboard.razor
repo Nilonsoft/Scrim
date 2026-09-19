@@ -63,13 +63,13 @@
     <!-- Right Listeners Count & Web Player Link -->
     <div style="display: flex; align-items: center; gap: 12px;">
         @if (IsLive) {
-            <a href="http://localhost:@(ProfileManager.CurrentProfile.Port)" target="_blank" class="listeners-pill" style="text-decoration: none; color: #00d2ff;" title="Open Web UI">
+            <button class="listeners-pill" style="background: #14171d; border: 1px solid rgba(0, 210, 255, 0.3); color: #00d2ff; cursor: pointer;" @onclick='() => OpenInBrowser($"http://localhost:{ProfileManager.CurrentProfile.Port}")' title="Open Web Player in Default Browser">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="10"></circle>
                     <line x1="2" y1="12" x2="22" y2="12"></line>
                 </svg>
-                <span>Web Player :@(ProfileManager.CurrentProfile.Port)</span>
-            </a>
+                <span>Web Player :@(ProfileManager.CurrentProfile.Port) ↗</span>
+            </button>
             <button class="listeners-pill" style="background: #14171d; border: 1px solid rgba(0, 210, 255, 0.3); color: #00d2ff; cursor: pointer;" @onclick="@(() => ShowShareModal = !ShowShareModal)" title="Share station link with network or outside listeners">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="18" cy="5" r="3"></circle>
@@ -109,15 +109,43 @@
             </p>
 
             <div style="display: flex; flex-direction: column; gap: 14px;">
+                <!-- Localhost URL -->
+                <div style="background: #12141a; border: 1px solid #232731; border-radius: 8px; padding: 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <span style="font-size: 11px; font-weight: 700; color: #38bdf8; letter-spacing: 0.5px;">LOCAL MACHINE</span>
+                        <span style="font-size: 11px; color: #64748b;">This computer</span>
+                    </div>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <div style="flex: 1; display: flex; align-items: center; background: #1a1d26; border: 1px solid #2d323e; border-radius: 6px; padding: 6px 10px; overflow: hidden; cursor: pointer;" @onclick='() => OpenInBrowser($"http://localhost:{ProfileManager.CurrentProfile.Port}")' title="Click to open in browser">
+                            <span style="color: #38bdf8; text-decoration: underline; font-family: monospace; font-size: 12px; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">
+                                http://localhost:@(ProfileManager.CurrentProfile.Port)
+                            </span>
+                        </div>
+                        <button class="scrim-btn-secondary" style="padding: 6px 12px; font-size: 12px; white-space: nowrap;" @onclick='() => OpenInBrowser($"http://localhost:{ProfileManager.CurrentProfile.Port}")' title="Open in default browser">
+                            Open ↗
+                        </button>
+                        <button class="scrim-btn-primary" style="padding: 6px 14px; font-size: 12px; white-space: nowrap;" @onclick='() => CopyUrl($"http://localhost:{ProfileManager.CurrentProfile.Port}", "Localhost")'>
+                            @(CopiedUrlTarget == "Localhost" ? "✓ Copied!" : "Copy")
+                        </button>
+                    </div>
+                </div>
+
                 <!-- Local LAN URL -->
                 <div style="background: #12141a; border: 1px solid #232731; border-radius: 8px; padding: 12px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                         <span style="font-size: 11px; font-weight: 700; color: #00d2ff; letter-spacing: 0.5px;">LOCAL NETWORK (WI-FI / LAN)</span>
                         <span style="font-size: 11px; color: #64748b;">For devices on your home network</span>
                     </div>
-                    <div style="display: flex; gap: 8px;">
-                        <input type="text" readonly class="scrim-input" style="font-family: monospace; font-size: 12px;" value="@GetLocalNetworkUrl()" />
-                        <button class="scrim-btn-primary" style="padding: 6px 14px; font-size: 12px;" @onclick='() => CopyUrl(GetLocalNetworkUrl(), "LAN")'>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <div style="flex: 1; display: flex; align-items: center; background: #1a1d26; border: 1px solid #2d323e; border-radius: 6px; padding: 6px 10px; overflow: hidden; cursor: pointer;" @onclick='() => OpenInBrowser(GetLocalNetworkUrl())' title="Click to open in browser">
+                            <span style="color: #00d2ff; text-decoration: underline; font-family: monospace; font-size: 12px; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">
+                                @GetLocalNetworkUrl()
+                            </span>
+                        </div>
+                        <button class="scrim-btn-secondary" style="padding: 6px 12px; font-size: 12px; white-space: nowrap;" @onclick='() => OpenInBrowser(GetLocalNetworkUrl())' title="Open in default browser">
+                            Open ↗
+                        </button>
+                        <button class="scrim-btn-primary" style="padding: 6px 14px; font-size: 12px; white-space: nowrap;" @onclick='() => CopyUrl(GetLocalNetworkUrl(), "LAN")'>
                             @(CopiedUrlTarget == "LAN" ? "✓ Copied!" : "Copy")
                         </button>
                     </div>
@@ -129,9 +157,16 @@
                         <span style="font-size: 11px; font-weight: 700; color: #10b981; letter-spacing: 0.5px;">OUTSIDE NETWORK (INTERNET)</span>
                         <span style="font-size: 11px; color: #64748b;">For remote listeners anywhere</span>
                     </div>
-                    <div style="display: flex; gap: 8px;">
-                        <input type="text" readonly class="scrim-input" style="font-family: monospace; font-size: 12px;" value="@GetOutsideNetworkUrl()" />
-                        <button class="scrim-btn-primary" style="padding: 6px 14px; font-size: 12px;" @onclick='() => CopyUrl(GetOutsideNetworkUrl(), "WAN")'>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <div style="flex: 1; display: flex; align-items: center; background: #1a1d26; border: 1px solid #2d323e; border-radius: 6px; padding: 6px 10px; overflow: hidden; cursor: pointer;" @onclick='() => OpenInBrowser(GetOutsideNetworkUrl())' title="Click to open in browser">
+                            <span style="color: #10b981; text-decoration: underline; font-family: monospace; font-size: 12px; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">
+                                @GetOutsideNetworkUrl()
+                            </span>
+                        </div>
+                        <button class="scrim-btn-secondary" style="padding: 6px 12px; font-size: 12px; white-space: nowrap;" @onclick='() => OpenInBrowser(GetOutsideNetworkUrl())' title="Open in default browser">
+                            Open ↗
+                        </button>
+                        <button class="scrim-btn-primary" style="padding: 6px 14px; font-size: 12px; white-space: nowrap;" @onclick='() => CopyUrl(GetOutsideNetworkUrl(), "WAN")'>
                             @(CopiedUrlTarget == "WAN" ? "✓ Copied!" : "Copy")
                         </button>
                     </div>
@@ -1810,11 +1845,18 @@
                 <div>
                     <div style="display: flex; justify-content: space-between; font-size: 11px; color: #94a3b8; margin-bottom: 3px;">
                         <span>Local Machine:</span>
-                        <a href="@($"http://localhost:{ProfileManager.CurrentProfile.Port}")" target="_blank" style="color: #00d2ff; text-decoration: none; font-size: 10px;">Open in Browser ↗</a>
+                        <button style="background: none; border: none; color: #00d2ff; cursor: pointer; padding: 0; font-size: 10px;" @onclick='() => OpenInBrowser($"http://localhost:{ProfileManager.CurrentProfile.Port}")'>Open in Browser ↗</button>
                     </div>
-                    <div style="display: flex; gap: 6px;">
-                        <input type="text" readonly class="scrim-input" style="font-family: monospace; font-size: 11px; padding: 5px 8px;" value="@($"http://localhost:{ProfileManager.CurrentProfile.Port}")" />
-                        <button class="scrim-btn-secondary" style="padding: 4px 10px; font-size: 11px;" @onclick='() => CopyUrl($"http://localhost:{ProfileManager.CurrentProfile.Port}", "Local")'>
+                    <div style="display: flex; gap: 6px; align-items: center;">
+                        <div style="flex: 1; display: flex; align-items: center; background: #1a1d26; border: 1px solid #2d323e; border-radius: 6px; padding: 5px 8px; overflow: hidden; cursor: pointer;" @onclick='() => OpenInBrowser($"http://localhost:{ProfileManager.CurrentProfile.Port}")' title="Click to open in browser">
+                            <span style="font-family: monospace; font-size: 11px; color: #00d2ff; text-decoration: underline; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">
+                                http://localhost:@(ProfileManager.CurrentProfile.Port)
+                            </span>
+                        </div>
+                        <button class="scrim-btn-secondary" style="padding: 4px 8px; font-size: 11px; white-space: nowrap;" @onclick='() => OpenInBrowser($"http://localhost:{ProfileManager.CurrentProfile.Port}")' title="Open in default browser">
+                            Open ↗
+                        </button>
+                        <button class="scrim-btn-secondary" style="padding: 4px 10px; font-size: 11px; white-space: nowrap;" @onclick='() => CopyUrl($"http://localhost:{ProfileManager.CurrentProfile.Port}", "Local")'>
                             @(CopiedUrlTarget == "Local" ? "✓" : "Copy")
                         </button>
                     </div>
@@ -1826,9 +1868,16 @@
                         <span>Local Network (Wi-Fi / LAN):</span>
                         <span style="color: #64748b; font-size: 10px;">For home devices</span>
                     </div>
-                    <div style="display: flex; gap: 6px;">
-                        <input type="text" readonly class="scrim-input" style="font-family: monospace; font-size: 11px; padding: 5px 8px;" value="@GetLocalNetworkUrl()" />
-                        <button class="scrim-btn-secondary" style="padding: 4px 10px; font-size: 11px;" @onclick='() => CopyUrl(GetLocalNetworkUrl(), "LAN")'>
+                    <div style="display: flex; gap: 6px; align-items: center;">
+                        <div style="flex: 1; display: flex; align-items: center; background: #1a1d26; border: 1px solid #2d323e; border-radius: 6px; padding: 5px 8px; overflow: hidden; cursor: pointer;" @onclick='() => OpenInBrowser(GetLocalNetworkUrl())' title="Click to open in browser">
+                            <span style="font-family: monospace; font-size: 11px; color: #00d2ff; text-decoration: underline; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">
+                                @GetLocalNetworkUrl()
+                            </span>
+                        </div>
+                        <button class="scrim-btn-secondary" style="padding: 4px 8px; font-size: 11px; white-space: nowrap;" @onclick='() => OpenInBrowser(GetLocalNetworkUrl())' title="Open in default browser">
+                            Open ↗
+                        </button>
+                        <button class="scrim-btn-secondary" style="padding: 4px 10px; font-size: 11px; white-space: nowrap;" @onclick='() => CopyUrl(GetLocalNetworkUrl(), "LAN")'>
                             @(CopiedUrlTarget == "LAN" ? "✓" : "Copy")
                         </button>
                     </div>
@@ -1840,9 +1889,16 @@
                         <span>Outside Network (Internet):</span>
                         <span style="color: #64748b; font-size: 10px;">For remote listeners</span>
                     </div>
-                    <div style="display: flex; gap: 6px;">
-                        <input type="text" readonly class="scrim-input" style="font-family: monospace; font-size: 11px; padding: 5px 8px;" value="@GetOutsideNetworkUrl()" />
-                        <button class="scrim-btn-secondary" style="padding: 4px 10px; font-size: 11px;" @onclick='() => CopyUrl(GetOutsideNetworkUrl(), "WAN")'>
+                    <div style="display: flex; gap: 6px; align-items: center;">
+                        <div style="flex: 1; display: flex; align-items: center; background: #1a1d26; border: 1px solid #2d323e; border-radius: 6px; padding: 5px 8px; overflow: hidden; cursor: pointer;" @onclick='() => OpenInBrowser(GetOutsideNetworkUrl())' title="Click to open in browser">
+                            <span style="font-family: monospace; font-size: 11px; color: #10b981; text-decoration: underline; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">
+                                @GetOutsideNetworkUrl()
+                            </span>
+                        </div>
+                        <button class="scrim-btn-secondary" style="padding: 4px 8px; font-size: 11px; white-space: nowrap;" @onclick='() => OpenInBrowser(GetOutsideNetworkUrl())' title="Open in default browser">
+                            Open ↗
+                        </button>
+                        <button class="scrim-btn-secondary" style="padding: 4px 10px; font-size: 11px; white-space: nowrap;" @onclick='() => CopyUrl(GetOutsideNetworkUrl(), "WAN")'>
                             @(CopiedUrlTarget == "WAN" ? "✓" : "Copy")
                         </button>
                     </div>
@@ -1895,6 +1951,16 @@
             Task.Run(() => NetworkDiscovery.TryUnmapUpnpPort(ProfileManager.CurrentProfile.Port));
         }
         StateHasChanged();
+    }
+
+    private void OpenInBrowser(string url) {
+        if (string.IsNullOrWhiteSpace(url)) return;
+        try {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
+                FileName = url,
+                UseShellExecute = true
+            });
+        } catch { }
     }
 
     private void RefreshNetworkStatus() {
