@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using Scrim.Audio;
@@ -13,6 +14,33 @@ namespace Scrim {
         public IServiceProvider Services { get; }
 
         public App() {
+            // Configure WebView2 User Data Folder in LocalAppData to avoid permission issues
+            try {
+                var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                var webView2Dir = Path.Combine(localAppData, "Scrim", "WebView2");
+                if (!Directory.Exists(webView2Dir)) {
+                    Directory.CreateDirectory(webView2Dir);
+                }
+                Environment.SetEnvironmentVariable("WEBVIEW2_USER_DATA_FOLDER", webView2Dir);
+            } catch { }
+
+            // Global exception handling to prevent silent process crashes
+            DispatcherUnhandledException += (s, args) => {
+                LogCrash(args.Exception);
+                MessageBox.Show(
+                    $"An unexpected error occurred:\n\n{args.Exception.Message}\n\nDetails have been logged to ~/.scrim/crash.log.",
+                    "Scrim Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+                args.Handled = true;
+            };
+
+            AppDomain.CurrentDomain.UnhandledException += (s, args) => {
+                if (args.ExceptionObject is Exception ex) {
+                    LogCrash(ex);
+                }
+            };
+
             var services = new ServiceCollection();
             
             // Blazor specific
@@ -91,6 +119,18 @@ namespace Scrim {
             localAudioRouting?.RestoreAllMuted();
 
             base.OnExit(e);
+        }
+
+        private static void LogCrash(Exception ex) {
+            try {
+                var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                var logDir = Path.Combine(userProfile, ".scrim");
+                if (!Directory.Exists(logDir)) {
+                    Directory.CreateDirectory(logDir);
+                }
+                var logFile = Path.Combine(logDir, "crash.log");
+                File.AppendAllText(logFile, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] CRASH: {ex}\n\n");
+            } catch { }
         }
     }
 }

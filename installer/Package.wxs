@@ -3,15 +3,19 @@
            Manufacturer="Scrim Studio"
            Version="$(var.Version)"
            UpgradeCode="4C7016BC-8356-4228-BCEE-B5E3C5FD83EA"
-           Scope="perMachine">
+           Scope="perUser">
 
     <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed."
                   Schedule="afterInstallInitialize" />
 
     <MediaTemplate EmbedCab="yes" />
 
-    <StandardDirectory Id="ProgramFiles64Folder">
-      <Directory Id="INSTALLFOLDER" Name="Scrim" />
+    <Property Id="MSIFASTINSTALL" Value="7" />
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="Scrim" />
+      </Directory>
     </StandardDirectory>
 
     <StandardDirectory Id="ProgramMenuFolder">
