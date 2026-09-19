@@ -71,11 +71,18 @@ namespace Scrim.Audio {
             }
 
             activateOperation.GetActivateResult(out int hr, out object activatedInterface);
+            Console.WriteLine($"[ProcessLoopbackCapture] ActivateResult: hr=0x{hr:X8}, itf={activatedInterface}");
             if (hr < 0 || activatedInterface == null) {
                 return hr;
             }
 
             _audioClient = (IAudioClient)activatedInterface;
+            int mixFormatHr = _audioClient.GetMixFormat(out nint pMixFormat);
+            Console.WriteLine($"[ProcessLoopbackCapture] GetMixFormat: hr=0x{mixFormatHr:X8}, pMix={pMixFormat}");
+            if (pMixFormat != nint.Zero) {
+                var mixWf = Marshal.PtrToStructure<WAVEFORMATEX>(pMixFormat);
+                Console.WriteLine($"[ProcessLoopbackCapture] MixFormat: tag={mixWf.wFormatTag}, ch={mixWf.nChannels}, rate={mixWf.nSamplesPerSec}, bits={mixWf.wBitsPerSample}");
+            }
 
             var format = new WAVEFORMATEX {
                 wFormatTag = 1,
@@ -101,6 +108,7 @@ namespace Scrim.Audio {
                 0,
                 ref format,
                 ref sessionGuid);
+            Console.WriteLine($"[ProcessLoopbackCapture] Initialize (44.1k): hr=0x{initResult:X8}");
 
             if (initResult < 0) {
                 initResult = _audioClient.Initialize(
@@ -110,6 +118,7 @@ namespace Scrim.Audio {
                     0,
                     ref format,
                     ref sessionGuid);
+                Console.WriteLine($"[ProcessLoopbackCapture] Initialize fallback: hr=0x{initResult:X8}");
             }
 
             if (initResult < 0) {
