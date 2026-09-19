@@ -296,7 +296,11 @@ namespace Scrim.Server {
 
         public void Stop() {
             _cts?.Cancel();
-            _listener?.Stop();
+            try {
+                _listener?.Stop();
+                _listener?.Close();
+            } catch { }
+            _listener = null;
             if (_profileManager.CurrentProfile.EnableUpnpPortForwarding) {
                 _networkDiscovery.TryUnmapUpnpPort(_profileManager.CurrentProfile.Port);
             }
@@ -304,7 +308,6 @@ namespace Scrim.Server {
 
         public void Dispose() {
             Stop();
-            _listener?.Close();
         }
     }
 }

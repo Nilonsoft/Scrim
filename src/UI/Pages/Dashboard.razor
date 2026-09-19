@@ -316,6 +316,9 @@
     private System.Timers.Timer? _vuTimer;
     private CancellationTokenSource? _broadcastCts;
     private int CustomBitrateInput = 128;
+    private int CustomPortInput = 8080;
+    private string PortChangeStatusMessage = "";
+    private bool PortChangeSuccess = false;
     private string NewCustomSoundName = "";
     private string NewCustomSoundPath = "";
 
@@ -420,6 +423,7 @@
 
         Mixer.AppVolume = (float)ProfileManager.CurrentProfile.AppStreamVolume / 100f;
         CustomBitrateInput = ProfileManager.CurrentProfile.Bitrate;
+        CustomPortInput = ProfileManager.CurrentProfile.Port;
 
         // Ensure Web Player HTTP server is running so listeners can always view the station
         try {
@@ -899,6 +903,50 @@
         if (CustomBitrateInput >= 16 && CustomBitrateInput <= 512) {
             SetBitrate(CustomBitrateInput);
         }
+    }
+
+    private void SetPresetPort(int port) {
+        CustomPortInput = port;
+        ApplyServerPort();
+    }
+
+    private void ApplyServerPort() {
+        if (CustomPortInput < 1024 || CustomPortInput > 65535) {
+            PortChangeStatusMessage = "Port must be between 1024 and 65535.";
+            PortChangeSuccess = false;
+            return;
+        }
+
+        int oldPort = ProfileManager.CurrentProfile.Port;
+        if (CustomPortInput == oldPort) {
+            PortChangeStatusMessage = $"✓ Server is running on port {CustomPortInput}";
+            PortChangeSuccess = true;
+            return;
+        }
+
+        try {
+            if (ProfileManager.CurrentProfile.EnableUpnpPortForwarding) {
+                NetworkDiscovery.TryUnmapUpnpPort(oldPort);
+            }
+
+            ProfileManager.CurrentProfile.Port = CustomPortInput;
+            ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+
+            StreamServer.Stop();
+            StreamServer.Start(CustomPortInput);
+
+            if (ProfileManager.CurrentProfile.EnableUpnpPortForwarding) {
+                Task.Run(() => NetworkDiscovery.TryMapUpnpPort(CustomPortInput));
+            }
+
+            PortChangeStatusMessage = $"✓ Server port changed to {CustomPortInput} and restarted";
+            PortChangeSuccess = true;
+        } catch (Exception ex) {
+            PortChangeStatusMessage = $"Error applying port: {ex.Message}";
+            PortChangeSuccess = false;
+        }
+
+        StateHasChanged();
     }
 
     private void PlaySoundEffect(string soundName) {
@@ -1420,6 +1468,18 @@
                 </div>
             }
 
+            <!-- Stream Server Port Setting -->
+            <div style="margin-top: 14px; padding-top: 10px; border-top: 1px solid #232731;">
+                <label class="scrim-label" style="margin-bottom: 6px;">Server Port</label>
+                <div style="display: flex; gap: 6px; align-items: center;">
+                    <input type="number" min="1024" max="65535" class="scrim-input" style="width: 90px; padding: 4px 8px; font-size: 11px; font-family: monospace;" 
+                           value="@CustomPortInput" 
+                           @oninput="@((ChangeEventArgs e) => { if (int.TryParse(e.Value?.ToString(), out int p)) CustomPortInput = p; })" />
+                    <button class="scrim-btn-secondary" style="padding: 4px 10px; font-size: 11px;" @onclick="ApplyServerPort">Set Port</button>
+                    <span style="font-size: 10px; color: #64748b;">Current: :@(ProfileManager.CurrentProfile.Port)</span>
+                </div>
+            </div>
+
             <div style="display: flex; gap: 8px; margin-top: 14px;">
                 <button class="scrim-btn-primary" style="flex: 1;" @onclick="StartBroadcast" disabled="@IsLive">Start Broadcast</button>
                 <button class="scrim-btn-secondary" @onclick="StopBroadcast" disabled="@(!IsLive)">Stop</button>
@@ -1648,6 +1708,41 @@
                     <input type="checkbox" checked="@ProfileManager.CurrentProfile.EnableUpnpPortForwarding" @onchange="ToggleUpnpPortForwarding" />
                     <span class="scrim-slider"></span>
                 </label>
+            </div>
+
+            <!-- Stream Server Port Configuration -->
+            <div style="margin-bottom: 14px; background: #12141a; border: 1px solid #232731; border-radius: 8px; padding: 12px 14px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <div>
+                        <div style="font-size: 12px; font-weight: 600; color: #fff;">Server Port (HTTP & Stream)</div>
+                        <div style="font-size: 11px; color: #64748b;">Port used by the web player and audio stream listener endpoint</div>
+                    </div>
+                    <span style="font-family: monospace; font-size: 12px; font-weight: 700; color: #00d2ff; background: #181b22; padding: 2px 8px; border-radius: 4px; border: 1px solid #2d3342;">
+                        :@(ProfileManager.CurrentProfile.Port)
+                    </span>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                    <div style="display: flex; align-items: center; background: #1a1d26; border: 1px solid #2d323e; border-radius: 6px; padding: 0 8px; flex: 1; min-width: 140px;">
+                        <span style="color: #64748b; font-family: monospace; font-size: 12px; margin-right: 4px;">Port:</span>
+                        <input type="number" min="1024" max="65535" class="scrim-input" style="border: none; background: transparent; padding: 6px 4px; font-family: monospace; font-size: 12px; color: #fff; width: 100%;" 
+                               value="@CustomPortInput" 
+                               @oninput="@((ChangeEventArgs e) => { if (int.TryParse(e.Value?.ToString(), out int p)) CustomPortInput = p; })" 
+                               placeholder="e.g. 8080" />
+                    </div>
+                    <button class="scrim-btn-primary" style="padding: 6px 14px; font-size: 11px; white-space: nowrap;" @onclick="ApplyServerPort">
+                        Apply Port
+                    </button>
+                    <!-- Quick preset port pills -->
+                    <button class="pill-option @(ProfileManager.CurrentProfile.Port == 8080 ? "active" : "")" style="padding: 4px 8px; font-size: 10px;" @onclick="@(() => SetPresetPort(8080))">8080</button>
+                    <button class="pill-option @(ProfileManager.CurrentProfile.Port == 8000 ? "active" : "")" style="padding: 4px 8px; font-size: 10px;" @onclick="@(() => SetPresetPort(8000))">8000</button>
+                    <button class="pill-option @(ProfileManager.CurrentProfile.Port == 9000 ? "active" : "")" style="padding: 4px 8px; font-size: 10px;" @onclick="@(() => SetPresetPort(9000))">9000</button>
+                    <button class="pill-option @(ProfileManager.CurrentProfile.Port == 5000 ? "active" : "")" style="padding: 4px 8px; font-size: 10px;" @onclick="@(() => SetPresetPort(5000))">5000</button>
+                </div>
+                @if (!string.IsNullOrEmpty(PortChangeStatusMessage)) {
+                    <div style="font-size: 11px; margin-top: 6px; color: @(PortChangeSuccess ? "#10b981" : "#ef4444");">
+                        @PortChangeStatusMessage
+                    </div>
+                }
             </div>
 
             <!-- Connection URLs List -->
