@@ -127,9 +127,22 @@ namespace Scrim.Audio {
                                 }
                             }
 
+                            // Keep microphone queue bounded to max 120ms (21168 bytes at 44.1kHz 16-bit stereo)
+                            // to prevent latency buildup or clock drift between capture and playback devices
+                            const int MaxMicQueueBytes = 21168;
+                            if (micQueue.Count > MaxMicQueueBytes) {
+                                int excess = micQueue.Count - MaxMicQueueBytes;
+                                excess -= excess % 4; // strictly maintain 4-byte frame alignment
+                                for (int b = 0; b < excess; b++) {
+                                    micQueue.Dequeue();
+                                }
+                            }
+
                             // Extract matching amount of microphone audio for this mixing frame
                             byte[] micBuffer = new byte[appBuffer.Length];
                             int micBytesToCopy = Math.Min(micQueue.Count, appBuffer.Length);
+                            micBytesToCopy -= micBytesToCopy % 4; // ensure strictly 4-byte sample-aligned reads
+
                             for (int b = 0; b < micBytesToCopy; b++) {
                                 micBuffer[b] = micQueue.Dequeue();
                             }

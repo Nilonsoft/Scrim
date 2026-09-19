@@ -60,8 +60,8 @@ namespace Scrim.Audio {
                 _captureDeviceId = deviceId;
                 _cts = new CancellationTokenSource();
 
-                if (processId == 0) {
-                    // System-wide Audio or Targeted Output Device Loopback:
+                if (!string.IsNullOrEmpty(deviceId) || processId == 0) {
+                    // Targeted Output Device Loopback (e.g. Virtual Cable) or System-wide Audio:
                     StartWasapiLoopback(deviceId);
                     return;
                 }

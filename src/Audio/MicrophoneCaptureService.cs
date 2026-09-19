@@ -54,16 +54,63 @@ namespace Scrim.Audio {
             }
         }
 
+        private static bool IsVirtualCableDevice(string? name) {
+            if (string.IsNullOrWhiteSpace(name)) return false;
+            return name.Contains("cable", StringComparison.OrdinalIgnoreCase) ||
+                   name.Contains("vb-audio", StringComparison.OrdinalIgnoreCase) ||
+                   name.Contains("virtual audio", StringComparison.OrdinalIgnoreCase) ||
+                   name.Contains("virtual line", StringComparison.OrdinalIgnoreCase);
+        }
+
         public void StartCapture(string? deviceId = null) {
             if (_capture != null) return;
-            
+
+            var enumerator = new MMDeviceEnumerator();
+            MMDevice? targetDevice = null;
+
+            if (!string.IsNullOrEmpty(deviceId)) {
+                try {
+                    var dev = enumerator.GetDevice(deviceId);
+                    if (dev != null && !IsVirtualCableDevice(dev.FriendlyName)) {
+                        targetDevice = dev;
+                    } else if (dev != null) {
+                        Console.WriteLine($"[MicrophoneCaptureService] Ignored virtual cable device '{dev.FriendlyName}' for voice microphone. Auto-detecting physical mic.");
+                    }
+                } catch { }
+            }
+
+            if (targetDevice == null) {
+                // Determine best physical microphone endpoint, avoiding virtual cables
+                try {
+                    var defaultComm = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications);
+                    if (defaultComm != null && !IsVirtualCableDevice(defaultComm.FriendlyName)) {
+                        targetDevice = defaultComm;
+                    }
+                } catch { }
+
+                if (targetDevice == null) {
+                    try {
+                        var defaultConsole = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Console);
+                        if (defaultConsole != null && !IsVirtualCableDevice(defaultConsole.FriendlyName)) {
+                            targetDevice = defaultConsole;
+                        }
+                    } catch { }
+                }
+
+                if (targetDevice == null) {
+                    try {
+                        var active = enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active);
+                        targetDevice = active.FirstOrDefault(d => !IsVirtualCableDevice(d.FriendlyName))
+                                    ?? active.FirstOrDefault();
+                    } catch { }
+                }
+            }
+
 #pragma warning disable CS0618 // Type or member is obsolete
-            if (string.IsNullOrEmpty(deviceId)) {
-                _capture = new WasapiCapture();
+            if (targetDevice != null) {
+                _capture = new WasapiCapture(targetDevice);
             } else {
-                var enumerator = new MMDeviceEnumerator();
-                var device = enumerator.GetDevice(deviceId);
-                _capture = new WasapiCapture(device);
+                _capture = new WasapiCapture();
             }
 #pragma warning restore CS0618 // Type or member is obsolete
 

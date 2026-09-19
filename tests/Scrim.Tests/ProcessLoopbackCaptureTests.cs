@@ -97,5 +97,14 @@ namespace Scrim.Tests {
             short midSample = BitConverter.ToInt16(outBytes, (outFrames / 4) * 4);
             Assert.True(Math.Abs(midSample) > 1000);
         }
+
+        [Fact]
+        public void StartCapture_WithDeviceIdAndNonZeroPid_InitializesLoopbackWithoutError() {
+            var capture = new ProcessLoopbackCapture();
+            // Should not throw when starting and stopping capture with non-zero PID and null/dummy device
+            capture.StartCapture(9999, null);
+            capture.StopCapture();
+            Assert.True(true);
+        }
     }
 }

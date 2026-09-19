@@ -388,6 +388,16 @@
     private bool IsVirtualDeviceActive => 
         !string.IsNullOrEmpty(ProfileManager.CurrentProfile.CaptureDeviceId) &&
         (ProfileManager.CurrentProfile.CaptureDeviceId == VbCableDeviceId || ProfileManager.CurrentProfile.CaptureDeviceId == DetectedVirtualDeviceId);
+    private bool IsSelectedMicVirtualCable {
+        get {
+            if (string.IsNullOrEmpty(SelectedDeviceId)) return false;
+            var dev = Devices.FirstOrDefault(d => d.Id == SelectedDeviceId);
+            if (dev == null) return false;
+            return dev.Name.Contains("cable", StringComparison.OrdinalIgnoreCase) ||
+                   dev.Name.Contains("vb-audio", StringComparison.OrdinalIgnoreCase) ||
+                   dev.Name.Contains("virtual", StringComparison.OrdinalIgnoreCase);
+        }
+    }
     private readonly WindowEnumerator _enumerator = new();
     private DotNetObjectReference<Dashboard>? _dotNetRef;
     private System.Timers.Timer? _refreshTimer;
@@ -479,9 +489,29 @@
             IsPlayingMedia = MetadataService.CurrentMetadata.IsPlaying;
         }
 
-        // Restore user choices from persisted profile
+        // Restore user choices from persisted profile (ignoring virtual cables for voice microphone)
         if (!string.IsNullOrEmpty(p.SelectedMicrophoneId) && Devices.Any(d => d.Id == p.SelectedMicrophoneId)) {
-            SelectedDeviceId = p.SelectedMicrophoneId;
+            var savedDev = Devices.FirstOrDefault(d => d.Id == p.SelectedMicrophoneId);
+            bool isVirtual = savedDev != null && (savedDev.Name.Contains("cable", StringComparison.OrdinalIgnoreCase) ||
+                                                 savedDev.Name.Contains("vb-audio", StringComparison.OrdinalIgnoreCase) ||
+                                                 savedDev.Name.Contains("virtual", StringComparison.OrdinalIgnoreCase));
+            if (!isVirtual) {
+                SelectedDeviceId = p.SelectedMicrophoneId;
+            } else {
+                var physicalMic = Devices.FirstOrDefault(d => !d.Name.Contains("cable", StringComparison.OrdinalIgnoreCase) &&
+                                                              !d.Name.Contains("vb-audio", StringComparison.OrdinalIgnoreCase) &&
+                                                              !d.Name.Contains("virtual", StringComparison.OrdinalIgnoreCase));
+                SelectedDeviceId = physicalMic?.Id ?? "";
+                p.SelectedMicrophoneId = SelectedDeviceId;
+                ProfileManager.SaveProfile(p);
+            }
+        } else if (string.IsNullOrEmpty(SelectedDeviceId)) {
+            var physicalMic = Devices.FirstOrDefault(d => !d.Name.Contains("cable", StringComparison.OrdinalIgnoreCase) &&
+                                                          !d.Name.Contains("vb-audio", StringComparison.OrdinalIgnoreCase) &&
+                                                          !d.Name.Contains("virtual", StringComparison.OrdinalIgnoreCase));
+            SelectedDeviceId = physicalMic?.Id ?? "";
+            p.SelectedMicrophoneId = SelectedDeviceId;
+            ProfileManager.SaveProfile(p);
         }
 
         if (!string.IsNullOrEmpty(p.SelectedVoiceEffect)) {
@@ -620,7 +650,7 @@
 
     private void EnsureAudioMonitoring(uint pid) {
         try {
-            string? captureDevice = pid == 0 ? ProfileManager.CurrentProfile.CaptureDeviceId : null;
+            string? captureDevice = ProfileManager.CurrentProfile.CaptureDeviceId;
             Capture.StartCapture(pid, captureDevice);
             MicService.StartCapture(SelectedDeviceId);
             MicService.SetVirtualOutputDevice(null);
@@ -795,7 +825,7 @@
         try {
             StreamServer.Start(ProfileManager.CurrentProfile.Port);
 
-            string? captureDevice = SelectedProcessId == 0 ? ProfileManager.CurrentProfile.CaptureDeviceId : null;
+            string? captureDevice = ProfileManager.CurrentProfile.CaptureDeviceId;
             Capture.StartCapture(SelectedProcessId, captureDevice);
             if (SelectedProcessId != 0) {
                 MetadataService.StartMonitoring(SelectedProcessId);
@@ -1647,35 +1677,43 @@
             <div>
                 <label class="scrim-label">Microphone</label>
                 <select class="scrim-select" @bind="SelectedDeviceId" @bind:after="OnMicrophoneChanged">
-                    <option value="">(Default System Microphone)</option>
+                    <option value="">(Default Physical Microphone)</option>
                     @foreach (var d in Devices) {
-                        <option value="@d.Id">@d.Name</option>
+                        bool isVirtual = d.Name.Contains("cable", StringComparison.OrdinalIgnoreCase) ||
+                                         d.Name.Contains("vb-audio", StringComparison.OrdinalIgnoreCase) ||
+                                         d.Name.Contains("virtual", StringComparison.OrdinalIgnoreCase);
+                        <option value="@d.Id">@(isVirtual ? $"⚠️ {d.Name} (Virtual Loopback - Not Voice)" : d.Name)</option>
                     }
                 </select>
+                @if (IsSelectedMicVirtualCable) {
+                    <div style="margin-top: 8px; font-size: 11px; color: #f59e0b; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 6px; padding: 8px 10px; line-height: 1.4;">
+                        ⚠️ <b>Virtual Cable is selected as your microphone.</b> Music routed through Virtual Cable will be treated as microphone voice instead of music, and will be cut off when the mic is muted! Please select your physical microphone.
+                    </div>
+                }
             </div>
 
-            <!-- Microphone & Virtual Audio Auto-Routing Notice -->
-            <div style="margin-top: 12px; background: #121620; border: 1px solid @(MicService.IsVirtualOutputActive ? "#10b981" : "#252a35"); border-radius: 10px; padding: 10px 12px;">
+            <!-- Stream Audio Routing Status -->
+            <div style="margin-top: 12px; background: #121620; border: 1px solid @(IsVirtualDeviceActive ? "rgba(0, 210, 255, 0.35)" : "#252a35"); border-radius: 10px; padding: 10px 12px;">
                 <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;">
                     <div style="display: flex; align-items: center; gap: 6px;">
-                        <span style="font-size: 14px;">🎙️</span>
-                        <span style="font-size: 12px; font-weight: 700; color: #fff;">Microphone Virtual Routing</span>
+                        <span style="font-size: 14px;">🎛️</span>
+                        <span style="font-size: 12px; font-weight: 700; color: #fff;">Stream Audio Routing</span>
                     </div>
-                    @if (MicService.IsVirtualOutputActive) {
+                    @if (IsVirtualDeviceActive) {
                         <span style="font-size: 10px; background: #10b981; color: #0b0d14; font-weight: 700; padding: 1px 7px; border-radius: 10px; display: inline-flex; align-items: center; gap: 4px;">
-                            <span>●</span> ROUTED TO VIRTUAL DEVICE
+                            <span>●</span> ISOLATED CABLE STREAM
                         </span>
                     } else {
                         <span style="font-size: 10px; background: #252a35; color: #94a3b8; font-weight: 600; padding: 1px 7px; border-radius: 10px;">
-                            DIRECT STREAM MIX
+                            DIRECT AUDIO CAPTURE
                         </span>
                     }
                 </div>
                 <div style="font-size: 11px; color: #94a3b8; line-height: 1.4;">
-                    @if (MicService.IsVirtualOutputActive) {
-                        <span>Your microphone is <strong>actively routed</strong> through your virtual audio device (<strong>@(RenderDevices.FirstOrDefault(d => d.Id == ProfileManager.CurrentProfile.CaptureDeviceId).Name ?? "Virtual Cable")</strong>) and mixed directly into your broadcast stream. Any external app capturing the virtual cable will hear your voice.</span>
+                    @if (IsVirtualDeviceActive) {
+                        <span>Music is actively captured from <strong>@(RenderDevices.FirstOrDefault(d => d.Id == ProfileManager.CurrentProfile.CaptureDeviceId).Name ?? "Virtual Cable")</strong> continuously. The microphone channel remains completely independent.</span>
                     } else {
-                        <span>When a virtual device (e.g. CABLE Input) is selected above, Scrim automatically routes your live microphone through it and into your stream with auto-ducking.</span>
+                        <span>Music is captured directly from your selected application window or default audio endpoint.</span>
                     }
                 </div>
             </div>
@@ -1841,13 +1879,6 @@
                 @if (MicService.IsMicTestMode) {
                     <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 8px; padding: 6px 10px; margin-top: 8px; font-size: 11px; color: #f59e0b; text-align: center;">
                         ⚠️ <strong>Off-Air Mic Test Active</strong>: Voice is playing in your headphones only and is NOT broadcast to the stream.
-                    </div>
-                }
-
-                @if (MicService.IsVirtualOutputActive) {
-                    <div style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 8px; padding: 6px 10px; margin-top: 8px; font-size: 11px; color: #10b981; display: flex; align-items: center; justify-content: center; gap: 6px; text-align: center;">
-                        <span>🟢</span>
-                        <span><strong>Mic Routed</strong>: Active on Virtual Capture Device & Live Stream</span>
                     </div>
                 }
             </div>
