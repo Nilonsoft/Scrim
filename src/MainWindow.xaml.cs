@@ -20,21 +20,39 @@ public partial class MainWindow : Window
 {
     private bool _isExplicitClose = false;
 
-    public MainWindow()
-    {
+    public MainWindow() {
         InitializeComponent();
+        ApplySavedWindowBounds();
         Loaded += MainWindow_Loaded;
+        SizeChanged += MainWindow_SizeChanged;
     }
 
-    private void MainWindow_Loaded(object sender, RoutedEventArgs e)
-    {
+    private void ApplySavedWindowBounds() {
+        try {
+            var profileManager = ((App)Application.Current).Services.GetService<IProfileManager>();
+            var profile = profileManager?.CurrentProfile;
+            if (profile != null) {
+                if (profile.WindowWidth >= 400) {
+                    double maxWidth = SystemParameters.VirtualScreenWidth > 0 ? SystemParameters.VirtualScreenWidth : 1920;
+                    Width = Math.Min(profile.WindowWidth, maxWidth);
+                }
+                if (profile.WindowHeight >= 300) {
+                    double maxHeight = SystemParameters.VirtualScreenHeight > 0 ? SystemParameters.VirtualScreenHeight : 1080;
+                    Height = Math.Min(profile.WindowHeight, maxHeight);
+                }
+                if (profile.WindowMaximized) {
+                    WindowState = WindowState.Maximized;
+                }
+            }
+        } catch { }
+    }
+
+    private void MainWindow_Loaded(object sender, RoutedEventArgs e) {
         var profileManager = ((App)Application.Current).Services.GetService<IProfileManager>();
         var profile = profileManager?.CurrentProfile;
-        if (profile != null)
-        {
+        if (profile != null) {
             this.Title = $"Scrim Console - {profile.ProfileName} (:{profile.Port})";
-            if (TrayIcon != null)
-            {
+            if (TrayIcon != null) {
                 TrayIcon.ToolTipText = $"Scrim Console - {profile.ProfileName} (:{profile.Port})";
             }
         }
@@ -71,28 +89,53 @@ public partial class MainWindow : Window
         } catch { }
     }
 
-    private void BlazorWebView_Initialized(object? sender, Microsoft.AspNetCore.Components.WebView.BlazorWebViewInitializedEventArgs e)
-    {
-        e.WebView.CoreWebView2.NewWindowRequested += (s, args) =>
-        {
+    private void MainWindow_SizeChanged(object sender, SizeChangedEventArgs e) {
+        if (WindowState == WindowState.Normal) {
+            var profileManager = ((App)Application.Current).Services.GetService<IProfileManager>();
+            var profile = profileManager?.CurrentProfile;
+            if (profile != null && e.NewSize.Width >= 400 && e.NewSize.Height >= 300) {
+                profile.WindowWidth = e.NewSize.Width;
+                profile.WindowHeight = e.NewSize.Height;
+                profile.WindowMaximized = false;
+            }
+        }
+    }
+
+    private void SaveWindowBounds() {
+        try {
+            var profileManager = ((App)Application.Current).Services.GetService<IProfileManager>();
+            var profile = profileManager?.CurrentProfile;
+            if (profile != null) {
+                if (WindowState == WindowState.Maximized) {
+                    profile.WindowMaximized = true;
+                } else if (WindowState == WindowState.Normal) {
+                    profile.WindowMaximized = false;
+                    if (ActualWidth >= 400 && ActualHeight >= 300) {
+                        profile.WindowWidth = ActualWidth;
+                        profile.WindowHeight = ActualHeight;
+                    }
+                }
+                profileManager?.SaveProfile(profile);
+            }
+        } catch { }
+    }
+
+    private void BlazorWebView_Initialized(object? sender, Microsoft.AspNetCore.Components.WebView.BlazorWebViewInitializedEventArgs e) {
+        e.WebView.CoreWebView2.NewWindowRequested += (s, args) => {
             args.Handled = true;
-            if (!string.IsNullOrEmpty(args.Uri))
-            {
-                try
-                {
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                    {
+            if (!string.IsNullOrEmpty(args.Uri)) {
+                try {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
                         FileName = args.Uri,
                         UseShellExecute = true
                     });
-                }
-                catch { }
+                } catch { }
             }
         };
     }
 
-    private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
-    {
+    private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e) {
+        SaveWindowBounds();
         if (_isExplicitClose) return;
 
         var profileManager = ((App)Application.Current).Services.GetService<IProfileManager>();
@@ -102,63 +145,64 @@ public partial class MainWindow : Window
 
         var mode = profile.CloseMode;
 
-        if (mode == CloseToTrayMode.Ask)
-        {
+        if (mode == CloseToTrayMode.Ask) {
             var prompt = new Scrim.UI.Windows.ClosePromptWindow();
             prompt.Owner = this;
             var result = prompt.ShowDialog();
             
-            if (result == true)
-            {
+            if (result == true) {
                 mode = prompt.ChosenMode;
-                if (prompt.RememberChoice)
-                {
+                if (prompt.RememberChoice) {
                     profile.CloseMode = mode;
                     profileManager!.SaveProfile(profile);
                 }
-            }
-            else
-            {
+            } else {
                 e.Cancel = true;
                 return;
             }
         }
 
-        if (mode == CloseToTrayMode.MinimizeToTray)
-        {
+        if (mode == CloseToTrayMode.MinimizeToTray) {
             e.Cancel = true;
             this.Hide();
-        }
-        else if (mode == CloseToTrayMode.Close)
-        {
+        } else if (mode == CloseToTrayMode.Close) {
             _isExplicitClose = true;
             Application.Current.Shutdown();
         }
     }
 
-    private void Window_StateChanged(object sender, EventArgs e)
-    {
+    private void Window_StateChanged(object sender, EventArgs e) {
         // Minimize stays visible on the Windows taskbar; closing (X) closes to tray.
+        var profileManager = ((App)Application.Current).Services.GetService<IProfileManager>();
+        var profile = profileManager?.CurrentProfile;
+        if (profile != null) {
+            if (WindowState == WindowState.Maximized) {
+                profile.WindowMaximized = true;
+            } else if (WindowState == WindowState.Normal) {
+                profile.WindowMaximized = false;
+                if (ActualWidth >= 400 && ActualHeight >= 300) {
+                    profile.WindowWidth = ActualWidth;
+                    profile.WindowHeight = ActualHeight;
+                }
+            }
+        }
     }
 
-    private void TrayIcon_TrayMouseDoubleClick(object sender, RoutedEventArgs e)
-    {
+    private void TrayIcon_TrayMouseDoubleClick(object sender, RoutedEventArgs e) {
         RestoreWindow();
     }
 
-    private void ShowApp_Click(object sender, RoutedEventArgs e)
-    {
+    private void ShowApp_Click(object sender, RoutedEventArgs e) {
         RestoreWindow();
     }
 
-    private void ExitApp_Click(object sender, RoutedEventArgs e)
-    {
+    private void ExitApp_Click(object sender, RoutedEventArgs e) {
+        SaveWindowBounds();
         _isExplicitClose = true;
         Application.Current.Shutdown();
     }
 
-    private void RestoreWindow()
-    {
+    private void RestoreWindow() {
         this.Show();
         this.WindowState = WindowState.Normal;
         this.Activate();

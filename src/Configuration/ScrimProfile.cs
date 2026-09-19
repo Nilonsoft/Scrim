@@ -60,6 +60,11 @@ namespace Scrim.Configuration {
         public System.Collections.Generic.List<string> CenterColumnCards { get; set; } = new() { "card-vu-talk", "card-voice-fx", "card-queue", "card-chat" };
         public System.Collections.Generic.List<string> RightColumnCards { get; set; } = new() { "card-encoding", "card-media-player", "card-soundboard" };
 
+        // Console Window Bounds & State Persistence
+        public double WindowWidth { get; set; } = 1200;
+        public double WindowHeight { get; set; } = 800;
+        public bool WindowMaximized { get; set; } = false;
+
         public System.Collections.Generic.List<CustomSoundItem> CustomSounds { get; set; } = new();
     }
 

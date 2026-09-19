@@ -70,6 +70,38 @@ namespace Scrim.Tests {
             }
         }
 
+        [Fact]
+        public void WindowBounds_PersistProperlyAcrossProfileSaves() {
+            var defaultProfile = new ScrimProfile();
+            Assert.Equal(1200, defaultProfile.WindowWidth);
+            Assert.Equal(800, defaultProfile.WindowHeight);
+            Assert.False(defaultProfile.WindowMaximized);
+
+            var manager = new ProfileManager();
+            var profile = new ScrimProfile {
+                ProfileName = _testProfileName + "_WindowBounds",
+                WindowWidth = 1440,
+                WindowHeight = 920,
+                WindowMaximized = true
+            };
+
+            manager.SaveProfile(profile);
+
+            var manager2 = new ProfileManager();
+            manager2.LoadProfile(profile.ProfileName);
+
+            Assert.Equal(1440, manager2.CurrentProfile.WindowWidth);
+            Assert.Equal(920, manager2.CurrentProfile.WindowHeight);
+            Assert.True(manager2.CurrentProfile.WindowMaximized);
+
+            // Cleanup
+            var appData = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var path = Path.Combine(appData, ".scrim", $"{profile.ProfileName}.json");
+            if (File.Exists(path)) {
+                File.Delete(path);
+            }
+        }
+
         public void Dispose() {
             // Cleanup the file that was created in the actual user directory
             var appData = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
