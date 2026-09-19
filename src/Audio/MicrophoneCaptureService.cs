@@ -9,16 +9,22 @@ namespace Scrim.Audio {
 #pragma warning disable CS0618 // Type or member is obsolete
         private WasapiCapture? _capture;
         private WasapiOut? _monitorOut;
+        private WasapiOut? _virtualOut;
 #pragma warning restore CS0618 // Type or member is obsolete
         private readonly VoiceEffectLoader _effectLoader;
         private BufferedWaveProvider? _monitorBuffer;
+        private BufferedWaveProvider? _virtualBuffer;
         private readonly object _monitorLock = new();
+        private readonly object _virtualLock = new();
+        private string? _virtualDeviceId;
         
         public ChannelReader<byte[]> MicrophoneStream => _channel.Reader;
         public string CurrentEffect { get; set; } = "normal";
         public bool IsMonitoring { get; set; } = false;
         public bool IsMicTestMode { get; set; } = false;
         public float InputLevel { get; private set; } = 0f;
+        public string? VirtualOutputDeviceId => _virtualDeviceId;
+        public bool IsVirtualOutputActive => _virtualOut != null;
 
         public MicrophoneCaptureService(VoiceEffectLoader effectLoader) {
             _effectLoader = effectLoader;
@@ -35,6 +41,17 @@ namespace Scrim.Audio {
                 list.Add(new MicrophoneDevice { Id = d.ID, Name = d.FriendlyName });
             }
             return list;
+        }
+
+        public void SetVirtualOutputDevice(string? deviceId) {
+            lock (_virtualLock) {
+                if (_virtualDeviceId == deviceId && _virtualOut != null) return;
+                StopVirtualOutput();
+                _virtualDeviceId = deviceId;
+                if (!string.IsNullOrEmpty(deviceId)) {
+                    EnsureVirtualPlayback();
+                }
+            }
         }
 
         public void StartCapture(string? deviceId = null) {
@@ -84,6 +101,14 @@ namespace Scrim.Audio {
                         StopMonitoringPlayback();
                     }
 
+                    // Route to virtual capture device if configured
+                    if (_virtualOut != null && _virtualBuffer != null) {
+                        if (_virtualBuffer.BufferedBytes > _virtualBuffer.BufferLength * 0.75) {
+                            _virtualBuffer.ClearBuffer();
+                        }
+                        _virtualBuffer.AddSamples(buffer, 0, buffer.Length);
+                    }
+
                     // Only send to mixer and live broadcast stream when NOT in private test mode
                     if (!IsMicTestMode) {
                         _channel.Writer.TryWrite(buffer);
@@ -92,6 +117,7 @@ namespace Scrim.Audio {
             };
 
             _capture.StartRecording();
+            EnsureVirtualPlayback();
         }
 
         private void EnsureMonitorPlayback() {
@@ -111,6 +137,28 @@ namespace Scrim.Audio {
             }
         }
 
+        private void EnsureVirtualPlayback() {
+            lock (_virtualLock) {
+                if (_virtualOut == null && !string.IsNullOrEmpty(_virtualDeviceId)) {
+                    try {
+                        var enumerator = new MMDeviceEnumerator();
+                        var device = enumerator.GetDevice(_virtualDeviceId);
+                        _virtualBuffer = new BufferedWaveProvider(new WaveFormat(44100, 16, 2), TimeSpan.FromMilliseconds(800)) {
+                            DiscardOnBufferOverflow = true
+                        };
+#pragma warning disable CS0618 // Type or member is obsolete
+                        _virtualOut = new WasapiOut(device, AudioClientShareMode.Shared, false, 50);
+#pragma warning restore CS0618 // Type or member is obsolete
+                        _virtualOut.Init(_virtualBuffer);
+                        _virtualOut.Play();
+                    } catch {
+                        _virtualOut = null;
+                        _virtualBuffer = null;
+                    }
+                }
+            }
+        }
+
         public void StopMonitoringPlayback() {
             lock (_monitorLock) {
                 if (_monitorOut != null) {
@@ -124,8 +172,22 @@ namespace Scrim.Audio {
             }
         }
 
+        public void StopVirtualOutput() {
+            lock (_virtualLock) {
+                if (_virtualOut != null) {
+                    try {
+                        _virtualOut.Stop();
+                        _virtualOut.Dispose();
+                    } catch { }
+                    _virtualOut = null;
+                    _virtualBuffer = null;
+                }
+            }
+        }
+
         public void StopCapture() {
             StopMonitoringPlayback();
+            StopVirtualOutput();
             if (_capture != null) {
                 _capture.StopRecording();
                 _capture.Dispose();

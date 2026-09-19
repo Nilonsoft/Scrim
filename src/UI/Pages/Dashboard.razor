@@ -592,6 +592,7 @@
 
     private void OnCaptureDeviceChanged() {
         ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        MicService.SetVirtualOutputDevice(ProfileManager.CurrentProfile.CaptureDeviceId);
         EnsureAudioMonitoring(SelectedProcessId);
         StateHasChanged();
     }
@@ -600,6 +601,7 @@
         try {
             Capture.StartCapture(pid, ProfileManager.CurrentProfile.CaptureDeviceId);
             MicService.StartCapture(SelectedDeviceId);
+            MicService.SetVirtualOutputDevice(ProfileManager.CurrentProfile.CaptureDeviceId);
             if (!Mixer.IsMixing) {
                 Mixer.StartMixing(Capture.AudioStream, MicService.MicrophoneStream, CancellationToken.None);
             }
@@ -764,6 +766,7 @@
             }
 
             MicService.StartCapture(SelectedDeviceId);
+            MicService.SetVirtualOutputDevice(ProfileManager.CurrentProfile.CaptureDeviceId);
             Mixer.StartMixing(Capture.AudioStream, MicService.MicrophoneStream, token);
 
             var format = Enum.TryParse<AudioFormat>(ProfileManager.CurrentProfile.AudioFormat, true, out var parsed) 
@@ -895,6 +898,8 @@
     private void OnMicrophoneChanged() {
         ProfileManager.CurrentProfile.SelectedMicrophoneId = SelectedDeviceId;
         ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        MicService.StartCapture(SelectedDeviceId);
+        MicService.SetVirtualOutputDevice(ProfileManager.CurrentProfile.CaptureDeviceId);
     }
 
     private void OnVoiceEffectChanged() {
@@ -926,6 +931,7 @@
         if (!string.IsNullOrEmpty(targetId)) {
             ProfileManager.CurrentProfile.CaptureDeviceId = targetId;
             ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+            MicService.SetVirtualOutputDevice(targetId);
             EnsureAudioMonitoring(SelectedProcessId);
             StateHasChanged();
         }
@@ -968,6 +974,7 @@
         if (!string.IsNullOrEmpty(targetDeviceId)) {
             ProfileManager.CurrentProfile.CaptureDeviceId = targetDeviceId;
             ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+            MicService.SetVirtualOutputDevice(targetDeviceId);
             EnsureAudioMonitoring(SelectedProcessId);
 
             // Open Windows Sound App Volume Settings so the user can easily assign their music player
@@ -986,6 +993,7 @@
             VirtualDeviceService.SetDefaultPlaybackDevice(OriginalDefaultDeviceId);
             ProfileManager.CurrentProfile.CaptureDeviceId = "";
             ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+            MicService.SetVirtualOutputDevice(null);
             EnsureAudioMonitoring(SelectedProcessId);
             VirtualCableInstallStatus = $"✔ Restored Windows default playback to {OriginalDefaultDeviceName ?? "speakers"}.";
             StateHasChanged();
@@ -1214,7 +1222,8 @@
     private void PlaySoundEffect(string soundName) {
         Task.Run(() => {
             try {
-                byte[] wav = GenerateSoundWav(soundName);
+                var (wav, pcmStereo) = GenerateSound(soundName);
+                Mixer.PlaySoundEffect(pcmStereo);
                 using var ms = new MemoryStream(wav);
                 using var sp = new System.Media.SoundPlayer(ms);
                 sp.Play();
@@ -1226,6 +1235,10 @@
         Task.Run(() => {
             try {
                 if (File.Exists(sound.FilePath)) {
+                    byte[]? pcm = LoadWavToPcm16Stereo44100(sound.FilePath);
+                    if (pcm != null && pcm.Length > 0) {
+                        Mixer.PlaySoundEffect(pcm);
+                    }
                     using var sp = new System.Media.SoundPlayer(sound.FilePath);
                     sp.Play();
                 }
@@ -1251,7 +1264,7 @@
         StateHasChanged();
     }
 
-    private static byte[] GenerateSoundWav(string name) {
+    private static (byte[] WavBytes, byte[] PcmStereoBytes) GenerateSound(string name) {
         int sampleRate = 44100;
         int numSamples = (int)(sampleRate * (name.ToLower() switch {
             "airhorn" => 0.7,
@@ -1302,6 +1315,20 @@
             samples[i] = (short)(s * 32767);
         }
 
+        // Stereo 44.1kHz 16-bit PCM for broadcast ducking mixer
+        byte[] pcmStereo = new byte[numSamples * 4];
+        for (int i = 0; i < numSamples; i++) {
+            short sample = samples[i];
+            byte lo = (byte)(sample & 0xFF);
+            byte hi = (byte)((sample >> 8) & 0xFF);
+            int off = i * 4;
+            pcmStereo[off] = lo;
+            pcmStereo[off + 1] = hi;
+            pcmStereo[off + 2] = lo;
+            pcmStereo[off + 3] = hi;
+        }
+
+        // Mono 44.1kHz 16-bit WAV for local DJ playback
         using var ms = new MemoryStream();
         using var bw = new BinaryWriter(ms);
         bw.Write(System.Text.Encoding.ASCII.GetBytes("RIFF"));
@@ -1320,7 +1347,100 @@
         for (int i = 0; i < numSamples; i++) {
             bw.Write(samples[i]);
         }
-        return ms.ToArray();
+        return (ms.ToArray(), pcmStereo);
+    }
+
+    private static byte[]? LoadWavToPcm16Stereo44100(string filePath) {
+        try {
+            using var fs = File.OpenRead(filePath);
+            using var br = new BinaryReader(fs);
+            if (new string(br.ReadChars(4)) != "RIFF") return null;
+            br.ReadInt32();
+            if (new string(br.ReadChars(4)) != "WAVE") return null;
+
+            short channels = 2;
+            int sampleRate = 44100;
+            short bitsPerSample = 16;
+            short audioFormat = 1;
+            byte[]? rawAudio = null;
+
+            while (fs.Position < fs.Length - 8) {
+                string chunkId = new string(br.ReadChars(4));
+                int chunkSize = br.ReadInt32();
+                if (chunkId == "fmt ") {
+                    audioFormat = br.ReadInt16();
+                    channels = br.ReadInt16();
+                    sampleRate = br.ReadInt32();
+                    br.ReadInt32();
+                    br.ReadInt16();
+                    bitsPerSample = br.ReadInt16();
+                    int extra = chunkSize - 16;
+                    if (extra > 0) fs.Seek(extra, SeekOrigin.Current);
+                } else if (chunkId == "data") {
+                    rawAudio = br.ReadBytes(chunkSize);
+                    break;
+                } else {
+                    fs.Seek(chunkSize, SeekOrigin.Current);
+                }
+            }
+
+            if (rawAudio == null || rawAudio.Length == 0) return null;
+
+            if (sampleRate == 44100 && bitsPerSample == 16 && channels == 2 && audioFormat == 1) {
+                return rawAudio;
+            }
+
+            bool isFloat = audioFormat == 3 || bitsPerSample == 32;
+            int bytesPerFrame = channels * (isFloat ? 4 : (bitsPerSample / 8));
+            if (bytesPerFrame <= 0) return null;
+
+            int inFrames = rawAudio.Length / bytesPerFrame;
+            if (inFrames <= 0) return null;
+
+            int outFrames = (sampleRate == 44100) ? inFrames : (int)Math.Round(inFrames * 44100.0 / sampleRate);
+            if (outFrames <= 0) return null;
+
+            byte[] outBytes = new byte[outFrames * 4];
+            double ratio = (double)sampleRate / 44100.0;
+
+            for (int j = 0; j < outFrames; j++) {
+                double inIndex = j * ratio;
+                int idx0 = (int)inIndex;
+                double frac = inIndex - idx0;
+                int idx1 = Math.Min(idx0 + 1, inFrames - 1);
+
+                float l0, r0, l1, r1;
+                if (isFloat) {
+                    int o0 = idx0 * bytesPerFrame;
+                    int o1 = idx1 * bytesPerFrame;
+                    l0 = BitConverter.ToSingle(rawAudio, o0);
+                    r0 = channels >= 2 ? BitConverter.ToSingle(rawAudio, o0 + 4) : l0;
+                    l1 = BitConverter.ToSingle(rawAudio, o1);
+                    r1 = channels >= 2 ? BitConverter.ToSingle(rawAudio, o1 + 4) : l1;
+                } else {
+                    int o0 = idx0 * bytesPerFrame;
+                    int o1 = idx1 * bytesPerFrame;
+                    l0 = BitConverter.ToInt16(rawAudio, o0) / 32768.0f;
+                    r0 = channels >= 2 ? BitConverter.ToInt16(rawAudio, o0 + 2) / 32768.0f : l0;
+                    l1 = BitConverter.ToInt16(rawAudio, o1) / 32768.0f;
+                    r1 = channels >= 2 ? BitConverter.ToInt16(rawAudio, o1 + 2) / 32768.0f : l1;
+                }
+
+                float l = (float)(l0 * (1.0 - frac) + l1 * frac);
+                float r = (float)(r0 * (1.0 - frac) + r1 * frac);
+                short sL = (short)Math.Clamp((int)(l * 32767.0f), short.MinValue, short.MaxValue);
+                short sR = (short)Math.Clamp((int)(r * 32767.0f), short.MinValue, short.MaxValue);
+
+                int outOffset = j * 4;
+                outBytes[outOffset] = (byte)(sL & 0xFF);
+                outBytes[outOffset + 1] = (byte)((sL >> 8) & 0xFF);
+                outBytes[outOffset + 2] = (byte)(sR & 0xFF);
+                outBytes[outOffset + 3] = (byte)((sR >> 8) & 0xFF);
+            }
+            return outBytes;
+        } catch {
+            return null;
+        }
     }
 
     private void PlayTrack(PlaylistItem track) {
@@ -1374,6 +1494,7 @@
         _refreshTimer?.Dispose();
         _vuTimer?.Dispose();
         _broadcastCts?.Cancel();
+        MicService.SetVirtualOutputDevice(null);
         MicService.StopMonitoringPlayback();
         LocalAudioRouting.RestoreAllMuted();
         ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
@@ -1495,6 +1616,32 @@
                         <option value="@d.Id">@d.Name</option>
                     }
                 </select>
+            </div>
+
+            <!-- Microphone & Virtual Audio Auto-Routing Notice -->
+            <div style="margin-top: 12px; background: #121620; border: 1px solid @(MicService.IsVirtualOutputActive ? "#10b981" : "#252a35"); border-radius: 10px; padding: 10px 12px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;">
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <span style="font-size: 14px;">🎙️</span>
+                        <span style="font-size: 12px; font-weight: 700; color: #fff;">Microphone Virtual Routing</span>
+                    </div>
+                    @if (MicService.IsVirtualOutputActive) {
+                        <span style="font-size: 10px; background: #10b981; color: #0b0d14; font-weight: 700; padding: 1px 7px; border-radius: 10px; display: inline-flex; align-items: center; gap: 4px;">
+                            <span>●</span> ROUTED TO VIRTUAL DEVICE
+                        </span>
+                    } else {
+                        <span style="font-size: 10px; background: #252a35; color: #94a3b8; font-weight: 600; padding: 1px 7px; border-radius: 10px;">
+                            DIRECT STREAM MIX
+                        </span>
+                    }
+                </div>
+                <div style="font-size: 11px; color: #94a3b8; line-height: 1.4;">
+                    @if (MicService.IsVirtualOutputActive) {
+                        <span>Your microphone is <strong>actively routed</strong> through your virtual audio device (<strong>@(RenderDevices.FirstOrDefault(d => d.Id == ProfileManager.CurrentProfile.CaptureDeviceId).Name ?? "Virtual Cable")</strong>) and mixed directly into your broadcast stream. Any external app capturing the virtual cable will hear your voice.</span>
+                    } else {
+                        <span>When a virtual device (e.g. CABLE Input) is selected above, Scrim automatically routes your live microphone through it and into your stream with auto-ducking.</span>
+                    }
+                </div>
             </div>
         </div>,
 
@@ -1658,6 +1805,13 @@
                 @if (MicService.IsMicTestMode) {
                     <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 8px; padding: 6px 10px; margin-top: 8px; font-size: 11px; color: #f59e0b; text-align: center;">
                         ⚠️ <strong>Off-Air Mic Test Active</strong>: Voice is playing in your headphones only and is NOT broadcast to the stream.
+                    </div>
+                }
+
+                @if (MicService.IsVirtualOutputActive) {
+                    <div style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 8px; padding: 6px 10px; margin-top: 8px; font-size: 11px; color: #10b981; display: flex; align-items: center; justify-content: center; gap: 6px; text-align: center;">
+                        <span>🟢</span>
+                        <span><strong>Mic Routed</strong>: Active on Virtual Capture Device & Live Stream</span>
                     </div>
                 }
             </div>
@@ -1999,7 +2153,10 @@
 
         "card-soundboard" => @<div class="scrim-card">
             <div class="scrim-card-header scrim-drag-handle">
-                <h3 class="scrim-card-title">Soundboard</h3>
+                <div>
+                    <h3 class="scrim-card-title">Soundboard</h3>
+                    <div style="font-size: 10px; color: #00d2ff; margin-top: 1px; font-weight: 500;">⚡ Broadcasts Live to Stream & DJ Headphones</div>
+                </div>
                 <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
             </div>
             <div class="soundboard-grid">

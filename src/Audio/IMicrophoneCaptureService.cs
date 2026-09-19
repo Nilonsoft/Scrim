@@ -14,9 +14,12 @@ namespace Scrim.Audio {
         bool IsMonitoring { get; set; }
         bool IsMicTestMode { get; set; }
         float InputLevel { get; }
+        string? VirtualOutputDeviceId { get; }
+        bool IsVirtualOutputActive { get; }
         IEnumerable<MicrophoneDevice> GetDevices();
         void StartCapture(string? deviceId = null);
         void StopCapture();
         void StopMonitoringPlayback();
+        void SetVirtualOutputDevice(string? deviceId);
     }
 }

@@ -42,6 +42,7 @@ Traditional broadcasting software requires configuring complex third-party audio
 - **Automatic Driver Deployment**: Checks for the Microsoft WHQL-certified VB-Audio Virtual Cable driver. If missing, silently installs it from the bundled installer (`VBCABLE_Setup_x64.exe`).
 - **Console Capture Binding**: Instantly connects Scrim's loopback capture engine to the virtual cable (`CABLE Input`).
 - **Windows CoreAudio Handover**: Programmatically routes Windows default playback audio to the virtual cable via `IPolicyConfig`. All PC audio, browser sound, Spotify, games, and media players automatically feed directly into Scrim without manual routing.
+- **Automatic Microphone Virtual Routing**: When a virtual capture device (e.g. `CABLE Input`) is selected, Scrim automatically loops your active microphone through the virtual device via low-latency WASAPI output. Any external recording software, streaming app, or game capturing the virtual device receives your live voice and music combined, with clear visual routing status in the console.
 - **1-Click Speaker Restoration**: Whenever you want to switch back to your regular physical speakers or headphones (e.g. *Sound BlasterX G6*), simply click **`[ ↩ Restore Speakers ]`**.
 
 ### Application Window Selection & Volume
@@ -199,7 +200,7 @@ Scrim features a built-in, low-latency anonymous live chat system connecting lis
 ## 10. Studio Soundboard & Custom Sounds
 
 ### Built-In Studio SFX
-Synthesized in-memory 44.1kHz stereo audio effects:
+Synthesized in-memory 44.1kHz stereo audio effects mixed directly into your live broadcast stream with automatic ducking and analog VU needle reaction, while simultaneously playing locally in your DJ headphones:
 - **Airhorn**: Multi-oscillator detuned brass fanfare.
 - **Applause**: Filtered white-noise crowd ovation.
 - **Rimshot**: Snappy percussive snare hit with acoustic ring.
@@ -209,6 +210,7 @@ Synthesized in-memory 44.1kHz stereo audio effects:
 
 ### Custom Audio Files
 - Add custom `.wav` sound clips with a custom title and local file path.
+- Automatically converted to 44.1kHz 16-bit stereo PCM and mixed into both the live stream encoder and local DJ playback.
 - Custom sounds automatically persist across sessions in your profile.
 
 ---

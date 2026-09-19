@@ -159,5 +159,34 @@ namespace Scrim.Tests {
 
             cts.Cancel();
         }
+
+        [Fact]
+        public async Task StartMixing_WithSoundEffect_MixesIntoStream() {
+            var mixer = new AudioDuckingMixer { AppVolume = 0.0f };
+            var appChannel = Channel.CreateUnbounded<byte[]>();
+            var micChannel = Channel.CreateUnbounded<byte[]>();
+            var cts = new CancellationTokenSource();
+
+            mixer.StartMixing(appChannel.Reader, micChannel.Reader, cts.Token);
+
+            byte[] sfx = new byte[3528];
+            for (int i = 0; i < sfx.Length; i += 2) {
+                var bytes = BitConverter.GetBytes((short)12000);
+                sfx[i] = bytes[0];
+                sfx[i + 1] = bytes[1];
+            }
+
+            mixer.PlaySoundEffect(sfx);
+
+            byte[] silentApp = new byte[3528];
+            await appChannel.Writer.WriteAsync(silentApp);
+
+            var mixedFrame = await mixer.MixedStream.ReadAsync();
+
+            short sample = BitConverter.ToInt16(mixedFrame, 100);
+            Assert.InRange(sample, 11000, 13000);
+
+            cts.Cancel();
+        }
     }
 }

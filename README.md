@@ -13,10 +13,12 @@
 ### ⚡ 1-Click Virtual Audio Setup
 - **Integrated WHQL Driver**: Bundles the official Microsoft-certified VB-Audio Virtual Cable driver for silent background app capture.
 - **Zero-Configuration Routing**: Programmatically sets Windows default playback to the virtual cable via CoreAudio policy (`IPolicyConfig`), automatically streaming all PC audio and music apps into Scrim without manual Windows Mixer setup.
+- **Automatic Microphone Virtual Routing**: Loops your live microphone into the virtual capture device (`CABLE Input`) and broadcast stream with clear console status indicators, allowing external recording software and games to capture both voice and music.
 - **1-Click Speaker Restoration**: Safely restores your physical speakers/headphones at any time with a single click.
 
 ### 🎚️ Modular Studio Console
 - **3-Column Drag & Drop Interface**: Customize your studio layout with 11 reorderable cards (Audio Routing, Network & Internet, Master VU, Voice FX, Song Queue, Live Station Chat, Encoding, Media Player, Soundboard, Website Branding, and Playlist).
+- **Integrated Broadcast Soundboard**: Built-in sound effects (Airhorn, Applause, Rimshot, etc.) and custom `.wav` files mix directly into the live broadcast stream with analog VU needle reaction while simultaneously playing in DJ headphones.
 - **Proportional Column Layouts**: Toggle between **Studio** (Little-Big-Little) and **Equal** (1fr-1fr-1fr) sizing modes.
 - **Synchronized ON AIR & Transmitter (TX)**: Visual status badges and real-time audio transmission indicators keep you informed when sound is flowing.
 - **Calibrated Stereo dB VU Meters**: High-frequency analog-style response bars with precise numeric decibel readouts (`-40 dB` to `0.0 dB`).
