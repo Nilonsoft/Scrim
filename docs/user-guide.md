@@ -13,9 +13,12 @@ Scrim is a state-of-the-art Windows desktop radio broadcast console built with C
 5. [Live Encoding & Zero-Latency Hot-Swapping](#5-live-encoding--zero-latency-hot-swapping)
 6. [Network & Internet Broadcasting](#6-network--internet-broadcasting)
 7. [Responsive Web Player & Visualizers](#7-responsive-web-player--visualizers)
-8. [Interactive Song Requests Queue](#8-interactive-song-requests-queue)
-9. [Studio Soundboard & Custom Sounds](#9-studio-soundboard--custom-sounds)
-10. [Console Customization & Profile Persistence](#10-console-customization--profile-persistence)
+8. [Real-Time Anonymous Web Chat & Broadcaster Controls](#8-real-time-anonymous-web-chat--broadcaster-controls)
+9. [Interactive Song Requests Queue & Dedications](#9-interactive-song-requests-queue--dedications)
+10. [Studio Soundboard & Custom Sounds](#10-studio-soundboard--custom-sounds)
+11. [Persistent Per-Song Reactions & Session Song History](#11-persistent-per-song-reactions--session-song-history)
+12. [Console Customization & Profile Persistence](#12-console-customization--profile-persistence)
+13. [Website Branding, Custom Banners & Header Images](#13-website-branding-custom-banners--header-images)
 
 ---
 
@@ -245,3 +248,52 @@ All settings are stored in `C:\Users\<User>\.scrim\Default.json`:
 - **Clean Microphone & Loopback Resampling**: Universal 44.1kHz 16-bit stereo PCM resampling engine prevents hardware sample rate mismatches (such as 48kHz microphone shared-mode formats or 32-bit floating-point audio) from creating static or crashing the transmitter.
 - Station branding, show titles, genre tags, custom soundboard effects, and card layouts remain consistent across all sessions.
 - **Upgrade-Proof**: Upgrading or reinstalling the Scrim MSI installer never resets or overwrites your personal preferences.
+
+---
+
+## 13. Website Branding, Custom Banners & Header Images
+
+Broadcasters can personalize their public web player with a custom header banner image, station logo, station title, and show subtitle directly from the **Website Branding & Links** console card.
+
+### Top Station Header Banner Overview
+The header banner spans the entire top edge of the web player page, resting immediately above the navigation header bar. 
+
+- **Default Behavior (No Banner)**: If no banner image is configured (or if the field is cleared), the web player displays its clean, compact dark studio navigation header with zero dead space or empty layout gaps.
+- **Dynamic Display**: When configured, the banner appears with a seamless CSS gradient overlay (`rgba(0, 0, 0, 0.05)` at the top blending down into `var(--header-bg)` at the bottom), providing a smooth cinematic transition into the header controls.
+
+### Recommended Dimensions & Aspect Ratios
+
+The web player banner container is responsive with a fixed height:
+- **Desktop Screens (> 768px)**: `180px` height, `100%` viewport width.
+- **Mobile Screens (≤ 768px)**: `120px` height, `100%` viewport width.
+- **Image Scaling**: Displayed using CSS `object-fit: cover` with `object-position: center`. The image fills the full width and height while preserving its aspect ratio, cleanly centering the artwork.
+
+| Use Case | Optimal Resolution | Aspect Ratio | Notes |
+| :--- | :---: | :---: | :--- |
+| **Best Overall (1080p Desktop)** | **1920 × 240 px** to **1920 × 360 px** | **8:1** to **16:3** | Recommended. Perfectly fills full-HD screens with minimal vertical cropping. |
+| **High-Res / 4K / Ultrawide** | **2560 × 320 px** to **2560 × 480 px** | **8:1** to **16:3** | Crisp on 1440p and 4K ultra-wide monitors. |
+| **Standard Banner** | **1200 × 180 px** | **20:3 (6.6:1)** | Exact 1:1 pixel match for standard 1200px centered page layouts. |
+| **Standard Wallpaper / Artwork** | **1920 × 1080 px** | **16:9** | Supported via `object-fit: cover`. Ensure subject is vertically centered. |
+
+### Safe Zone & Visual Framing Tips
+1. **Vertical Centering**: Because `object-fit: cover` crops evenly from the top and bottom on wide desktop displays, keep logos, station titles, and key visual subjects within the **vertical center 50%** of your canvas.
+2. **Bottom Gradient Blend**: A soft gradient overlays the bottom 30% of the banner (`linear-gradient(180deg, ... var(--header-bg) 100%)`) to create a smooth transition into the player header. Avoid placing small text, copyright lines, or delicate logos along the bottom edge.
+3. **Contrast & Theme Harmony**: Dark, vibrant, or atmospheric designs (such as synthwave cityscapes, studio neon, or ambient gradients) blend best with Scrim's dark glassmorphism aesthetic.
+
+### Where to Store Assets & File Path Resolution
+Custom banners and logos can be stored locally in your Scrim user directory:
+```
+%USERPROFILE%\.scrim\assets\
+```
+*(For example: `C:\Users\<Username>\.scrim\assets\`)*
+
+> [!TIP]
+> In the Scrim Console, navigate to the **Website Branding & Links** card and click **`📁 Open Assets Folder`** to open this folder directly in Windows File Explorer.
+
+You can reference your image in the **Station Banner Image** input field using any of the following formats:
+- **Relative Path**: `.\assets\mybanner.png` or `assets\mybanner.jpg`
+- **Default Filename Lookup**: `mybanner.png` (Scrim automatically looks in `~/.scrim/assets/` by default)
+- **Extension-Free**: `mybanner` (Scrim automatically probes `.png`, `.jpg`, `.jpeg`, `.webp`, `.svg`, and `.gif`)
+- **Direct File Path**: `C:\Banners\mybanner.png`
+- **Remote Web URL**: `https://example.com/banner.png`
+
