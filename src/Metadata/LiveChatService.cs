@@ -316,17 +316,33 @@ namespace Scrim.Metadata {
             (new Regex(@":wave:", RegexOptions.IgnoreCase | RegexOptions.Compiled), "👋"),
             (new Regex(@":heart:", RegexOptions.IgnoreCase | RegexOptions.Compiled), "❤️"),
 
-            // Standard punctuation emoticons safely bounded by whitespace, line boundaries, or punctuation
-            (new Regex(@"(?<=^|\s)(?:</3)(?=$|\s|[.,!?])", RegexOptions.Compiled), "💔"),
-            (new Regex(@"(?<=^|\s)(?:<3)(?=$|\s|[.,!?])", RegexOptions.Compiled), "❤️"),
-            (new Regex(@"(?<=^|\s)(?:[:=]-?[oO])(?=$|\s|[.,!?])", RegexOptions.Compiled), "😮"),
-            (new Regex(@"(?<=^|\s)(?:[:=]-?D|x-?D|X-?D)(?=$|\s|[.,!?])", RegexOptions.Compiled), "😀"),
-            (new Regex(@"(?<=^|\s)(?:[:=]-?[\)\]])(?=$|\s|[.,!?])", RegexOptions.Compiled), "😊"),
-            (new Regex(@"(?<=^|\s)(?:;-?[\)\]])(?=$|\s|[.,!?])", RegexOptions.Compiled), "😉"),
-            (new Regex(@"(?<=^|\s)(?:[:=]-?[\(\[]|:'-?\()(?=$|\s|[.,!?])", RegexOptions.Compiled), "😢"),
-            (new Regex(@"(?<=^|\s)(?:[:=]-?[pP])(?=$|\s|[.,!?])", RegexOptions.Compiled), "😛"),
-            (new Regex(@"(?<=^|\s)(?:[:=]-?[/\\|])(?=$|\s|[.,!?])", RegexOptions.Compiled), "😐"),
-            (new Regex(@"(?<=^|\s)(?:[B8]-?\))(?=$|\s|[.,!?])", RegexOptions.Compiled), "😎")
+            // Hearts: <3 and </3 (safely avoiding numbers like <300)
+            (new Regex(@"</3", RegexOptions.Compiled), "💔"),
+            (new Regex(@"<3(?!\d)", RegexOptions.Compiled), "❤️"),
+
+            // Surprised: :O, :o, :-O, :-o, =O, =o, :0
+            (new Regex(@"(?<!\d)(?:[:=]-?[oO0])(?![a-zA-Z0-9])", RegexOptions.Compiled), "😮"),
+
+            // Laugh / Big grin: :D, :-D, =D, =-D, xD, XD
+            (new Regex(@"(?:(?<!\d)(?:[:=]-?D|=D)|(?<![a-zA-Z0-9])[xX]-?D)(?![a-zA-Z0-9])", RegexOptions.Compiled), "😀"),
+
+            // Smile: :), :-), =), =-), :], =]
+            (new Regex(@"(?:[:=]-?[\)\]])", RegexOptions.Compiled), "😊"),
+
+            // Wink: ;), ;-)
+            (new Regex(@"(?:;-?[\)\]])", RegexOptions.Compiled), "😉"),
+
+            // Sad / Cry: :(, :-(, =(, =-(, :'(
+            (new Regex(@"(?:[:=]-?[\(\[]|:'-?\()", RegexOptions.Compiled), "😢"),
+
+            // Tongue: :P, :-P, :p, :-p, =P, =p
+            (new Regex(@"(?<!\d)(?:[:=]-?[pP])(?![a-zA-Z0-9])", RegexOptions.Compiled), "😛"),
+
+            // Neutral: :|, :-|, =|, =/
+            (new Regex(@"(?<![a-zA-Z0-9])(?:[:=]-?[/\\|])(?![a-zA-Z0-9])", RegexOptions.Compiled), "😐"),
+
+            // Sunglasses: B), 8)
+            (new Regex(@"(?<![a-zA-Z0-9])(?:[B8]-?\))(?![a-zA-Z0-9])", RegexOptions.Compiled), "😎")
         };
 
         public IReadOnlyList<ChatMessage> GetRecentMessages() {

@@ -1601,6 +1601,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         const timeStr = formatMessageTime(msg.timestamp);
         const senderColor = msg.color || (msg.isHost ? '#ef4444' : '#00d2ff');
+        const textWithEmojis = convertEmoticons(msg.text || '');
 
         msgDiv.innerHTML = `
             <div class="chat-msg-header">
@@ -1610,7 +1611,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 </div>
                 <span class="chat-msg-time">${timeStr}</span>
             </div>
-            <div class="chat-msg-text">${escapeHtml(msg.text || '')}</div>
+            <div class="chat-msg-text">${escapeHtml(textWithEmojis)}</div>
         `;
 
         chatMessagesList.appendChild(msgDiv);
@@ -1768,40 +1769,52 @@ document.addEventListener('DOMContentLoaded', function () {
     // Emoticon Auto-Conversion
     function convertEmoticons(text) {
         if (!text) return '';
-        const rules = [
-            // Shortcodes
-            { p: /:fire:/gi, r: '🔥' },
-            { p: /:(?:thumbsup|\+1):/gi, r: '👍' },
-            { p: /:(?:thumbsdown|-1):/gi, r: '👎' },
-            { p: /:(?:party|tada):/gi, r: '🎉' },
-            { p: /:(?:music|note):/gi, r: '🎵' },
-            { p: /:radio:/gi, r: '📻' },
-            { p: /:rocket:/gi, r: '🚀' },
-            { p: /:100:/gi, r: '💯' },
-            { p: /:skull:/gi, r: '💀' },
-            { p: /:star:/gi, r: '⭐' },
-            { p: /:eyes:/gi, r: '👀' },
-            { p: /:sparkles:/gi, r: '✨' },
-            { p: /:clap:/gi, r: '👏' },
-            { p: /:wave:/gi, r: '👋' },
-            { p: /:heart:/gi, r: '❤️' },
-
-            // Punctuation Emoticons (safely bounded)
-            { p: /(?<=^|\s)(?:<\/3)(?=$|\s|[.,!?])/g, r: '💔' },
-            { p: /(?<=^|\s)(?:<3)(?=$|\s|[.,!?])/g, r: '❤️' },
-            { p: /(?<=^|\s)(?:[:=]-?[oO])(?=$|\s|[.,!?])/g, r: '😮' },
-            { p: /(?<=^|\s)(?:[:=]-?D|x-?D|X-?D)(?=$|\s|[.,!?])/g, r: '😀' },
-            { p: /(?<=^|\s)(?:[:=]-?[\)\]])(?=$|\s|[.,!?])/g, r: '😊' },
-            { p: /(?<=^|\s)(?:;-?[\)\]])(?=$|\s|[.,!?])/g, r: '😉' },
-            { p: /(?<=^|\s)(?:[:=]-?[\(\[]|:'-?\()(?=$|\s|[.,!?])/g, r: '😢' },
-            { p: /(?<=^|\s)(?:[:=]-?[pP])(?=$|\s|[.,!?])/g, r: '😛' },
-            { p: /(?<=^|\s)(?:[:=]-?[/\\|])(?=$|\s|[.,!?])/g, r: '😐' },
-            { p: /(?<=^|\s)(?:[B8]-?\))(?=$|\s|[.,!?])/g, r: '😎' }
-        ];
         let res = text;
-        for (let i = 0; i < rules.length; i++) {
-            res = res.replace(rules[i].p, rules[i].r);
-        }
+        // Shortcodes
+        res = res.replace(/:fire:/gi, '🔥');
+        res = res.replace(/:(?:thumbsup|\+1):/gi, '👍');
+        res = res.replace(/:(?:thumbsdown|-1):/gi, '👎');
+        res = res.replace(/:(?:party|tada):/gi, '🎉');
+        res = res.replace(/:(?:music|note):/gi, '🎵');
+        res = res.replace(/:radio:/gi, '📻');
+        res = res.replace(/:rocket:/gi, '🚀');
+        res = res.replace(/:100:/gi, '💯');
+        res = res.replace(/:skull:/gi, '💀');
+        res = res.replace(/:star:/gi, '⭐');
+        res = res.replace(/:eyes:/gi, '👀');
+        res = res.replace(/:sparkles:/gi, '✨');
+        res = res.replace(/:clap:/gi, '👏');
+        res = res.replace(/:wave:/gi, '👋');
+        res = res.replace(/:heart:/gi, '❤️');
+
+        // Hearts: <3 and </3 (avoid digits like <300)
+        res = res.replace(/<\/3/g, '💔');
+        res = res.replace(/<3(?!\d)/g, '❤️');
+
+        // Surprised: :O, :o, :-O, :-o, =O, =o, :0
+        res = res.replace(/(?<!\d)(?:[:=]-?[oO0])(?![a-zA-Z0-9])/g, '😮');
+
+        // Laugh / Big grin: :D, :-D, =D, =-D, xD, XD
+        res = res.replace(/(?:(?<!\d)(?:[:=]-?D|=D)|(?<![a-zA-Z0-9])[xX]-?D)(?![a-zA-Z0-9])/g, '😀');
+
+        // Smile: :), :-), =), =-), :], =]
+        res = res.replace(/(?:[:=]-?[\)\]])/g, '😊');
+
+        // Wink: ;), ;-)
+        res = res.replace(/(?:;-?[\)\]])/g, '😉');
+
+        // Sad / Cry: :(, :-(, =(, =-(, :'(
+        res = res.replace(/(?:[:=]-?[\(\[]|:'-?\()/g, '😢');
+
+        // Tongue: :P, :-P, :p, :-p, =P, =p
+        res = res.replace(/(?<!\d)(?:[:=]-?[pP])(?![a-zA-Z0-9])/g, '😛');
+
+        // Neutral: :|, :-|, =|, =/
+        res = res.replace(/(?<![a-zA-Z0-9])(?:[:=]-?[/\\|])(?![a-zA-Z0-9])/g, '😐');
+
+        // Sunglasses: B), 8)
+        res = res.replace(/(?<![a-zA-Z0-9])(?:[B8]-?\))(?![a-zA-Z0-9])/g, '😎');
+
         return res;
     }
 
