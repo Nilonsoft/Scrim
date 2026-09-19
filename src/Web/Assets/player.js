@@ -455,6 +455,37 @@ document.addEventListener('DOMContentLoaded', function () {
     animateWaveform();
 
     // Live Stream Play / Stop Controls (Strictly for Web User)
+    let userExplicitlyStopped = false;
+    let autoplayUnlocked = false;
+
+    function unlockAutoplay() {
+        if (autoplayUnlocked) {
+            return;
+        }
+        autoplayUnlocked = true;
+        document.removeEventListener('pointerdown', unlockAutoplay, true);
+        document.removeEventListener('click', unlockAutoplay, true);
+        document.removeEventListener('keydown', unlockAutoplay, true);
+        document.removeEventListener('touchstart', unlockAutoplay, true);
+        if (!userExplicitlyStopped && !isPlaying && !isConnecting) {
+            startStream(false);
+        }
+    }
+
+    function checkAutoplay(isLive) {
+        if (!isLive || userExplicitlyStopped || isPlaying || isConnecting) {
+            return;
+        }
+        attemptAutoplay();
+    }
+
+    function attemptAutoplay() {
+        if (userExplicitlyStopped || isPlaying || isConnecting) {
+            return;
+        }
+        startStream(true);
+    }
+
     function stopStream() {
         isUserPlaying = false;
         isPlaying = false;
@@ -468,7 +499,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
-    function startStream() {
+    function startStream(isAutoplay) {
         isUserPlaying = true;
         isConnecting = true;
         updatePlayButtonUI();
@@ -479,7 +510,9 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         const subtitleEl = document.getElementById('showSubtitle');
-        if (subtitleEl) subtitleEl.textContent = "Connecting to live audio stream...";
+        if (subtitleEl) {
+            subtitleEl.textContent = "Connecting to live audio stream...";
+        }
 
         // Always load a fresh live connection with timestamp cache-buster so stream is real-time
         audio.src = '/stream?t=' + Date.now();
@@ -492,11 +525,29 @@ document.addEventListener('DOMContentLoaded', function () {
                     isPlaying = true;
                     isConnecting = false;
                     updatePlayButtonUI();
-                    if (subtitleEl) subtitleEl.textContent = defaultSubtitle;
+                    if (subtitleEl) {
+                        subtitleEl.textContent = defaultSubtitle;
+                    }
                 }
             }).catch(function (err) {
                 console.warn("Playback could not start:", err);
                 if (isUserPlaying) {
+                    if (err.name === 'NotAllowedError') {
+                        isUserPlaying = false;
+                        isPlaying = false;
+                        isConnecting = false;
+                        updatePlayButtonUI();
+                        audio.removeAttribute('src');
+                        if (subtitleEl) {
+                            subtitleEl.textContent = "Click anywhere to listen live";
+                        }
+                        document.addEventListener('pointerdown', unlockAutoplay, true);
+                        document.addEventListener('click', unlockAutoplay, true);
+                        document.addEventListener('keydown', unlockAutoplay, true);
+                        document.addEventListener('touchstart', unlockAutoplay, true);
+                        return;
+                    }
+
                     isUserPlaying = false;
                     isPlaying = false;
                     isConnecting = false;
@@ -513,11 +564,15 @@ document.addEventListener('DOMContentLoaded', function () {
     if (playBtn && audio) {
         playBtn.addEventListener('click', function () {
             if (isUserPlaying || isPlaying || isConnecting) {
+                userExplicitlyStopped = true;
                 stopStream();
                 const subtitleEl = document.getElementById('showSubtitle');
-                if (subtitleEl) subtitleEl.textContent = defaultSubtitle;
+                if (subtitleEl) {
+                    subtitleEl.textContent = defaultSubtitle;
+                }
             } else {
-                startStream();
+                userExplicitlyStopped = false;
+                startStream(false);
             }
         });
 
@@ -578,6 +633,14 @@ document.addEventListener('DOMContentLoaded', function () {
 
         if (branding.theme) {
             document.documentElement.setAttribute('data-theme', branding.theme);
+        }
+
+        if (branding.customThemeVariables && typeof branding.customThemeVariables === 'object') {
+            for (const [prop, val] of Object.entries(branding.customThemeVariables)) {
+                if (prop && val) {
+                    document.documentElement.style.setProperty(prop, val);
+                }
+            }
         }
 
         if (branding.pageTitle) {
@@ -722,6 +785,9 @@ document.addEventListener('DOMContentLoaded', function () {
             if (data) {
                 if (data.isLive !== undefined) {
                     updateLiveIndicator(data.isLive);
+                    if (data.isLive) {
+                        checkAutoplay(true);
+                    }
                 }
                 if (data.format !== undefined) {
                     updateStreamQuality(data.format, data.bitrate);
@@ -800,6 +866,8 @@ document.addEventListener('DOMContentLoaded', function () {
         })
         .catch(function (e) { console.warn("Could not fetch initial metadata", e); });
 
+    let lastTrackTitle = "";
+
     function updateTrackMetadata(title, artist, album, albumArtUrl, hasArt, duration, position, isPlaying) {
         const albumArt = document.getElementById('albumArt');
         const metaContainer = document.getElementById('metaContainer');
@@ -807,6 +875,10 @@ document.addEventListener('DOMContentLoaded', function () {
         const albumSub = document.getElementById('albumSub');
 
         const cleanTitle = (title || "").trim();
+        const trackChanged = (cleanTitle !== "" && cleanTitle !== lastTrackTitle);
+        if (cleanTitle !== "") {
+            lastTrackTitle = cleanTitle;
+        }
         const hasRealTrack = cleanTitle !== "" && 
             cleanTitle !== "Awaiting Audio Source..." && 
             cleanTitle !== "Awaiting Track Info..." && 
@@ -870,8 +942,28 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         if (position !== undefined && position !== null) {
             const parsedPos = parseFloat(position);
-            currentPositionSec = !isNaN(parsedPos) && parsedPos >= 0 ? parsedPos : 0;
-            lastPositionTimestamp = Date.now();
+            if (!isNaN(parsedPos) && parsedPos >= 0) {
+                if (trackChanged || lastPositionTimestamp === 0) {
+                    currentPositionSec = parsedPos;
+                    lastPositionTimestamp = Date.now();
+                } else {
+                    let estimatedCurrent = currentPositionSec;
+                    if (isTrackPlaying && lastPositionTimestamp > 0) {
+                        const elapsed = (Date.now() - lastPositionTimestamp) / 1000;
+                        estimatedCurrent = currentPositionSec + elapsed;
+                    }
+
+                    const diff = parsedPos - estimatedCurrent;
+                    if (Math.abs(diff) > 2.5 || diff > 0) {
+                        currentPositionSec = parsedPos;
+                        lastPositionTimestamp = Date.now();
+                    } else {
+                        // Smoothly advance without jumping backwards due to OS polling latency
+                        currentPositionSec = estimatedCurrent;
+                        lastPositionTimestamp = Date.now();
+                    }
+                }
+            }
         }
         if (isPlaying !== undefined && isPlaying !== null) {
             isTrackPlaying = !!isPlaying;
@@ -902,6 +994,9 @@ document.addEventListener('DOMContentLoaded', function () {
                     if (listenerCount) listenerCount.textContent = data.listeners || '1';
                     if (data.isLive !== undefined) {
                         updateLiveIndicator(data.isLive);
+                        if (data.isLive) {
+                            checkAutoplay(true);
+                        }
                     }
                     if (data.format !== undefined) {
                         updateStreamQuality(data.format, data.bitrate);

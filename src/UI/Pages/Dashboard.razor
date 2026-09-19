@@ -25,6 +25,7 @@
 @inject LocalAudioRoutingService LocalAudioRouting
 @inject INetworkDiscoveryService NetworkDiscovery
 @inject VirtualAudioDeviceService VirtualDeviceService
+@inject IThemeService ThemeService
 
 <!-- Top Header Bar -->
 <header class="scrim-topbar">
@@ -510,6 +511,10 @@
 
         IsLive = Hub.IsBroadcasting;
         Hub.BroadcastingStateChanged += OnHubBroadcastingStateChanged;
+
+        if (p.BroadcastOnOpen && !IsLive) {
+            StartBroadcast();
+        }
 
         Task.Run(async () => {
             await NetworkDiscovery.RefreshPublicIpAsync();
@@ -1069,6 +1074,14 @@
             ProfileManager.CurrentProfile.AccentColor = defaultAccent;
         }
         SaveBranding();
+    }
+
+    private void ToggleBroadcastOnOpen(ChangeEventArgs e) {
+        if (bool.TryParse(e.Value?.ToString(), out bool val)) {
+            ProfileManager.CurrentProfile.BroadcastOnOpen = val;
+            ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+            StateHasChanged();
+        }
     }
 
     private void AddNavLink() {
@@ -1785,6 +1798,15 @@
                         </button>
                     }
                 </div>
+
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 10px; padding-top: 8px; border-top: 1px dashed #232731;">
+                    <label class="scrim-label" style="margin: 0; cursor: pointer; font-size: 11px;" for="broadcastOnOpenChk">Broadcast on Open</label>
+                    <input type="checkbox" id="broadcastOnOpenChk" 
+                           checked="@ProfileManager.CurrentProfile.BroadcastOnOpen" 
+                           @onchange="ToggleBroadcastOnOpen" 
+                           style="cursor: pointer; width: 15px; height: 15px; accent-color: #00d2ff;" 
+                           title="Automatically start broadcasting when Scrim opens" />
+                </div>
             </div>
         </div>,
 
@@ -1941,26 +1963,22 @@
             </div>
 
             <div style="margin-bottom: 14px;">
-                <label class="scrim-label">Website Theme Preset</label>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <label class="scrim-label" style="margin: 0;">Website Theme</label>
+                    <div style="display: flex; gap: 6px;">
+                        <button class="scrim-btn-secondary" style="padding: 2px 8px; font-size: 11px;" @onclick="() => ThemeService.RefreshThemes()" title="Reload user themes from disk">⟳ Refresh</button>
+                        <button class="scrim-btn-secondary" style="padding: 2px 8px; font-size: 11px;" @onclick="() => ThemeService.OpenThemesDirectory()" title="Open ~/.scrim/themes/ in Explorer">📁 Open Themes Folder</button>
+                    </div>
+                </div>
                 <div style="display: flex; gap: 6px; flex-wrap: wrap;">
-                    <button class="pill-option @(ProfileManager.CurrentProfile.WebTheme == "dark" ? "active" : "")" 
-                            style="padding: 4px 10px; font-size: 11px;" 
-                            @onclick='@(() => SetWebTheme("dark", "#00d2ff"))'>🌙 Dark</button>
-                    <button class="pill-option @(ProfileManager.CurrentProfile.WebTheme == "goth" ? "active" : "")" 
-                            style="padding: 4px 10px; font-size: 11px;" 
-                            @onclick='@(() => SetWebTheme("goth", "#e11d48"))'>🦇 Goth</button>
-                    <button class="pill-option @(ProfileManager.CurrentProfile.WebTheme == "pink" ? "active" : "")" 
-                            style="padding: 4px 10px; font-size: 11px;" 
-                            @onclick='@(() => SetWebTheme("pink", "#ec4899"))'>💖 Pink</button>
-                    <button class="pill-option @(ProfileManager.CurrentProfile.WebTheme == "flowers" ? "active" : "")" 
-                            style="padding: 4px 10px; font-size: 11px;" 
-                            @onclick='@(() => SetWebTheme("flowers", "#10b981"))'>🌸 Flowers</button>
-                    <button class="pill-option @(ProfileManager.CurrentProfile.WebTheme == "light" ? "active" : "")" 
-                            style="padding: 4px 10px; font-size: 11px;" 
-                            @onclick='@(() => SetWebTheme("light", "#0284c7"))'>☀️ Light</button>
-                    <button class="pill-option @(ProfileManager.CurrentProfile.WebTheme == "rock" ? "active" : "")" 
-                            style="padding: 4px 10px; font-size: 11px;" 
-                            @onclick='@(() => SetWebTheme("rock", "#ea580c"))'>🎸 Rock & Roll</button>
+                    @foreach (var theme in ThemeService.GetAvailableThemes()) {
+                        <button class="pill-option @(ProfileManager.CurrentProfile.WebTheme == theme.Id ? "active" : "")" 
+                                style="padding: 4px 10px; font-size: 11px;" 
+                                title="@theme.Description"
+                                @onclick='@(() => SetWebTheme(theme.Id, theme.AccentColor))'>
+                            @(theme.Icon) @(theme.Name)@(theme.IsCustom ? " (User)" : "")
+                        </button>
+                    }
                 </div>
             </div>
 

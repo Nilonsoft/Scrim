@@ -77,6 +77,7 @@
 Comprehensive guides, specifications, and architecture documents are located in the [`docs/`](docs/) directory:
 
 - 📖 **[User & Feature Guide](docs/user-guide.md)**: Complete walkthrough of all 10 console cards, virtual audio, mic controls, and web player options.
+- 🎨 **[Web Player Themes & Custom Theme Guide](docs/web-themes.md)**: Guide to built-in themes (Dark, Goth, Pink, Flowers, Light, Rock & Roll) and creating user JSON themes in `~/.scrim/themes/`.
 - 🌐 **[Network & Outside Broadcasting Guide](docs/network-broadcasting.md)**: Details on local LAN sharing, UPnP port forwarding, custom domain overrides, and media player endpoints.
 - 📐 **[Project Specification & Architecture](docs/spec.md)**: Deep technical dive into the WASAPI loopback capture, mixing pipelines, and transcoding engine.
 - 🔌 **[Plugin Development Guide](docs/plugin-development.md)**: Instructions for developing custom voice effects and DSP processors via Lua, JSON, or C# DLLs.

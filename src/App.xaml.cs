@@ -20,6 +20,7 @@ namespace Scrim {
 
             // Configuration
             services.AddSingleton<IProfileManager, ProfileManager>();
+            services.AddSingleton<IThemeService, ThemeService>();
 
             // Audio & Encoding
             services.AddSingleton<VoiceEffectLoader>();

@@ -17,16 +17,27 @@ namespace Scrim.Server {
         private readonly SongRequestController _requestController;
         private readonly IProfileManager _profileManager;
         private readonly INetworkDiscoveryService _networkDiscovery;
+        private readonly IThemeService _themeService;
         private HttpListener? _listener;
         private TcpListener? _bridgeListener;
         private CancellationTokenSource? _cts;
 
-        public HttpStreamServer(BroadcastHub hub, IMetadataService metadataService, SongRequestController requestController, IProfileManager profileManager, INetworkDiscoveryService networkDiscovery) {
+        public HttpStreamServer(BroadcastHub hub, IMetadataService metadataService, SongRequestController requestController, IProfileManager profileManager, INetworkDiscoveryService networkDiscovery, IThemeService? themeService = null) {
             _hub = hub;
             _metadataService = metadataService;
             _requestController = requestController;
             _profileManager = profileManager;
             _networkDiscovery = networkDiscovery;
+            _themeService = themeService ?? new ThemeService();
+        }
+
+        private string GetCustomThemeJson(string themeId) {
+            var themeDef = _themeService.GetTheme(themeId);
+            if (themeDef != null && themeDef.IsCustom) {
+                var resolved = themeDef.GetResolvedCssVariables();
+                return "{" + string.Join(",", resolved.Select(kvp => $"\"{EscapeJson(kvp.Key)}\":\"{EscapeJson(kvp.Value)}\"")) + "}";
+            }
+            return "{}";
         }
 
         private static int FindAvailablePort(int startingPort) {
@@ -420,7 +431,8 @@ namespace Scrim.Server {
                     await writer.WriteAsync($"data: {queueJson}\n\n");
 
                     var navLinksArray = string.Join(",", profile.CustomNavLinks.Select(l => $"{{\"label\":\"{EscapeJson(l.Label)}\",\"url\":\"{EscapeJson(l.Url)}\"}}"));
-                    string brandingJson = $"{{\"type\":\"branding\",\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(profile.WebTheme ?? "dark")}\",\"logoUrl\":\"{EscapeJson(profile.LogoUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}]}}";
+                    string customThemeJson = GetCustomThemeJson(profile.WebTheme ?? "dark");
+                    string brandingJson = $"{{\"type\":\"branding\",\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(profile.WebTheme ?? "dark")}\",\"customThemeVariables\":{customThemeJson},\"logoUrl\":\"{EscapeJson(profile.LogoUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}]}}";
                     await writer.WriteAsync($"data: {brandingJson}\n\n");
 
                     await writer.FlushAsync();
@@ -435,7 +447,8 @@ namespace Scrim.Server {
             try {
                 var profile = _profileManager.CurrentProfile;
                 var navLinksArray = string.Join(",", profile.CustomNavLinks.Select(l => $"{{\"label\":\"{EscapeJson(l.Label)}\",\"url\":\"{EscapeJson(l.Url)}\"}}"));
-                string json = $"{{\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(profile.WebTheme ?? "dark")}\",\"logoUrl\":\"{EscapeJson(profile.LogoUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}]}}";
+                string customThemeJson = GetCustomThemeJson(profile.WebTheme ?? "dark");
+                string json = $"{{\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(profile.WebTheme ?? "dark")}\",\"customThemeVariables\":{customThemeJson},\"logoUrl\":\"{EscapeJson(profile.LogoUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}]}}";
                 byte[] buffer = System.Text.Encoding.UTF8.GetBytes(json);
                 context.Response.ContentType = "application/json";
                 context.Response.Headers.Add("Access-Control-Allow-Origin", "*");

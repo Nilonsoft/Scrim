@@ -61,6 +61,7 @@ Traditional broadcasting software requires configuring complex third-party audio
 - **`🔴 ON AIR`**: Main broadcast toggle located in the top navigation bar. Pulsing red indicates your station is live.
 - **`🟢 TX (Transmitter Active)`**: Visual transmission indicator showing that audio frames are actively encoding and transmitting over the network.
 - **`START / STOP BROADCAST`**: Located in the Encoding & Broadcast card. All broadcast triggers stay 100% synchronized in real time.
+- **`Broadcast on Open`**: Toggle checkbox located in the Encoding & Broadcast card. When enabled, Scrim automatically initiates broadcasting as soon as the desktop application opens, ideal for automated station setups.
 
 ### Calibrated Dual Stereo & Microphone Audio Meters
 - **Stereo Master Peak Meters (L & R)**: High-frequency analog-style response bars displaying broadcast master levels in decibels (`-40 dB` to `0.0 dB`).
@@ -152,6 +153,10 @@ Listeners can switch between 4 live sound reaction modes using the visualizer st
 2. **Dynamic Waveform**: Flowing oscillographic wave reacting in real time to audio peaks.
 3. **Glowing Retro VU Meter**: Twin analog meters with physical needle ballistics.
 4. **Pulsing Sound Bars**: Modern jumping sound columns with peak-hold decay caps.
+
+### Instant Autoplay on Load
+- When a listener browses to the web player while your station is live, the web player immediately initiates audio playback and visualizers.
+- If a browser enforces strict media autoplay restrictions prior to user gesture, the player prompts with *"Click anywhere to listen live"* and unlocks instantly on the listener's first tap or click anywhere on the page.
 
 ---
 

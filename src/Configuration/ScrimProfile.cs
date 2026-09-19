@@ -15,6 +15,7 @@ namespace Scrim.Configuration {
         public bool EnableNetworkAccess { get; set; } = true;
         public bool EnableUpnpPortForwarding { get; set; } = true;
         public CloseToTrayMode CloseMode { get; set; } = CloseToTrayMode.MinimizeToTray;
+        public bool BroadcastOnOpen { get; set; } = false;
         public bool MuteAppLocally { get; set; } = false;
         public int AppStreamVolume { get; set; } = 100;
         public string CaptureDeviceId { get; set; } = "";
