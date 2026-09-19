@@ -287,6 +287,7 @@ namespace Scrim.Tests {
                 Assert.Equal(HttpStatusCode.OK, m3uRes.StatusCode);
                 var m3uText = await m3uRes.Content.ReadAsStringAsync();
                 Assert.Contains("/radio", m3uText);
+                Assert.Contains($"http://localhost:{testPort}/radio", m3uText);
 
                 // 3. Audio stream connects on custom path /radio
                 using var customStreamRes = await client.GetAsync($"http://localhost:{testPort}/radio", HttpCompletionOption.ResponseHeadersRead);

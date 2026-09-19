@@ -2201,14 +2201,47 @@ document.addEventListener('DOMContentLoaded', function () {
     const directStreamM3uLink = document.getElementById('directStreamM3uLink');
     const directStreamMetaNote = document.getElementById('directStreamMetaNote');
 
+    const sidebarStreamUrlInput = document.getElementById('sidebarStreamUrlInput');
+    const sidebarStreamCopyBtn = document.getElementById('sidebarStreamCopyBtn');
+    const sidebarStreamCopyBtnText = document.getElementById('sidebarStreamCopyBtnText');
+    const sidebarOpenGuideBtn = document.getElementById('sidebarOpenGuideBtn');
+    const sidebarM3uLink = document.getElementById('sidebarM3uLink');
+
     function getAbsoluteStreamUrl() {
         const mount = currentStreamEndpoint ? (currentStreamEndpoint.startsWith('/') ? currentStreamEndpoint : ('/' + currentStreamEndpoint)) : '/stream';
-        return window.location.origin + mount;
+        const loc = window.location;
+        const origin = loc.origin || (loc.protocol + '//' + loc.host);
+        let pathname = loc.pathname || '';
+        if (pathname.endsWith('/index.html')) {
+            pathname = pathname.slice(0, -11);
+        } else if (pathname.endsWith('/')) {
+            pathname = pathname.slice(0, -1);
+        }
+        if (!pathname || pathname === '/') {
+            return origin + mount;
+        }
+        return origin + pathname + mount;
     }
 
-    function openDirectStreamModal() {
-        if (!directStreamModal) return;
+    function getAbsoluteM3uUrl() {
+        const loc = window.location;
+        const origin = loc.origin || (loc.protocol + '//' + loc.host);
+        let pathname = loc.pathname || '';
+        if (pathname.endsWith('/index.html')) {
+            pathname = pathname.slice(0, -11);
+        } else if (pathname.endsWith('/')) {
+            pathname = pathname.slice(0, -1);
+        }
+        if (!pathname || pathname === '/') {
+            return origin + '/listen.m3u';
+        }
+        return origin + pathname + '/listen.m3u';
+    }
+
+    function updateAllDirectStreamUrls() {
         const absUrl = getAbsoluteStreamUrl();
+        const m3uUrl = getAbsoluteM3uUrl();
+
         if (directStreamUrlInput) {
             directStreamUrlInput.value = absUrl;
         }
@@ -2216,13 +2249,57 @@ document.addEventListener('DOMContentLoaded', function () {
             directStreamOpenTabLink.href = absUrl;
         }
         if (directStreamM3uLink) {
-            directStreamM3uLink.href = '/listen.m3u';
+            directStreamM3uLink.href = m3uUrl;
+        }
+        if (sidebarStreamUrlInput) {
+            sidebarStreamUrlInput.value = absUrl;
+        }
+        if (sidebarM3uLink) {
+            sidebarM3uLink.href = m3uUrl;
         }
         if (directStreamMetaNote) {
             const fmt = (streamFormat && streamFormat.textContent) ? streamFormat.textContent : 'MP3';
             const br = (streamBitrate && streamBitrate.textContent) ? streamBitrate.textContent : '128 kbps';
             directStreamMetaNote.textContent = `Broadcast: ${fmt} • ${br} • Real-time low-latency stream`;
         }
+    }
+
+    function copyTextToClipboard(text, btnEl, textEl, originalLabel) {
+        function onCopied() {
+            if (btnEl) btnEl.classList.add('copied');
+            if (textEl) textEl.textContent = 'Copied! ✓';
+            setTimeout(function () {
+                if (btnEl) btnEl.classList.remove('copied');
+                if (textEl) textEl.textContent = originalLabel;
+            }, 2200);
+        }
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(onCopied).catch(fallback);
+        } else {
+            fallback();
+        }
+
+        function fallback() {
+            try {
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                const success = document.execCommand('copy');
+                document.body.removeChild(ta);
+                if (success) onCopied();
+            } catch (e) {
+                console.warn('[Copy] Failed to copy:', e);
+            }
+        }
+    }
+
+    function openDirectStreamModal() {
+        if (!directStreamModal) return;
+        updateAllDirectStreamUrls();
         directStreamModal.style.display = 'flex';
         setTimeout(function () {
             if (directStreamUrlInput) {
@@ -2240,6 +2317,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
     window.openDirectStreamModal = openDirectStreamModal;
     window.closeDirectStreamModal = closeDirectStreamModal;
+    window.getAbsoluteStreamUrl = getAbsoluteStreamUrl;
+    window.updateAllDirectStreamUrls = updateAllDirectStreamUrls;
 
     if (directStreamBtn) {
         directStreamBtn.addEventListener('click', openDirectStreamModal);
@@ -2253,6 +2332,10 @@ document.addEventListener('DOMContentLoaded', function () {
     if (directStreamDoneBtn) {
         directStreamDoneBtn.addEventListener('click', closeDirectStreamModal);
     }
+    if (sidebarOpenGuideBtn) {
+        sidebarOpenGuideBtn.addEventListener('click', openDirectStreamModal);
+    }
+
     if (directStreamModal) {
         directStreamModal.addEventListener('click', function (e) {
             if (e.target === directStreamModal) {
@@ -2266,39 +2349,23 @@ document.addEventListener('DOMContentLoaded', function () {
             this.select();
         });
     }
+    if (sidebarStreamUrlInput) {
+        sidebarStreamUrlInput.addEventListener('click', function () {
+            this.select();
+        });
+    }
 
     if (directStreamCopyBtn && directStreamUrlInput) {
         directStreamCopyBtn.addEventListener('click', function () {
             const urlToCopy = directStreamUrlInput.value || getAbsoluteStreamUrl();
+            copyTextToClipboard(urlToCopy, directStreamCopyBtn, directStreamCopyBtnText, 'Copy URL');
+        });
+    }
 
-            function onCopied() {
-                directStreamCopyBtn.classList.add('copied');
-                if (directStreamCopyBtnText) {
-                    directStreamCopyBtnText.textContent = 'Copied! ✓';
-                }
-                setTimeout(function () {
-                    directStreamCopyBtn.classList.remove('copied');
-                    if (directStreamCopyBtnText) {
-                        directStreamCopyBtnText.textContent = 'Copy URL';
-                    }
-                }, 2200);
-            }
-
-            function fallbackCopy() {
-                try {
-                    directStreamUrlInput.select();
-                    const success = document.execCommand('copy');
-                    if (success) onCopied();
-                } catch (e) {
-                    console.warn('[Direct Stream] Copy failed:', e);
-                }
-            }
-
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(urlToCopy).then(onCopied).catch(fallbackCopy);
-            } else {
-                fallbackCopy();
-            }
+    if (sidebarStreamCopyBtn && sidebarStreamUrlInput) {
+        sidebarStreamCopyBtn.addEventListener('click', function () {
+            const urlToCopy = sidebarStreamUrlInput.value || getAbsoluteStreamUrl();
+            copyTextToClipboard(urlToCopy, sidebarStreamCopyBtn, sidebarStreamCopyBtnText, 'Copy');
         });
     }
 
@@ -2307,6 +2374,9 @@ document.addEventListener('DOMContentLoaded', function () {
             closeDirectStreamModal();
         }
     });
+
+    // Populate all direct stream URL fields immediately on page load based on the current browser URL
+    updateAllDirectStreamUrls();
 
     // Progressive Web App (PWA) Support
     if ('serviceWorker' in navigator) {

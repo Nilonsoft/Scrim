@@ -463,11 +463,19 @@ namespace Scrim.Server {
                     portStr = profile.UseReverseProxy ? "" : $":{customPort}";
                     return c.Substring(0, colon);
                 }
+                portStr = profile.UseReverseProxy ? "" : $":{profile.Port}";
                 return c;
             }
 
-            string rawHost = context.Request.Headers["X-Forwarded-Host"] ?? context.Request.Url?.Host ?? "localhost";
-            return rawHost.Contains(':') ? rawHost.Split(':')[0] : rawHost;
+            string rawHost = context.Request.Headers["X-Forwarded-Host"] ?? context.Request.Headers["Host"] ?? context.Request.Url?.Host ?? "localhost";
+            rawHost = rawHost.Trim();
+            if (rawHost.Contains(':')) {
+                var parts = rawHost.Split(':');
+                portStr = (profile.UseReverseProxy || parts[1] == "80" || parts[1] == "443") ? "" : $":{parts[1]}";
+                return parts[0];
+            } else {
+                return rawHost;
+            }
         }
 
         private void HandleM3uRequest(HttpListenerContext context) {

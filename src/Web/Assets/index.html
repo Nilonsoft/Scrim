@@ -242,8 +242,35 @@
             <audio id="audioElement" preload="none" crossorigin="anonymous"></audio>
         </section>
 
-        <!-- RIGHT: Live Queue & Song Request Cards -->
+        <!-- RIGHT: Live Queue, Requests, Chat & Direct Stream Cards -->
         <aside class="sidebar-cards">
+            <!-- DIRECT AUDIO STREAM (VLC, Games, Bots) -->
+            <div class="sidebar-card direct-stream-sidebar-card" id="directStreamSidebarCard">
+                <div class="direct-stream-side-header">
+                    <h3 class="sidebar-title" style="margin-bottom: 0;">DIRECT AUDIO STREAM</h3>
+                    <span class="direct-stream-side-pill">VLC • GAMES</span>
+                </div>
+                <p class="direct-stream-side-desc">Direct stream feed for external media players & games:</p>
+                <div class="direct-stream-side-input-wrap">
+                    <input type="text" class="direct-stream-side-input" id="sidebarStreamUrlInput" readonly spellcheck="false" placeholder="Loading stream URL..." />
+                    <button type="button" class="direct-stream-side-copy-btn" id="sidebarStreamCopyBtn" title="Copy direct stream URL">
+                        <svg class="side-copy-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                        </svg>
+                        <span id="sidebarStreamCopyBtnText">Copy</span>
+                    </button>
+                </div>
+                <div class="direct-stream-side-actions">
+                    <button type="button" class="direct-stream-side-guide-btn" id="sidebarOpenGuideBtn">
+                        ℹ️ Setup Guide
+                    </button>
+                    <a href="/listen.m3u" class="direct-stream-side-m3u-btn" id="sidebarM3uLink" download="scrim_live.m3u" title="Download .m3u playlist for VLC/Winamp">
+                        📥 .M3U Playlist
+                    </a>
+                </div>
+            </div>
+
             <!-- UPCOMING: LIVE QUEUE -->
             <div class="sidebar-card">
                 <h3 class="sidebar-title">UPCOMING: LIVE QUEUE</h3>
