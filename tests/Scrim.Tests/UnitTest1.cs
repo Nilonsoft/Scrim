@@ -64,8 +64,38 @@ namespace Scrim.Tests {
                 var optionsResponse = await client.SendAsync(request);
                 Assert.True(optionsResponse.IsSuccessStatusCode);
                 Assert.True(optionsResponse.Headers.Contains("Access-Control-Allow-Origin"));
+
+                // Test PWA manifest endpoint
+                var manifestResponse = await client.GetAsync($"http://localhost:{testPort}/manifest.webmanifest");
+                Assert.True(manifestResponse.IsSuccessStatusCode);
+                Assert.Contains("application/manifest+json", manifestResponse.Content.Headers.ContentType?.ToString() ?? "");
+
+                // Test PWA service worker endpoint
+                var swResponse = await client.GetAsync($"http://localhost:{testPort}/sw.js");
+                Assert.True(swResponse.IsSuccessStatusCode);
+                Assert.True(swResponse.Headers.Contains("Service-Worker-Allowed"));
             } finally {
                 server.Stop();
+            }
+        }
+
+        [Fact]
+        public void ThemeService_InitializesAllBuiltInThemes() {
+            var themeService = new ThemeService();
+            var themes = themeService.GetAvailableThemes();
+
+            Assert.True(themes.Count >= 11);
+            string[] expectedThemeIds = new[] {
+                "dark", "goth", "pink", "flowers", "light", "rock",
+                "synthwave", "cyberpunk", "space", "lofi", "ocean"
+            };
+
+            foreach (var id in expectedThemeIds) {
+                var theme = themeService.GetTheme(id);
+                Assert.NotNull(theme);
+                Assert.False(string.IsNullOrWhiteSpace(theme.Name));
+                Assert.False(string.IsNullOrWhiteSpace(theme.Icon));
+                Assert.False(string.IsNullOrWhiteSpace(theme.AccentColor));
             }
         }
     }

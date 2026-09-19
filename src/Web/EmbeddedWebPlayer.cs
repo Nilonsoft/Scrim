@@ -66,14 +66,22 @@ namespace Scrim.Web {
             if (data != null) {
                 string ext = Path.GetExtension(relativePath).ToLower();
                 response.ContentType = ext switch {
-                    ".html" => "text/html",
-                    ".css" => "text/css",
-                    ".js" => "application/javascript",
+                    ".html" => "text/html; charset=utf-8",
+                    ".css" => "text/css; charset=utf-8",
+                    ".js" => "application/javascript; charset=utf-8",
+                    ".webmanifest" => "application/manifest+json; charset=utf-8",
+                    ".json" => "application/json; charset=utf-8",
                     ".png" => "image/png",
                     ".jpg" or ".jpeg" => "image/jpeg",
                     ".svg" => "image/svg+xml",
+                    ".ico" => "image/x-icon",
                     _ => "text/plain"
                 };
+
+                response.Headers.Add("Access-Control-Allow-Origin", "*");
+                if (relativePath.Equals("sw.js", StringComparison.OrdinalIgnoreCase)) {
+                    response.Headers.Add("Service-Worker-Allowed", "/");
+                }
 
                 response.ContentLength64 = data.Length;
                 response.OutputStream.Write(data, 0, data.Length);

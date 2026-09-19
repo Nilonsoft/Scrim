@@ -9,6 +9,7 @@
         xmlns:tb="http://www.hardcodet.net/taskbar"
         mc:Ignorable="d"
         Title="Scrim Console" Height="800" Width="1200"
+        Icon="app.ico"
         Background="#121212"
         StateChanged="Window_StateChanged"
         Closing="Window_Closing">
@@ -21,6 +22,7 @@
 
         <tb:TaskbarIcon x:Name="TrayIcon"
                         ToolTipText="Scrim Console"
+                        IconSource="app.ico"
                         TrayMouseDoubleClick="TrayIcon_TrayMouseDoubleClick">
             <tb:TaskbarIcon.ContextMenu>
                 <ContextMenu>

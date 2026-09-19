@@ -9,6 +9,10 @@ document.addEventListener('DOMContentLoaded', function () {
     const volumeBtn = document.getElementById('volumeBtn');
     const volOnIcon = volumeBtn ? volumeBtn.querySelector('.icon-vol-on') : null;
     const volMuteIcon = volumeBtn ? volumeBtn.querySelector('.icon-vol-mute') : null;
+    const topSpeakerBtn = document.getElementById('topSpeakerBtn');
+    const topVolOnIcon = topSpeakerBtn ? topSpeakerBtn.querySelector('.icon-top-vol-on') : null;
+    const topVolMuteIcon = topSpeakerBtn ? topSpeakerBtn.querySelector('.icon-top-vol-mute') : null;
+    const pwaInstallBtn = document.getElementById('pwaInstallBtn');
     const trackTitle = document.getElementById('trackTitle');
     const trackArtist = document.getElementById('trackArtist');
     const bottomTrackName = document.getElementById('bottomTrackName');
@@ -26,6 +30,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function updatePlayButtonUI() {
         if (!playBtn) return;
+        if (topSpeakerBtn) {
+            if (isPlaying) {
+                topSpeakerBtn.classList.add('playing');
+            } else {
+                topSpeakerBtn.classList.remove('playing');
+            }
+        }
         if (isPlaying) {
             if (playIcon) playIcon.style.display = 'none';
             if (pauseIcon) pauseIcon.style.display = 'block';
@@ -146,6 +157,19 @@ document.addEventListener('DOMContentLoaded', function () {
         const isMuted = currentVolume <= 0.001;
         if (volOnIcon) volOnIcon.style.display = isMuted ? 'none' : 'block';
         if (volMuteIcon) volMuteIcon.style.display = isMuted ? 'block' : 'none';
+
+        if (topVolOnIcon) topVolOnIcon.style.display = isMuted ? 'none' : 'block';
+        if (topVolMuteIcon) topVolMuteIcon.style.display = isMuted ? 'block' : 'none';
+
+        if (topSpeakerBtn) {
+            if (isMuted) {
+                topSpeakerBtn.classList.add('muted');
+                topSpeakerBtn.title = "Unmute Audio (M)";
+            } else {
+                topSpeakerBtn.classList.remove('muted');
+                topSpeakerBtn.title = "Mute Audio (M)";
+            }
+        }
     }
 
     if (volumeSlider) {
@@ -167,6 +191,32 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         });
     }
+
+    if (topSpeakerBtn) {
+        topSpeakerBtn.addEventListener('click', function () {
+            if (currentVolume > 0.001) {
+                lastUnmutedVolume = currentVolume;
+                setVolume(0);
+            } else {
+                setVolume(lastUnmutedVolume || 0.85);
+            }
+        });
+    }
+
+    // Keyboard shortcut 'M' to quickly mute/unmute audio from anywhere on the page
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'm' || e.key === 'M') {
+            if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+                return;
+            }
+            if (currentVolume > 0.001) {
+                lastUnmutedVolume = currentVolume;
+                setVolume(0);
+            } else {
+                setVolume(lastUnmutedVolume || 0.85);
+            }
+        }
+    });
 
     updateVolumeUI();
 
@@ -1059,4 +1109,47 @@ document.addEventListener('DOMContentLoaded', function () {
             queueList.appendChild(li);
         });
     }
+
+    // Progressive Web App (PWA) Support
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function () {
+            navigator.serviceWorker.register('/sw.js').then(function (reg) {
+                console.log('[PWA] ServiceWorker registered with scope:', reg.scope);
+            }).catch(function (err) {
+                console.warn('[PWA] ServiceWorker registration:', err);
+            });
+        });
+    }
+
+    let deferredPrompt = null;
+    window.addEventListener('beforeinstallprompt', function (e) {
+        e.preventDefault();
+        deferredPrompt = e;
+        if (pwaInstallBtn) {
+            pwaInstallBtn.style.display = 'inline-flex';
+        }
+    });
+
+    if (pwaInstallBtn) {
+        pwaInstallBtn.addEventListener('click', function () {
+            if (!deferredPrompt) {
+                return;
+            }
+            deferredPrompt.prompt();
+            deferredPrompt.userChoice.then(function (choiceResult) {
+                if (choiceResult.outcome === 'accepted') {
+                    console.log('[PWA] User accepted installation');
+                }
+                deferredPrompt = null;
+                pwaInstallBtn.style.display = 'none';
+            });
+        });
+    }
+
+    window.addEventListener('appinstalled', function () {
+        console.log('[PWA] App installed successfully');
+        if (pwaInstallBtn) {
+            pwaInstallBtn.style.display = 'none';
+        }
+    });
 });

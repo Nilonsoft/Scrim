@@ -17,16 +17,21 @@ Scrim features a powerful, dynamic theming engine for the live broadcast web pla
 
 ## Built-In Themes
 
-Scrim includes 6 professionally curated broadcast themes out of the box:
+Scrim includes 11 professionally curated broadcast themes out of the box with custom background artwork and ambient gradient patterns:
 
 | Theme | Key | Icon | Description |
 | :--- | :---: | :---: | :--- |
-| **Dark Studio** | `dark` | 🌙 | Modern obsidian carbon broadcast studio with electric cyan accents. |
-| **Goth** | `goth` | 🦇 | Pitch-black void (`#050608`), blood crimson accents (`#e11d48`), and silver borders. |
-| **Pink** | `pink` | 💖 | Cyber bubblegum neon magenta (`#130a17`), hot pink glows (`#ec4899`), and purple tones. |
-| **Flowers** | `flowers` | 🌸 | Serene botanical night aesthetic (`#09130e`), emerald foliage, and blossom highlights. |
-| **Light** | `light` | ☀️ | Crisp daytime broadcast studio (`#f8fafc`), clean white cards, dark typography (`#0f172a`). |
-| **Rock & Roll** | `rock` | 🎸 | Vintage amplifier aesthetic (`#120d09`), high-voltage flame orange (`#ea580c`), and amber gold. |
+| **Dark Studio** | `dark` | 🌙 | Modern obsidian carbon broadcast studio with electric cyan accents and studio spotlight aura. |
+| **Goth** | `goth` | 🦇 | Pitch-black void (`#050608`), blood crimson accents (`#e11d48`), cathedral vignette shadows, and silver borders. |
+| **Pink** | `pink` | 💖 | Cyber bubblegum neon magenta (`#130a17`), hot pink glows (`#ec4899`), and dual atmospheric gradients. |
+| **Flowers** | `flowers` | 🌸 | Serene botanical night aesthetic (`#09130e`), emerald foliage, and blossom gold dust highlights. |
+| **Light** | `light` | ☀️ | Crisp daytime broadcast studio (`#f8fafc`), clean white cards, dark typography (`#0f172a`), and sky blue light. |
+| **Rock & Roll** | `rock` | 🎸 | Vintage amplifier aesthetic (`#120d09`), high-voltage flame orange (`#ea580c`), and incandescent amber flare. |
+| **Synthwave 80s** | `synthwave` | 🌆 | Retro-futuristic neon magenta and cyan grid with twilight sunset glow. |
+| **Cyberpunk** | `cyberpunk` | ⚡ | High-voltage neon yellow, toxic cyan, and high-tech circuit hex matrix grid. |
+| **Midnight Nebula** | `space` | 🌌 | Deep cosmic void with starlight particles and glowing violet nebula dust clouds. |
+| **Lo-Fi Cafe** | `lofi` | ☕ | Warm cozy coffee house amber, vintage vinyl micro-groove texture, and lantern glow. |
+| **Ocean Deep** | `ocean` | 🌊 | Abyssal navy depths with bioluminescent marine mint and aqua shimmer caustics. |
 
 ---
 

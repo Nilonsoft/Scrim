@@ -84,6 +84,51 @@ namespace Scrim.Configuration {
                 AccentColor = "#ea580c",
                 IsCustom = false
             });
+
+            _builtInThemes.Add(new WebThemeDefinition {
+                Id = "synthwave",
+                Name = "Synthwave 80s",
+                Icon = "🌆",
+                Description = "Retro-futuristic neon magenta and cyan grid with twilight sunset glow",
+                AccentColor = "#f43f5e",
+                IsCustom = false
+            });
+
+            _builtInThemes.Add(new WebThemeDefinition {
+                Id = "cyberpunk",
+                Name = "Cyberpunk",
+                Icon = "⚡",
+                Description = "High-voltage neon yellow, toxic cyan, and high-tech circuit hex grid",
+                AccentColor = "#facc15",
+                IsCustom = false
+            });
+
+            _builtInThemes.Add(new WebThemeDefinition {
+                Id = "space",
+                Name = "Midnight Nebula",
+                Icon = "🌌",
+                Description = "Deep cosmic void with starlight particles and glowing violet nebula dust",
+                AccentColor = "#8b5cf6",
+                IsCustom = false
+            });
+
+            _builtInThemes.Add(new WebThemeDefinition {
+                Id = "lofi",
+                Name = "Lo-Fi Cafe",
+                Icon = "☕",
+                Description = "Warm cozy coffee house amber, vintage vinyl texture, and lantern glow",
+                AccentColor = "#f97316",
+                IsCustom = false
+            });
+
+            _builtInThemes.Add(new WebThemeDefinition {
+                Id = "ocean",
+                Name = "Ocean Deep",
+                Icon = "🌊",
+                Description = "Abyssal navy depths with bioluminescent marine mint and aqua shimmer",
+                AccentColor = "#06b6d4",
+                IsCustom = false
+            });
         }
 
         private void EnsureThemesDirectoryAndExample() {

@@ -158,6 +158,15 @@ Listeners can switch between 4 live sound reaction modes using the visualizer st
 - When a listener browses to the web player while your station is live, the web player immediately initiates audio playback and visualizers.
 - If a browser enforces strict media autoplay restrictions prior to user gesture, the player prompts with *"Click anywhere to listen live"* and unlocks instantly on the listener's first tap or click anywhere on the page.
 
+### Quick Audio Mute & Header Speaker Control
+- **Top Speaker Button**: Located next to the format badge in the player card header. Clicking toggles mute/unmute instantly without losing your volume slider position.
+- **Keyboard Shortcut**: Press **`M`** anywhere on the page to quickly mute or unmute audio playback.
+- **Synchronized UI**: The top speaker button, bottom volume button, and slider all stay synchronized in real time.
+
+### Progressive Web App (PWA) Installation
+- **Install as Desktop or Mobile App**: Click the **`[ Install App ]`** button in the web player header to install Scrim as a standalone desktop application (Chrome, Edge) or add it to your mobile home screen (Android, iOS).
+- **Service Worker Shell**: Automatically caches web player styling, scripts, and branding assets for instant startup while keeping live audio streaming and metadata events 100% real-time.
+
 ---
 
 ## 8. Interactive Song Requests Queue
