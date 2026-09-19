@@ -8,6 +8,10 @@
     --text-bright: #ffffff;
     --text-muted: #8c93a4;
     --text-dim: #5c6374;
+    --accent-color: #ef4444;
+    --accent-contrast: #ffffff;
+    --accent-glow: 0 0 20px rgba(239, 68, 68, 0.55);
+    --accent-glow-subtle: 0 2px 8px rgba(239, 68, 68, 0.3);
     --on-air-red: #ef4444;
     --on-air-glow: 0 0 20px rgba(239, 68, 68, 0.55);
     --amber-pill-bg: #29170e;
@@ -61,15 +65,15 @@ body {
     display: inline-flex;
     align-items: center;
     gap: 7px;
-    background: #ef4444;
-    color: #ffffff;
+    background: var(--on-air-red, var(--accent-color, #ef4444));
+    color: var(--accent-contrast, #ffffff);
     border-radius: 20px;
     padding: 5px 14px;
     font-size: 12px;
     font-weight: 700;
     letter-spacing: 1px;
-    box-shadow: var(--on-air-glow);
-    transition: background 0.3s ease, box-shadow 0.3s ease;
+    box-shadow: var(--on-air-glow, var(--accent-glow));
+    transition: background 0.3s ease, box-shadow 0.3s ease, color 0.3s ease;
 }
 
 .on-air-pill.offline {
@@ -290,14 +294,14 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #00d2ff;
+    color: var(--accent-color, #00d2ff);
     z-index: 3;
     animation: iconBreath 2s ease-in-out infinite;
 }
 
 @keyframes iconBreath {
-    0%, 100% { transform: scale(1); color: #00d2ff; }
-    50% { transform: scale(1.1); color: #ef4444; }
+    0%, 100% { transform: scale(1); color: var(--accent-color, #00d2ff); }
+    50% { transform: scale(1.1); color: #ffffff; }
 }
 
 .loader-text {
@@ -374,8 +378,8 @@ body {
 
 .genre-tag {
     font-size: 13px;
-    color: var(--text-muted);
-    font-weight: 500;
+    color: var(--accent-color, var(--text-muted));
+    font-weight: 600;
 }
 
 .top-action-icons {
@@ -472,9 +476,9 @@ body {
 
 .vis-mode-btn.active {
     background: var(--accent-color, #00d2ff);
-    color: #0b0d14;
+    color: var(--accent-contrast, #0b0d14);
     font-weight: 700;
-    box-shadow: 0 2px 8px rgba(0, 210, 255, 0.3);
+    box-shadow: var(--accent-glow-subtle, 0 2px 8px rgba(0, 210, 255, 0.3));
 }
 
 .waveform-container {
@@ -503,38 +507,58 @@ body {
 
 .scrub-track {
     width: 100%;
-    height: 4px;
-    background: #252832;
-    border-radius: 2px;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 3px;
     position: relative;
-    cursor: pointer;
+    cursor: default;
+    overflow: visible;
+    transition: height 0.15s ease, background-color 0.15s ease;
+}
+
+.scrub-track:hover {
+    height: 8px;
+    background: rgba(255, 255, 255, 0.14);
 }
 
 .scrub-fill {
-    width: 58%;
+    width: 0%;
     height: 100%;
-    background: #ffffff;
-    border-radius: 2px;
+    background: linear-gradient(90deg, var(--accent-color, #00d2ff), #ffffff);
+    border-radius: 3px;
     position: relative;
+    box-shadow: 0 0 10px var(--accent-color, rgba(0, 210, 255, 0.4));
+    transition: width 0.25s linear;
 }
 
 .scrub-thumb {
-    width: 12px;
-    height: 12px;
+    width: 14px;
+    height: 14px;
     background: #ffffff;
     border-radius: 50%;
     position: absolute;
-    right: -6px;
-    top: -4px;
-    box-shadow: 0 0 8px rgba(0,0,0,0.6);
+    right: -7px;
+    top: 50%;
+    transform: translateY(-50%);
+    box-shadow: 0 0 10px var(--accent-color, rgba(0, 210, 255, 0.8)), 0 2px 6px rgba(0, 0, 0, 0.6);
+    border: 2px solid #1a1d26;
+    transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.scrub-track:hover .scrub-thumb {
+    transform: translateY(-50%) scale(1.25);
 }
 
 .time-readout {
     display: flex;
     justify-content: space-between;
-    font-size: 12px;
+    font-size: 11px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    font-variant-numeric: tabular-nums;
     color: var(--text-dim);
     margin-top: 8px;
+    letter-spacing: 0.5px;
+    font-weight: 500;
 }
 
 /* Bottom Bar Controls */
@@ -625,7 +649,7 @@ body {
 .volume-slider {
     width: 80px;
     height: 4px;
-    accent-color: #ffffff;
+    accent-color: var(--accent-color, #ffffff);
     background: #252832;
     border-radius: 2px;
     cursor: pointer;
@@ -708,7 +732,8 @@ body {
 }
 
 .request-input:focus {
-    border-color: #3b4252;
+    border-color: var(--accent-color, #3b4252);
+    box-shadow: 0 0 8px var(--accent-glow-subtle, rgba(239, 68, 68, 0.25));
 }
 
 .request-input::placeholder {
@@ -725,12 +750,14 @@ body {
     padding: 12px;
     border-radius: 10px;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: all 0.2s ease;
 }
 
 .submit-request-btn:hover {
-    background: #2f3440;
-    border-color: #424856;
+    background: var(--accent-color, #2f3440);
+    color: var(--accent-contrast, #ffffff);
+    border-color: var(--accent-color, #424856);
+    box-shadow: var(--accent-glow-subtle, 0 4px 14px rgba(0, 0, 0, 0.4));
 }
 
 .request-success-msg {

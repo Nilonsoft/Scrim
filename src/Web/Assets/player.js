@@ -603,8 +603,28 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         if (branding.accentColor) {
-            document.documentElement.style.setProperty('--on-air-red', branding.accentColor);
-            document.documentElement.style.setProperty('--on-air-glow', `0 0 20px ${branding.accentColor}88`);
+            const hex = branding.accentColor.trim();
+            if (/^#([0-9a-fA-F]{3}){1,2}$/.test(hex)) {
+                let r, g, b;
+                if (hex.length === 4) {
+                    r = parseInt(hex[1] + hex[1], 16);
+                    g = parseInt(hex[2] + hex[2], 16);
+                    b = parseInt(hex[3] + hex[3], 16);
+                } else {
+                    r = parseInt(hex.substring(1, 3), 16);
+                    g = parseInt(hex.substring(3, 5), 16);
+                    b = parseInt(hex.substring(5, 7), 16);
+                }
+                const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+                const contrast = luminance > 0.6 ? '#0b0d14' : '#ffffff';
+
+                document.documentElement.style.setProperty('--accent-color', hex);
+                document.documentElement.style.setProperty('--accent-contrast', contrast);
+                document.documentElement.style.setProperty('--accent-glow', `0 0 20px rgba(${r}, ${g}, ${b}, 0.55)`);
+                document.documentElement.style.setProperty('--accent-glow-subtle', `0 2px 8px rgba(${r}, ${g}, ${b}, 0.35)`);
+                document.documentElement.style.setProperty('--on-air-red', hex);
+                document.documentElement.style.setProperty('--on-air-glow', `0 0 20px rgba(${r}, ${g}, ${b}, 0.55)`);
+            }
         }
 
         if (branding.customNavLinks && Array.isArray(branding.customNavLinks) && branding.customNavLinks.length > 0) {
@@ -667,17 +687,78 @@ document.addEventListener('DOMContentLoaded', function () {
                 updateLiveIndicator(data.isLive);
             }
         })
+    // Live Song Tracker State
+    let currentDurationSec = 0;
+    let currentPositionSec = 0;
+    let lastPositionTimestamp = 0;
+    let isTrackPlaying = false;
+    let trackerTimer = null;
+    const scrubFill = document.getElementById('scrubFill');
+    const currentTimeEl = document.getElementById('currentTime');
+    const totalTimeEl = document.getElementById('totalTime');
+
+    function formatTime(seconds) {
+        if (!seconds || isNaN(seconds) || seconds < 0) return "0:00";
+        const totalSec = Math.floor(seconds);
+        const mins = Math.floor(totalSec / 60);
+        const secs = totalSec % 60;
+        if (mins >= 60) {
+            const hrs = Math.floor(mins / 60);
+            const remMins = mins % 60;
+            return hrs + ":" + (remMins < 10 ? "0" : "") + remMins + ":" + (secs < 10 ? "0" : "") + secs;
+        }
+        return mins + ":" + (secs < 10 ? "0" : "") + secs;
+    }
+
+    function updateSongTrackerUI() {
+        if (!scrubFill) return;
+
+        if (currentDurationSec > 0) {
+            let pos = currentPositionSec;
+            if (isTrackPlaying && lastPositionTimestamp > 0) {
+                const elapsed = (Date.now() - lastPositionTimestamp) / 1000;
+                pos = Math.min(currentDurationSec, currentPositionSec + elapsed);
+            }
+
+            const pct = Math.min(100, Math.max(0, (pos / currentDurationSec) * 100));
+            scrubFill.style.width = pct.toFixed(2) + '%';
+
+            if (currentTimeEl) {
+                currentTimeEl.textContent = formatTime(pos);
+            }
+            if (totalTimeEl) {
+                totalTimeEl.textContent = formatTime(currentDurationSec);
+            }
+        } else {
+            scrubFill.style.width = '100%';
+            if (currentTimeEl) {
+                currentTimeEl.textContent = 'LIVE';
+            }
+            if (totalTimeEl) {
+                totalTimeEl.textContent = 'STREAM';
+            }
+        }
+    }
+
+    if (!trackerTimer) {
+        trackerTimer = setInterval(function () {
+            if (currentDurationSec > 0 && isTrackPlaying) {
+                updateSongTrackerUI();
+            }
+        }, 250);
+    }
+
     // Initial Metadata Fetch
     fetch('/api/metadata')
         .then(function (r) { return r.json(); })
         .then(function (data) {
             if (data && data.title) {
-                updateTrackMetadata(data.title, data.artist, data.album, data.albumArtUrl, data.hasArt);
+                updateTrackMetadata(data.title, data.artist, data.album, data.albumArtUrl, data.hasArt, data.duration, data.position, data.isPlaying);
             }
         })
         .catch(function (e) { console.warn("Could not fetch initial metadata", e); });
 
-    function updateTrackMetadata(title, artist, album, albumArtUrl, hasArt) {
+    function updateTrackMetadata(title, artist, album, albumArtUrl, hasArt, duration, position, isPlaying) {
         const albumArt = document.getElementById('albumArt');
         const metaContainer = document.getElementById('metaContainer');
         const albumBadge = document.getElementById('albumBadge');
@@ -739,6 +820,24 @@ document.addEventListener('DOMContentLoaded', function () {
             if (albumBadge) albumBadge.textContent = "ON AIR";
             if (albumSub) albumSub.textContent = "LIVE BROADCAST";
         }
+
+        // Update Song Tracker Timing
+        if (duration !== undefined && duration !== null) {
+            const parsedDur = parseFloat(duration);
+            currentDurationSec = !isNaN(parsedDur) && parsedDur > 0 ? parsedDur : 0;
+        }
+        if (position !== undefined && position !== null) {
+            const parsedPos = parseFloat(position);
+            currentPositionSec = !isNaN(parsedPos) && parsedPos >= 0 ? parsedPos : 0;
+            lastPositionTimestamp = Date.now();
+        }
+        if (isPlaying !== undefined && isPlaying !== null) {
+            isTrackPlaying = !!isPlaying;
+        } else {
+            isTrackPlaying = hasRealTrack;
+        }
+
+        updateSongTrackerUI();
     }
 
     // Connect to Server-Sent Events (SSE)
@@ -750,7 +849,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 const data = JSON.parse(event.data);
 
                 if (data.type === 'metadata') {
-                    updateTrackMetadata(data.title, data.artist, data.album, data.albumArtUrl, data.hasArt);
+                    updateTrackMetadata(data.title, data.artist, data.album, data.albumArtUrl, data.hasArt, data.duration, data.position, data.isPlaying);
                 }
 
                 if (data.type === 'branding') {

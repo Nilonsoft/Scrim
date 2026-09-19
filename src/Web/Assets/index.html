@@ -127,15 +127,16 @@
                 </div>
             </div>
 
-            <!-- Scrub / Progress Line -->
-            <div class="scrub-container">
-                <div class="scrub-track">
+            <!-- Song Tracker / Timeline Progress Bar -->
+            <div class="scrub-container" id="songTrackerContainer" title="Song Progress Tracker">
+                <div class="scrub-track" id="scrubTrack">
                     <div class="scrub-fill" id="scrubFill">
                         <div class="scrub-thumb"></div>
                     </div>
                 </div>
                 <div class="time-readout">
-                    <span id="currentTime">LIVE</span> / <span id="totalTime">STREAM</span>
+                    <span id="currentTime">0:00</span>
+                    <span id="totalTime">0:00</span>
                 </div>
             </div>
 
