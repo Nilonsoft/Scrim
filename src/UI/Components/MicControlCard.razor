@@ -1,8 +1,20 @@
 @using Scrim.Audio
+@using System.Collections.Generic
 @inject AudioDuckingMixer Mixer
+@inject MicrophoneCaptureService MicService
 
 <div class="card p-3 mb-3" style="background-color: #181818; border: 1px solid #383838; border-radius: 8px;">
     <h4 style="color: white; margin-top: 0;">Microphone</h4>
+    
+    <div class="mb-3">
+        <select class="form-select bg-dark text-white border-secondary" @bind="SelectedDeviceId">
+            <option value="">(System Default Microphone)</option>
+            @foreach (var device in Devices) {
+                <option value="@device.Id">@device.Name</option>
+            }
+        </select>
+    </div>
+
     <div class="d-flex align-items-center">
         <button class="btn btn-outline-danger me-2" @onmousedown="PttDown" @onmouseup="PttUp">Push To Talk</button>
         <button class="btn @(Mixer.LatchActive ? "btn-danger" : "btn-outline-secondary")" @onclick="ToggleLatch">On Air (Latch)</button>
@@ -10,8 +22,16 @@
 </div>
 
 @code {
+    private IEnumerable<MicrophoneDevice> Devices = Array.Empty<MicrophoneDevice>();
+    private string SelectedDeviceId = string.Empty;
+
+    protected override void OnInitialized() {
+        Devices = MicService.GetDevices();
+    }
+
     private void PttDown() { 
         Mixer.PushToTalkActive = true; 
+        MicService.StartCapture(SelectedDeviceId);
     }
     
     private void PttUp() { 
@@ -20,5 +40,8 @@
 
     private void ToggleLatch() {
         Mixer.LatchActive = !Mixer.LatchActive;
+        if (Mixer.LatchActive) {
+            MicService.StartCapture(SelectedDeviceId);
+        }
     }
 }
