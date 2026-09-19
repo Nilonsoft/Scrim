@@ -772,6 +772,7 @@
     private void OnMetadataReceived(object? sender, MediaMetadata meta) {
         InvokeAsync(() => {
             if (!string.IsNullOrWhiteSpace(meta.Title)) {
+                bool trackChanged = meta.Title != CurrentTrackTitle || meta.Artist != CurrentTrackArtist;
                 CurrentTrackTitle = meta.Title;
                 CurrentTrackArtist = string.IsNullOrWhiteSpace(meta.Artist) ? "Live Stream" : meta.Artist;
                 CurrentTrackExtra = string.IsNullOrWhiteSpace(meta.Album) ? "Broadcast Audio" : meta.Album;
@@ -779,8 +780,11 @@
                 if (meta.Duration > TimeSpan.Zero) {
                     CurrentTrackDuration = meta.Duration;
                 }
-                CurrentTrackPosition = meta.Position;
-                LastPositionUpdate = DateTimeOffset.UtcNow;
+                double diff = (meta.Position - CurrentTrackPosition).TotalSeconds;
+                if (trackChanged || Math.Abs(diff) > 2.5 || diff > 0.3 || !meta.IsPlaying) {
+                    CurrentTrackPosition = meta.Position;
+                    LastPositionUpdate = DateTimeOffset.UtcNow;
+                }
                 IsPlayingMedia = meta.IsPlaying;
             }
             StateHasChanged();
@@ -1372,18 +1376,36 @@
 
     private double GetProgressPercentage() {
         if (CurrentTrackDuration <= TimeSpan.Zero) return 0.0;
-        double pct = (CurrentTrackPosition.TotalSeconds / CurrentTrackDuration.TotalSeconds) * 100.0;
+        var pos = CurrentTrackPosition;
+        if (IsPlayingMedia && LastPositionUpdate > DateTimeOffset.MinValue) {
+            var elapsed = DateTimeOffset.UtcNow - LastPositionUpdate;
+            if (elapsed > TimeSpan.Zero && elapsed < TimeSpan.FromSeconds(10)) {
+                pos += elapsed;
+                if (pos > CurrentTrackDuration) pos = CurrentTrackDuration;
+            }
+        }
+        double pct = (pos.TotalSeconds / CurrentTrackDuration.TotalSeconds) * 100.0;
         return Math.Clamp(pct, 0.0, 100.0);
     }
 
     private string GetTimeDisplay() {
+        var pos = CurrentTrackPosition;
+        if (IsPlayingMedia && LastPositionUpdate > DateTimeOffset.MinValue) {
+            var elapsed = DateTimeOffset.UtcNow - LastPositionUpdate;
+            if (elapsed > TimeSpan.Zero && elapsed < TimeSpan.FromSeconds(10)) {
+                pos += elapsed;
+                if (CurrentTrackDuration > TimeSpan.Zero && pos > CurrentTrackDuration) {
+                    pos = CurrentTrackDuration;
+                }
+            }
+        }
         if (CurrentTrackDuration > TimeSpan.Zero) {
-            var remaining = CurrentTrackDuration - CurrentTrackPosition;
+            var remaining = CurrentTrackDuration - pos;
             if (remaining < TimeSpan.Zero) remaining = TimeSpan.Zero;
             return $"-{(int)remaining.TotalMinutes}:{remaining.Seconds:D2}";
         }
-        if (CurrentTrackPosition > TimeSpan.Zero) {
-            return $"{(int)CurrentTrackPosition.TotalMinutes}:{CurrentTrackPosition.Seconds:D2}";
+        if (pos > TimeSpan.Zero) {
+            return $"{(int)pos.TotalMinutes}:{pos.Seconds:D2}";
         }
         return "0:00";
     }

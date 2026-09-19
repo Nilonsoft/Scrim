@@ -1142,7 +1142,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     }
 
                     const diff = parsedPos - estimatedCurrent;
-                    if (Math.abs(diff) > 2.5 || diff > 0) {
+                    if (Math.abs(diff) > 2.5 || diff > 0.3) {
                         currentPositionSec = parsedPos;
                         lastPositionTimestamp = Date.now();
                     } else {

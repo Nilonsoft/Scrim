@@ -139,23 +139,39 @@ namespace Scrim.Metadata {
                     bool isPlaying = false;
 
                     try {
-                        var timeline = session.GetTimelineProperties();
-                        if (timeline != null) {
-                            duration = timeline.EndTime;
-                            position = timeline.Position;
-                        }
-                    } catch { }
-
-                    try {
                         var playbackInfo = session.GetPlaybackInfo();
                         if (playbackInfo != null) {
                             isPlaying = playbackInfo.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
                         }
                     } catch { }
 
+                    try {
+                        var timeline = session.GetTimelineProperties();
+                        if (timeline != null) {
+                            duration = timeline.EndTime;
+                            position = timeline.Position;
+                            if (isPlaying && timeline.LastUpdatedTime > DateTimeOffset.MinValue) {
+                                var elapsed = DateTimeOffset.UtcNow - timeline.LastUpdatedTime;
+                                if (elapsed > TimeSpan.Zero && elapsed < TimeSpan.FromHours(2)) {
+                                    position += elapsed;
+                                    if (duration > TimeSpan.Zero && position > duration) {
+                                        position = duration;
+                                    }
+                                }
+                            }
+                        }
+                    } catch { }
+
                     bool trackChanged = !string.IsNullOrEmpty(title) && 
                         !IsStreamArtifactOrEmpty(title, artist) &&
                         (title != CurrentMetadata.Title || artist != CurrentMetadata.Artist || album != CurrentMetadata.Album);
+
+                    if (!trackChanged && isPlaying && CurrentMetadata.Position > TimeSpan.Zero) {
+                        var diff = (position - CurrentMetadata.Position).TotalSeconds;
+                        if (diff < 0 && Math.Abs(diff) <= 2.5) {
+                            position = CurrentMetadata.Position;
+                        }
+                    }
 
                     byte[]? artBytes = CurrentMetadata.AlbumArt;
                     string? artUrl = CurrentMetadata.AlbumArtUrl;
