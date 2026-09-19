@@ -10,6 +10,10 @@ namespace Scrim.Audio {
         private readonly Channel<byte[]> _channel;
         private IAudioClient? _audioClient;
         private IAudioCaptureClient? _captureClient;
+#pragma warning disable CS0618
+        private NAudio.Wave.WasapiLoopbackCapture? _wasapiLoopback;
+#pragma warning restore CS0618
+        private readonly object _captureLock = new object();
         private CancellationTokenSource? _cts;
         private Task? _captureTask;
         private uint _processId;
@@ -31,37 +35,78 @@ namespace Scrim.Audio {
         }
 
         public void StartCapture(uint processId) {
-            if (_processId == processId && _captureTask != null && !_captureTask.IsCompleted) {
-                return;
-            }
-            StopCapture();
-            _processId = processId;
-            _cts = new CancellationTokenSource();
-
-            uint targetPid = processId == 0 ? (uint)Environment.ProcessId : processId;
-            var loopbackMode = processId == 0 
-                ? PROCESS_LOOPBACK_MODE.PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE 
-                : PROCESS_LOOPBACK_MODE.PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE;
-
-            var activationParams = new AUDIOCLIENT_ACTIVATION_PARAMS {
-                ActivationType = AUDIOCLIENT_ACTIVATION_TYPE.AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK,
-                ProcessLoopbackParams = new AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS {
-                    TargetProcessId = targetPid,
-                    ProcessLoopbackMode = loopbackMode
+            lock (_captureLock) {
+                if (_processId == processId && (_wasapiLoopback != null || (_captureTask != null && !_captureTask.IsCompleted))) {
+                    return;
                 }
-            };
+                StopCapture();
+                _processId = processId;
+                _cts = new CancellationTokenSource();
 
-            Guid IID_IAudioClient = new Guid("1CB9AD4C-DBFA-4c32-B178-C2F568A703B2");
+                if (processId == 0) {
+                    // System-wide Audio: Use battle-tested WASAPI render loopback
+                    StartWasapiLoopback();
+                    return;
+                }
 
-            _pActivationParams = Marshal.AllocHGlobal(Marshal.SizeOf<AUDIOCLIENT_ACTIVATION_PARAMS>());
-            Marshal.StructureToPtr(activationParams, _pActivationParams, false);
+                // Process-specific capture for targeted window/PID
+                var activationParams = new AUDIOCLIENT_ACTIVATION_PARAMS {
+                    ActivationType = AUDIOCLIENT_ACTIVATION_TYPE.AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK,
+                    ProcessLoopbackParams = new AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS {
+                        TargetProcessId = processId,
+                        ProcessLoopbackMode = PROCESS_LOOPBACK_MODE.PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE
+                    }
+                };
 
-            NativeMethods.ActivateAudioInterfaceAsync(
-                @"VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK",
-                ref IID_IAudioClient,
-                _pActivationParams,
-                this,
-                out _);
+                Guid IID_IAudioClient = new Guid("1CB9AD4C-DBFA-4c32-B178-C2F568A703B2");
+
+                _pActivationParams = Marshal.AllocHGlobal(Marshal.SizeOf<AUDIOCLIENT_ACTIVATION_PARAMS>());
+                Marshal.StructureToPtr(activationParams, _pActivationParams, false);
+
+                try {
+                    NativeMethods.ActivateAudioInterfaceAsync(
+                        @"VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK",
+                        ref IID_IAudioClient,
+                        _pActivationParams,
+                        this,
+                        out _);
+                } catch {
+                    // Fall back to system audio loopback if process activation fails
+                    StartWasapiLoopback();
+                }
+            }
+        }
+
+        private void StartWasapiLoopback() {
+            try {
+                StopWasapiLoopback();
+#pragma warning disable CS0618
+                _wasapiLoopback = new NAudio.Wave.WasapiLoopbackCapture();
+#pragma warning restore CS0618
+                var inFormat = _wasapiLoopback.WaveFormat;
+                _wasapiLoopback.DataAvailable += (s, e) => {
+                    if (e.BytesRecorded > 0) {
+                        byte[] pcm = ConvertTo16Bit44100Stereo(e.Buffer, e.BytesRecorded, inFormat);
+                        if (pcm.Length > 0) {
+                            _channel.Writer.TryWrite(pcm);
+                        }
+                    }
+                };
+                _wasapiLoopback.RecordingStopped += (s, e) => { };
+                _wasapiLoopback.StartRecording();
+            } catch (Exception ex) {
+                Console.WriteLine($"[ProcessLoopbackCapture] Failed to start WASAPI loopback: {ex.Message}");
+            }
+        }
+
+        private void StopWasapiLoopback() {
+            if (_wasapiLoopback != null) {
+                try {
+                    _wasapiLoopback.StopRecording();
+                    _wasapiLoopback.Dispose();
+                } catch { }
+                _wasapiLoopback = null;
+            }
         }
 
         public int ActivateCompleted(IActivateAudioInterfaceAsyncOperation activateOperation) {
@@ -71,18 +116,13 @@ namespace Scrim.Audio {
             }
 
             activateOperation.GetActivateResult(out int hr, out object activatedInterface);
-            Console.WriteLine($"[ProcessLoopbackCapture] ActivateResult: hr=0x{hr:X8}, itf={activatedInterface}");
             if (hr < 0 || activatedInterface == null) {
+                // Fall back to system-wide loopback
+                StartWasapiLoopback();
                 return hr;
             }
 
             _audioClient = (IAudioClient)activatedInterface;
-            int mixFormatHr = _audioClient.GetMixFormat(out nint pMixFormat);
-            Console.WriteLine($"[ProcessLoopbackCapture] GetMixFormat: hr=0x{mixFormatHr:X8}, pMix={pMixFormat}");
-            if (pMixFormat != nint.Zero) {
-                var mixWf = Marshal.PtrToStructure<WAVEFORMATEX>(pMixFormat);
-                Console.WriteLine($"[ProcessLoopbackCapture] MixFormat: tag={mixWf.wFormatTag}, ch={mixWf.nChannels}, rate={mixWf.nSamplesPerSec}, bits={mixWf.wBitsPerSample}");
-            }
 
             var format = new WAVEFORMATEX {
                 wFormatTag = 1,
@@ -108,7 +148,6 @@ namespace Scrim.Audio {
                 0,
                 ref format,
                 ref sessionGuid);
-            Console.WriteLine($"[ProcessLoopbackCapture] Initialize (44.1k): hr=0x{initResult:X8}");
 
             if (initResult < 0) {
                 initResult = _audioClient.Initialize(
@@ -118,10 +157,10 @@ namespace Scrim.Audio {
                     0,
                     ref format,
                     ref sessionGuid);
-                Console.WriteLine($"[ProcessLoopbackCapture] Initialize fallback: hr=0x{initResult:X8}");
             }
 
             if (initResult < 0) {
+                StartWasapiLoopback();
                 return initResult;
             }
 
@@ -192,31 +231,108 @@ namespace Scrim.Audio {
         }
 
         public void StopCapture() {
-            _cts?.Cancel();
-            try {
-                _captureTask?.Wait(200);
-            } catch { }
-            try {
-                _audioClient?.Stop();
-            } catch { }
-            if (_pActivationParams != nint.Zero) {
+            lock (_captureLock) {
+                StopWasapiLoopback();
+                _cts?.Cancel();
                 try {
-                    Marshal.FreeHGlobal(_pActivationParams);
+                    _captureTask?.Wait(200);
                 } catch { }
-                _pActivationParams = nint.Zero;
-            }
-            if (_audioClient != null && Marshal.IsComObject(_audioClient)) {
                 try {
-                    Marshal.ReleaseComObject(_audioClient);
+                    _audioClient?.Stop();
                 } catch { }
-                _audioClient = null;
+                if (_pActivationParams != nint.Zero) {
+                    try {
+                        Marshal.FreeHGlobal(_pActivationParams);
+                    } catch { }
+                    _pActivationParams = nint.Zero;
+                }
+                if (_audioClient != null && Marshal.IsComObject(_audioClient)) {
+                    try {
+                        Marshal.ReleaseComObject(_audioClient);
+                    } catch { }
+                    _audioClient = null;
+                }
+                if (_captureClient != null && Marshal.IsComObject(_captureClient)) {
+                    try {
+                        Marshal.ReleaseComObject(_captureClient);
+                    } catch { }
+                    _captureClient = null;
+                }
             }
-            if (_captureClient != null && Marshal.IsComObject(_captureClient)) {
-                try {
-                    Marshal.ReleaseComObject(_captureClient);
-                } catch { }
-                _captureClient = null;
+        }
+
+        private static byte[] ConvertTo16Bit44100Stereo(byte[] inBuffer, int bytesRecorded, NAudio.Wave.WaveFormat inFormat) {
+            if (bytesRecorded <= 0 || inBuffer == null) return Array.Empty<byte>();
+
+            int channels = Math.Max(1, inFormat.Channels);
+            int sampleRate = inFormat.SampleRate;
+
+            // Direct pass-through if already 16-bit 44.1kHz stereo
+            if (sampleRate == 44100 && inFormat.BitsPerSample == 16 && channels == 2) {
+                byte[] copy = new byte[bytesRecorded];
+                Buffer.BlockCopy(inBuffer, 0, copy, 0, bytesRecorded);
+                return copy;
             }
+
+            // Convert float (32-bit) or PCM (16-bit) to 44.1kHz 16-bit stereo
+            bool isFloat = inFormat.Encoding == NAudio.Wave.WaveFormatEncoding.IeeeFloat || inFormat.BitsPerSample == 32;
+            int bytesPerFrame = channels * (isFloat ? 4 : 2);
+            if (bytesPerFrame <= 0) return Array.Empty<byte>();
+
+            int inFrames = bytesRecorded / bytesPerFrame;
+            if (inFrames <= 0) return Array.Empty<byte>();
+
+            int outFrames = (sampleRate == 44100) ? inFrames : (int)Math.Round(inFrames * 44100.0 / sampleRate);
+            if (outFrames <= 0) return Array.Empty<byte>();
+
+            byte[] outBytes = new byte[outFrames * 4];
+            double ratio = (double)sampleRate / 44100.0;
+
+            for (int j = 0; j < outFrames; j++) {
+                double inIndex = j * ratio;
+                int idx0 = (int)inIndex;
+                double frac = inIndex - idx0;
+                int idx1 = Math.Min(idx0 + 1, inFrames - 1);
+
+                float l0, r0, l1, r1;
+
+                if (isFloat) {
+                    int offset0 = idx0 * bytesPerFrame;
+                    int offset1 = idx1 * bytesPerFrame;
+
+                    l0 = BitConverter.ToSingle(inBuffer, offset0);
+                    r0 = channels >= 2 ? BitConverter.ToSingle(inBuffer, offset0 + 4) : l0;
+
+                    l1 = BitConverter.ToSingle(inBuffer, offset1);
+                    r1 = channels >= 2 ? BitConverter.ToSingle(inBuffer, offset1 + 4) : l1;
+                } else {
+                    int offset0 = idx0 * bytesPerFrame;
+                    int offset1 = idx1 * bytesPerFrame;
+
+                    l0 = BitConverter.ToInt16(inBuffer, offset0) / 32768.0f;
+                    r0 = channels >= 2 ? BitConverter.ToInt16(inBuffer, offset0 + 2) / 32768.0f : l0;
+
+                    l1 = BitConverter.ToInt16(inBuffer, offset1) / 32768.0f;
+                    r1 = channels >= 2 ? BitConverter.ToInt16(inBuffer, offset1 + 2) / 32768.0f : l1;
+                }
+
+                float l = (float)(l0 * (1.0 - frac) + l1 * frac);
+                float r = (float)(r0 * (1.0 - frac) + r1 * frac);
+
+                short sL = (short)Math.Clamp((int)(l * 32767.0f), short.MinValue, short.MaxValue);
+                short sR = (short)Math.Clamp((int)(r * 32767.0f), short.MinValue, short.MaxValue);
+
+                byte[] bL = BitConverter.GetBytes(sL);
+                byte[] bR = BitConverter.GetBytes(sR);
+
+                int outOffset = j * 4;
+                outBytes[outOffset] = bL[0];
+                outBytes[outOffset + 1] = bL[1];
+                outBytes[outOffset + 2] = bR[0];
+                outBytes[outOffset + 3] = bR[1];
+            }
+
+            return outBytes;
         }
 
         public void Dispose() {

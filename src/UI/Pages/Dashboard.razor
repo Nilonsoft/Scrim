@@ -495,13 +495,19 @@
         };
         _refreshTimer.Start();
 
-        // High-frequency real audio level update for analog VU meters and broadcast stream out (75ms)
-        _vuTimer = new System.Timers.Timer(75);
+        // High-frequency real audio level update for analog VU meters and broadcast stream out (50ms)
+        _vuTimer = new System.Timers.Timer(50);
         _vuTimer.Elapsed += async (s, e) => {
             try {
                 float left = Mixer.LeftLevel;
                 float right = Mixer.RightLevel;
-                await JSRuntime.InvokeVoidAsync("scrimDragDrop.setStreamOutLevels", left, right, MicService.InputLevel, IsLive);
+                float mic = MicService.InputLevel;
+                bool isLive = IsLive;
+                await InvokeAsync(async () => {
+                    try {
+                        await JSRuntime.InvokeVoidAsync("scrimDragDrop.setStreamOutLevels", left, right, mic, isLive);
+                    } catch { }
+                });
             } catch { }
         };
         _vuTimer.Start();
