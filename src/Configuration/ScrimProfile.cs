@@ -95,5 +95,6 @@ namespace Scrim.Configuration {
         System.Collections.Generic.IEnumerable<string> GetAvailableProfiles();
         void SaveProfile(ScrimProfile profile);
         void LoadProfile(string name);
+        string? ResolveAssetPath(string? inputPath);
     }
 }

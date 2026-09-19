@@ -16,6 +16,12 @@ namespace Scrim.Configuration {
             if (!Directory.Exists(_configDir)) {
                 Directory.CreateDirectory(_configDir);
             }
+            string assetsDir = Path.Combine(_configDir, "assets");
+            if (!Directory.Exists(assetsDir)) {
+                try {
+                    Directory.CreateDirectory(assetsDir);
+                } catch { }
+            }
             LoadActiveOrInitialProfile();
         }
 
@@ -75,6 +81,81 @@ namespace Scrim.Configuration {
                     File.WriteAllText(Path.Combine(_configDir, "active_profile.txt"), name);
                 } catch { }
             }
+        }
+
+        public string? ResolveAssetPath(string? inputPath) {
+            if (string.IsNullOrWhiteSpace(inputPath)) return null;
+
+            string trimmed = inputPath.Trim();
+            if (trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) {
+                return null;
+            }
+
+            string assetsDir = Path.Combine(_configDir, "assets");
+            if (!Directory.Exists(assetsDir)) {
+                try {
+                    Directory.CreateDirectory(assetsDir);
+                } catch { }
+            }
+
+            string[] extensions = { "", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg" };
+
+            // 1. Direct path check (if absolute or relative to working directory)
+            foreach (var ext in extensions) {
+                string candidate = trimmed + ext;
+                if (File.Exists(candidate)) {
+                    return Path.GetFullPath(candidate);
+                }
+            }
+
+            // Normalize path separators and remove leading .\ or ./ or / or \
+            string clean = trimmed.Replace('/', '\\');
+            if (clean.StartsWith(".\\")) {
+                clean = clean.Substring(2);
+            }
+            clean = clean.TrimStart('\\');
+
+            string subName = clean;
+            if (clean.StartsWith("assets\\", StringComparison.OrdinalIgnoreCase)) {
+                subName = clean.Substring(7).TrimStart('\\');
+            }
+
+            // 2. Check in ~/.scrim/assets/ (with priority: subName then clean)
+            foreach (var ext in extensions) {
+                string candidate = Path.Combine(assetsDir, subName + ext);
+                if (File.Exists(candidate)) {
+                    return Path.GetFullPath(candidate);
+                }
+            }
+            foreach (var ext in extensions) {
+                string candidate = Path.Combine(assetsDir, clean + ext);
+                if (File.Exists(candidate)) {
+                    return Path.GetFullPath(candidate);
+                }
+            }
+
+            // 3. Check in ~/.scrim/
+            foreach (var ext in extensions) {
+                string candidate = Path.Combine(_configDir, clean + ext);
+                if (File.Exists(candidate)) {
+                    return Path.GetFullPath(candidate);
+                }
+            }
+
+            // 4. Check in App BaseDirectory Web/Assets/
+            string appWebAssets = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Web", "Assets");
+            if (Directory.Exists(appWebAssets)) {
+                foreach (var ext in extensions) {
+                    string candidate = Path.Combine(appWebAssets, subName + ext);
+                    if (File.Exists(candidate)) {
+                        return Path.GetFullPath(candidate);
+                    }
+                }
+            }
+
+            return null;
         }
     }
 }

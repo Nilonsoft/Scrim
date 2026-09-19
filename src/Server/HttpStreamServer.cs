@@ -346,6 +346,8 @@ namespace Scrim.Server {
                     HandleBrandingRequest(context);
                 } else if (path == "/api/banner") {
                     HandleBannerRequest(context);
+                } else if (path == "/api/logo") {
+                    HandleLogoRequest(context);
                 } else if (path == "/api/requests" && context.Request.HttpMethod == "POST") {
                     if (isRestricted) {
                         context.Response.StatusCode = 403;
@@ -656,7 +658,8 @@ namespace Scrim.Server {
                 string customThemeJson = GetCustomThemeJson(themeStr);
                 string streamMount = GetNormalizedMountPoint();
                 string bannerUrl = GetEffectiveBannerUrl();
-                return $"{{\"type\":\"branding\",\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(themeStr)}\",\"customThemeVariables\":{customThemeJson},\"logoUrl\":\"{EscapeJson(profile.LogoUrl)}\",\"bannerUrl\":\"{EscapeJson(bannerUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}],\"streamUrl\":\"/{streamMount}\",\"isPrivate\":false,\"restrictToLocal\":{(profile.RestrictToLocalNetwork ? "true" : "false")}}}";
+                string logoUrl = GetEffectiveLogoUrl();
+                return $"{{\"type\":\"branding\",\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(themeStr)}\",\"customThemeVariables\":{customThemeJson},\"logoUrl\":\"{EscapeJson(logoUrl)}\",\"bannerUrl\":\"{EscapeJson(bannerUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}],\"streamUrl\":\"/{streamMount}\",\"isPrivate\":false,\"restrictToLocal\":{(profile.RestrictToLocalNetwork ? "true" : "false")}}}";
             }
 
             EventHandler<MediaMetadata> onMetadata = (_, meta) => {
@@ -1008,8 +1011,27 @@ namespace Scrim.Server {
                 val.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) {
                 return val;
             }
-            if (File.Exists(val)) {
+            string? resolved = _profileManager.ResolveAssetPath(val);
+            if (!string.IsNullOrWhiteSpace(resolved) && File.Exists(resolved)) {
                 return "/api/banner";
+            }
+            return val;
+        }
+
+        private string GetEffectiveLogoUrl() {
+            var profile = _profileManager.CurrentProfile;
+            if (string.IsNullOrWhiteSpace(profile.LogoUrl)) {
+                return "";
+            }
+            string val = profile.LogoUrl.Trim();
+            if (val.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                val.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+                val.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) {
+                return val;
+            }
+            string? resolved = _profileManager.ResolveAssetPath(val);
+            if (!string.IsNullOrWhiteSpace(resolved) && File.Exists(resolved)) {
+                return "/api/logo";
             }
             return val;
         }
@@ -1021,8 +1043,9 @@ namespace Scrim.Server {
                 response.Headers.Add("Cache-Control", "public, max-age=60");
 
                 var profile = _profileManager.CurrentProfile;
-                if (!string.IsNullOrWhiteSpace(profile.BannerUrl) && File.Exists(profile.BannerUrl)) {
-                    string ext = Path.GetExtension(profile.BannerUrl).ToLowerInvariant();
+                string? resolved = _profileManager.ResolveAssetPath(profile.BannerUrl);
+                if (!string.IsNullOrWhiteSpace(resolved) && File.Exists(resolved)) {
+                    string ext = Path.GetExtension(resolved).ToLowerInvariant();
                     response.ContentType = ext switch {
                         ".png" => "image/png",
                         ".gif" => "image/gif",
@@ -1030,7 +1053,37 @@ namespace Scrim.Server {
                         ".svg" => "image/svg+xml",
                         _ => "image/jpeg"
                     };
-                    byte[] bytes = File.ReadAllBytes(profile.BannerUrl);
+                    byte[] bytes = File.ReadAllBytes(resolved);
+                    response.ContentLength64 = bytes.Length;
+                    response.OutputStream.Write(bytes, 0, bytes.Length);
+                } else {
+                    response.StatusCode = 404;
+                }
+            } catch {
+                context.Response.StatusCode = 500;
+            } finally {
+                context.Response.Close();
+            }
+        }
+
+        private void HandleLogoRequest(HttpListenerContext context) {
+            try {
+                var response = context.Response;
+                response.Headers.Add("Access-Control-Allow-Origin", "*");
+                response.Headers.Add("Cache-Control", "public, max-age=60");
+
+                var profile = _profileManager.CurrentProfile;
+                string? resolved = _profileManager.ResolveAssetPath(profile.LogoUrl);
+                if (!string.IsNullOrWhiteSpace(resolved) && File.Exists(resolved)) {
+                    string ext = Path.GetExtension(resolved).ToLowerInvariant();
+                    response.ContentType = ext switch {
+                        ".png" => "image/png",
+                        ".gif" => "image/gif",
+                        ".webp" => "image/webp",
+                        ".svg" => "image/svg+xml",
+                        _ => "image/jpeg"
+                    };
+                    byte[] bytes = File.ReadAllBytes(resolved);
                     response.ContentLength64 = bytes.Length;
                     response.OutputStream.Write(bytes, 0, bytes.Length);
                 } else {
@@ -1052,7 +1105,8 @@ namespace Scrim.Server {
                 bool isRestricted = profile.RestrictToLocalNetwork && !IsLocalNetworkClient(context);
                 string streamMount = GetNormalizedMountPoint();
                 string bannerUrl = GetEffectiveBannerUrl();
-                string json = $"{{\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(themeStr)}\",\"customThemeVariables\":{customThemeJson},\"logoUrl\":\"{EscapeJson(profile.LogoUrl)}\",\"bannerUrl\":\"{EscapeJson(bannerUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}],\"streamUrl\":\"/{streamMount}\",\"isPrivate\":{(isRestricted ? "true" : "false")},\"restrictToLocal\":{(profile.RestrictToLocalNetwork ? "true" : "false")}}}";
+                string logoUrl = GetEffectiveLogoUrl();
+                string json = $"{{\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(themeStr)}\",\"customThemeVariables\":{customThemeJson},\"logoUrl\":\"{EscapeJson(logoUrl)}\",\"bannerUrl\":\"{EscapeJson(bannerUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}],\"streamUrl\":\"/{streamMount}\",\"isPrivate\":{(isRestricted ? "true" : "false")},\"restrictToLocal\":{(profile.RestrictToLocalNetwork ? "true" : "false")}}}";
                 byte[] buffer = System.Text.Encoding.UTF8.GetBytes(json);
                 context.Response.ContentType = "application/json";
                 context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
