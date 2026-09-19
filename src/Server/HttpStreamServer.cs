@@ -21,6 +21,12 @@ namespace Scrim.Server {
         private readonly ILiveChatService _chatService;
         private readonly ISongReactionService _reactionService;
         private readonly ISongHistoryService _historyService;
+
+        public event Action? HistorySettingsChanged;
+
+        public void BroadcastHistoryUpdate() {
+            HistorySettingsChanged?.Invoke();
+        }
         private HttpListener? _listener;
         private TcpListener? _bridgeListener;
         private CancellationTokenSource? _cts;
@@ -582,15 +588,27 @@ namespace Scrim.Server {
             Action<string, ReactionCounts> onReaction = (type, counts) => {
                 string reactionJson = $"{{\"type\":\"reaction\",\"reaction\":\"{EscapeJson(type)}\",\"counts\":{{\"thumbsUp\":{counts.ThumbsUp},\"thumbsDown\":{counts.ThumbsDown},\"heart\":{counts.Heart}}}}}";
                 immediateChannel.Writer.TryWrite($"data: {reactionJson}\n\n");
+                var currentHistory = _historyService.GetHistory(_profileManager.CurrentProfile.SongHistoryLimit);
+                string historyJson = FormatHistoryJson(currentHistory);
+                immediateChannel.Writer.TryWrite($"data: {{\"type\":\"history_update\",\"history\":{historyJson}}}\n\n");
             };
 
             Action<ReactionCounts> onResetReactions = (counts) => {
                 string resetJson = $"{{\"type\":\"reaction_reset\",\"counts\":{{\"thumbsUp\":{counts.ThumbsUp},\"thumbsDown\":{counts.ThumbsDown},\"heart\":{counts.Heart}}}}}";
                 immediateChannel.Writer.TryWrite($"data: {resetJson}\n\n");
+                var currentHistory = _historyService.GetHistory(_profileManager.CurrentProfile.SongHistoryLimit);
+                string historyJson = FormatHistoryJson(currentHistory);
+                immediateChannel.Writer.TryWrite($"data: {{\"type\":\"history_update\",\"history\":{historyJson}}}\n\n");
             };
 
             Action<IReadOnlyList<SongHistoryItem>> onHistoryChanged = (items) => {
                 string historyJson = FormatHistoryJson(items.Take(_profileManager.CurrentProfile.SongHistoryLimit).ToList());
+                immediateChannel.Writer.TryWrite($"data: {{\"type\":\"history_update\",\"history\":{historyJson}}}\n\n");
+            };
+
+            Action onHistorySettings = () => {
+                var currentHistory = _historyService.GetHistory(_profileManager.CurrentProfile.SongHistoryLimit);
+                string historyJson = FormatHistoryJson(currentHistory);
                 immediateChannel.Writer.TryWrite($"data: {{\"type\":\"history_update\",\"history\":{historyJson}}}\n\n");
             };
 
@@ -641,6 +659,7 @@ namespace Scrim.Server {
             _historyService.HistoryChanged += onHistoryChanged;
             _metadataService.MetadataChanged += onMetadata;
             _hub.BroadcastingStateChanged += onBroadcastChanged;
+            HistorySettingsChanged += onHistorySettings;
 
             try {
                 using var writer = new StreamWriter(response.OutputStream);
@@ -709,6 +728,7 @@ namespace Scrim.Server {
                 _historyService.HistoryChanged -= onHistoryChanged;
                 _metadataService.MetadataChanged -= onMetadata;
                 _hub.BroadcastingStateChanged -= onBroadcastChanged;
+                HistorySettingsChanged -= onHistorySettings;
                 writeLock.Dispose();
                 response.Close();
             }

@@ -2365,14 +2365,15 @@
                     </label>
                 </div>
                 @if (ProfileManager.CurrentProfile.EnableSongHistory) {
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06);">
-                        <span style="font-size: 11px; color: #94a3b8;">Max tracks shown on web player:</span>
-                        <div style="display: flex; gap: 4px;">
-                            @foreach (var count in new[] { 5, 10, 15, 20, 25 }) {
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06); gap: 8px; flex-wrap: wrap;">
+                        <span style="font-size: 11px; color: #94a3b8;">Max songs in scrollable box:</span>
+                        <div style="display: flex; gap: 4px; align-items: center;">
+                            @foreach (var count in new[] { 5, 10, 15, 20, 25, 50 }) {
                                 <button class="pill-option @(ProfileManager.CurrentProfile.SongHistoryLimit == count ? "active" : "")" style="padding: 2px 8px; font-size: 10px;" @onclick="@(() => SetSongHistoryLimit(count))">
                                     @count
                                 </button>
                             }
+                            <input type="number" min="1" max="100" style="width: 48px; background: #1a1d26; border: 1px solid #2d323e; border-radius: 4px; color: #fff; font-size: 10px; padding: 2px 4px; text-align: center;" value="@ProfileManager.CurrentProfile.SongHistoryLimit" @onchange="OnSongHistoryLimitChanged" title="Custom maximum songs count (1-100)" />
                         </div>
                     </div>
                 }
@@ -2874,13 +2875,21 @@
     private void ToggleSongHistoryEnabled() {
         ProfileManager.CurrentProfile.EnableSongHistory = !ProfileManager.CurrentProfile.EnableSongHistory;
         ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        StreamServer.BroadcastHistoryUpdate();
         StateHasChanged();
     }
 
     private void SetSongHistoryLimit(int limit) {
-        ProfileManager.CurrentProfile.SongHistoryLimit = limit;
+        ProfileManager.CurrentProfile.SongHistoryLimit = Math.Clamp(limit, 1, 100);
         ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        StreamServer.BroadcastHistoryUpdate();
         StateHasChanged();
+    }
+
+    private void OnSongHistoryLimitChanged(ChangeEventArgs e) {
+        if (int.TryParse(e.Value?.ToString(), out int val)) {
+            SetSongHistoryLimit(val);
+        }
     }
 
     private bool ShowAllSongReactions = false;

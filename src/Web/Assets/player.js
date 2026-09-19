@@ -35,11 +35,11 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Recently Played History Elements
     const historyToggleBtn = document.getElementById('historyToggleBtn');
-    const historyModal = document.getElementById('historyModal');
-    const historyCloseBtn = document.getElementById('historyCloseBtn');
+    const historyCard = document.getElementById('historyCard');
+    const historyCountPill = document.getElementById('historyCountPill');
     const historyEmptyHint = document.getElementById('historyEmptyHint');
     const historyItemsList = document.getElementById('historyItemsList');
-    const historyModalTitle = document.getElementById('historyModalTitle');
+    const historyMessagesContainer = document.getElementById('historyMessagesContainer');
 
     let isPlaying = false;
     let isConnecting = false;
@@ -1684,38 +1684,24 @@ document.addEventListener('DOMContentLoaded', function () {
             if (res.ok) return res.json();
             return null;
         }).then(function (data) {
-            if (data && Array.isArray(data.history)) {
+            if (Array.isArray(data)) {
+                renderSongHistory(data);
+            } else if (data && Array.isArray(data.history)) {
                 renderSongHistory(data.history);
             }
         }).catch(function () {});
     }
 
-    if (historyToggleBtn && historyModal) {
+    if (historyToggleBtn && historyCard) {
         historyToggleBtn.addEventListener('click', function () {
-            historyModal.style.display = 'flex';
-            fetchSongHistory();
+            historyCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            historyCard.style.outline = '2px solid var(--accent-color, #00d2ff)';
+            historyCard.style.outlineOffset = '2px';
+            setTimeout(function () {
+                historyCard.style.outline = 'none';
+            }, 1200);
         });
     }
-
-    if (historyCloseBtn && historyModal) {
-        historyCloseBtn.addEventListener('click', function () {
-            historyModal.style.display = 'none';
-        });
-    }
-
-    if (historyModal) {
-        historyModal.addEventListener('click', function (e) {
-            if (e.target === historyModal) {
-                historyModal.style.display = 'none';
-            }
-        });
-    }
-
-    document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape' && historyModal && historyModal.style.display === 'flex') {
-            historyModal.style.display = 'none';
-        }
-    });
 
     fetchSongHistory();
 
@@ -1724,12 +1710,12 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!Array.isArray(items) || items.length === 0) {
             if (historyEmptyHint) historyEmptyHint.style.display = 'block';
             historyItemsList.innerHTML = '';
-            if (historyModalTitle) historyModalTitle.textContent = 'RECENTLY PLAYED';
+            if (historyCountPill) historyCountPill.textContent = '0 TRACKS';
             return;
         }
 
         if (historyEmptyHint) historyEmptyHint.style.display = 'none';
-        if (historyModalTitle) historyModalTitle.textContent = `RECENTLY PLAYED (${items.length})`;
+        if (historyCountPill) historyCountPill.textContent = `${items.length} TRACK${items.length === 1 ? '' : 'S'}`;
 
         historyItemsList.innerHTML = '';
         items.forEach(function (track) {
@@ -1768,46 +1754,46 @@ document.addEventListener('DOMContentLoaded', function () {
             info.appendChild(artistEl);
 
             const rightWrap = document.createElement('div');
-            rightWrap.style.display = 'flex';
-            rightWrap.style.alignItems = 'center';
-            rightWrap.style.gap = '8px';
-            rightWrap.style.whiteSpace = 'nowrap';
+            rightWrap.className = 'history-track-right';
 
-            if ((track.thumbsUp || 0) > 0 || (track.heart || 0) > 0 || (track.thumbsDown || 0) > 0) {
-                const reactionsEl = document.createElement('div');
-                reactionsEl.className = 'history-track-reactions';
-                reactionsEl.style.display = 'flex';
-                reactionsEl.style.gap = '6px';
-                reactionsEl.style.alignItems = 'center';
-                reactionsEl.style.fontSize = '11px';
+            const reactionsEl = document.createElement('div');
+            reactionsEl.className = 'history-track-reactions';
 
+            const hasReactions = (track.thumbsUp || 0) > 0 || (track.heart || 0) > 0 || (track.thumbsDown || 0) > 0;
+            if (hasReactions) {
                 if ((track.thumbsUp || 0) > 0) {
-                    const upSpan = document.createElement('span');
-                    upSpan.style.color = '#38bdf8';
-                    upSpan.title = 'Thumbs Up';
-                    upSpan.textContent = `👍 ${track.thumbsUp}`;
-                    reactionsEl.appendChild(upSpan);
+                    const upBadge = document.createElement('span');
+                    upBadge.className = 'history-rx-badge rx-thumbs-up';
+                    upBadge.title = `${track.thumbsUp} Thumbs Up`;
+                    upBadge.innerHTML = `👍 <span>${track.thumbsUp}</span>`;
+                    reactionsEl.appendChild(upBadge);
                 }
                 if ((track.heart || 0) > 0) {
-                    const heartSpan = document.createElement('span');
-                    heartSpan.style.color = '#f43f5e';
-                    heartSpan.title = 'Love';
-                    heartSpan.textContent = `❤️ ${track.heart}`;
-                    reactionsEl.appendChild(heartSpan);
+                    const heartBadge = document.createElement('span');
+                    heartBadge.className = 'history-rx-badge rx-heart';
+                    heartBadge.title = `${track.heart} Loves`;
+                    heartBadge.innerHTML = `❤️ <span>${track.heart}</span>`;
+                    reactionsEl.appendChild(heartBadge);
                 }
                 if ((track.thumbsDown || 0) > 0) {
-                    const downSpan = document.createElement('span');
-                    downSpan.style.color = '#94a3b8';
-                    downSpan.title = 'Thumbs Down';
-                    downSpan.textContent = `👎 ${track.thumbsDown}`;
-                    reactionsEl.appendChild(downSpan);
+                    const downBadge = document.createElement('span');
+                    downBadge.className = 'history-rx-badge rx-thumbs-down';
+                    downBadge.title = `${track.thumbsDown} Thumbs Down`;
+                    downBadge.innerHTML = `👎 <span>${track.thumbsDown}</span>`;
+                    reactionsEl.appendChild(downBadge);
                 }
-                rightWrap.appendChild(reactionsEl);
+            } else {
+                const noneBadge = document.createElement('span');
+                noneBadge.className = 'history-rx-none';
+                noneBadge.textContent = 'No reactions';
+                reactionsEl.appendChild(noneBadge);
             }
 
             const timeEl = document.createElement('div');
             timeEl.className = 'history-track-time';
             timeEl.textContent = track.playedAt || '';
+
+            rightWrap.appendChild(reactionsEl);
             rightWrap.appendChild(timeEl);
 
             row.appendChild(thumb);
@@ -1817,17 +1803,6 @@ document.addEventListener('DOMContentLoaded', function () {
             historyItemsList.appendChild(row);
         });
     }
-
-    fetch('/api/history')
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
-            if (Array.isArray(data)) {
-                renderSongHistory(data);
-            }
-        })
-        .catch(function (e) {
-            console.warn("Could not fetch initial history", e);
-        });
 
     // Progressive Web App (PWA) Support
     if ('serviceWorker' in navigator) {

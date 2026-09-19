@@ -1580,76 +1580,24 @@ body {
 }
 
 /* ==========================================================================
-   Recently Played Modal & History Drawer
+   Recently Played Sidebar Card & Track Reception
    ========================================================================== */
 
-.history-toggle-btn {
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+.history-card {
+    transition: all 0.2s ease;
 }
 
-.history-toggle-btn:hover {
-    color: var(--accent-color, #00d2ff);
-    border-color: var(--accent-color, #00d2ff);
-    box-shadow: 0 0 12px var(--accent-glow, rgba(0, 210, 255, 0.3));
-    transform: translateY(-1px);
-}
-
-.history-modal-backdrop {
-    position: fixed;
-    inset: 0;
-    background: rgba(8, 10, 15, 0.75);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 10000;
-    padding: 20px;
-    animation: fadeInModal 0.2s ease;
-}
-
-@keyframes fadeInModal {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-.history-modal-content {
-    background: var(--card-bg, #16181f);
-    border: 1px solid var(--card-border, #262934);
-    border-radius: 18px;
-    max-width: 480px;
-    width: 100%;
-    max-height: 80vh;
-    display: flex;
-    flex-direction: column;
-    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7);
-    overflow: hidden;
-    animation: popModal 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-@keyframes popModal {
-    from {
-        opacity: 0;
-        transform: scale(0.94) translateY(8px);
-    }
-    to {
-        opacity: 1;
-        transform: scale(1) translateY(0);
-    }
-}
-
-.history-modal-header {
+.history-card-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--card-border, #262934);
+    margin-bottom: 12px;
 }
 
 .history-header-title {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     color: #f1f5f9;
 }
 
@@ -1657,47 +1605,46 @@ body {
     color: var(--accent-color, #00d2ff);
 }
 
-.history-header-title h3 {
-    margin: 0;
-    font-size: 14px;
+.history-count-pill {
+    font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.5px;
-    color: #f1f5f9;
+    padding: 2px 8px;
+    border-radius: 12px;
+    background: rgba(0, 210, 255, 0.12);
+    color: var(--accent-color, #00d2ff);
+    border: 1px solid rgba(0, 210, 255, 0.25);
+    text-transform: uppercase;
 }
 
-.history-close-btn {
-    background: transparent;
-    border: none;
-    color: #94a3b8;
-    font-size: 16px;
-    cursor: pointer;
-    padding: 6px;
-    border-radius: 6px;
-    transition: all 0.15s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.history-close-btn:hover {
-    color: #ffffff;
-    background: rgba(255, 255, 255, 0.1);
-}
-
-.history-list-container {
-    padding: 16px 20px;
+.history-messages-container {
+    height: 240px;
     overflow-y: auto;
-    flex: 1;
+    background: var(--input-bg, #0d0f13);
+    border: 1px solid var(--card-border, #1f232c);
+    border-radius: 10px;
+    padding: 10px;
+    scroll-behavior: smooth;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+}
+
+.history-messages-container::-webkit-scrollbar {
+    width: 6px;
+}
+
+.history-messages-container::-webkit-scrollbar-thumb {
+    background: #2b303c;
+    border-radius: 3px;
 }
 
 .history-empty {
-    font-size: 13px;
-    color: #64748b;
+    font-size: 12px;
+    color: #555c6e;
+    font-style: italic;
     text-align: center;
-    padding: 30px 10px;
+    padding: 28px 10px;
+    margin: auto;
 }
 
 .history-items-list {
@@ -1709,22 +1656,22 @@ body {
 .history-row {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
     padding: 8px 10px;
     border-radius: 10px;
     background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.05);
     transition: all 0.15s ease;
 }
 
 .history-row:hover {
     background: rgba(255, 255, 255, 0.06);
-    border-color: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.1);
 }
 
 .history-thumb {
-    width: 38px;
-    height: 38px;
+    width: 36px;
+    height: 36px;
     border-radius: 8px;
     background: #1e222d;
     display: flex;
@@ -1753,7 +1700,7 @@ body {
 }
 
 .history-track-title {
-    font-size: 13px;
+    font-size: 12.5px;
     font-weight: 600;
     color: #f1f5f9;
     white-space: nowrap;
@@ -1762,20 +1709,74 @@ body {
 }
 
 .history-track-artist {
-    font-size: 11.5px;
+    font-size: 11px;
     color: #94a3b8;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
+.history-track-right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.history-track-reactions {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+
+.history-rx-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 6px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #94a3b8;
+    white-space: nowrap;
+}
+
+.history-rx-badge.rx-thumbs-up {
+    background: rgba(56, 189, 248, 0.12);
+    border-color: rgba(56, 189, 248, 0.3);
+    color: #38bdf8;
+}
+
+.history-rx-badge.rx-heart {
+    background: rgba(244, 63, 94, 0.12);
+    border-color: rgba(244, 63, 94, 0.3);
+    color: #f43f5e;
+}
+
+.history-rx-badge.rx-thumbs-down {
+    background: rgba(148, 163, 184, 0.1);
+    border-color: rgba(148, 163, 184, 0.25);
+    color: #cbd5e1;
+}
+
+.history-rx-none {
+    font-size: 9.5px;
+    color: #475569;
+    font-style: italic;
+}
+
 .history-track-time {
-    font-size: 11px;
+    font-size: 10.5px;
     font-weight: 500;
     color: #64748b;
     white-space: nowrap;
-    padding: 2px 8px;
-    border-radius: 12px;
+    padding: 1px 6px;
+    border-radius: 10px;
     background: rgba(255, 255, 255, 0.04);
 }
 

@@ -288,27 +288,27 @@
                     </div>
                 </form>
             </div>
-    </main>
 
-    <!-- RECENTLY PLAYED MODAL / DRAWER -->
-    <div class="history-modal-backdrop" id="historyModal" style="display: none;">
-        <div class="history-modal-content">
-            <div class="history-modal-header">
-                <div class="history-header-title">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="10"></circle>
-                        <polyline points="12 6 12 12 16 14"></polyline>
-                    </svg>
-                    <h3 id="historyModalTitle">RECENTLY PLAYED</h3>
+            <!-- RECENTLY PLAYED -->
+            <div class="sidebar-card history-card" id="historyCard">
+                <div class="history-card-header">
+                    <div class="history-header-title">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="12 6 12 12 16 14"></polyline>
+                        </svg>
+                        <h3 class="sidebar-title" style="margin-bottom: 0;">RECENTLY PLAYED</h3>
+                    </div>
+                    <span class="history-count-pill" id="historyCountPill">0 TRACKS</span>
                 </div>
-                <button class="history-close-btn" id="historyCloseBtn" title="Close">✕</button>
+
+                <div class="history-messages-container" id="historyMessagesContainer">
+                    <div class="history-empty" id="historyEmptyHint">No recently played songs yet this session.</div>
+                    <div class="history-items-list" id="historyItemsList"></div>
+                </div>
             </div>
-            <div class="history-list-container" id="historyListContainer">
-                <div class="history-empty" id="historyEmptyHint">No recently played songs yet this session.</div>
-                <div class="history-items-list" id="historyItemsList"></div>
-            </div>
-        </div>
-    </div>
+        </aside>
+    </main>
 
     <!-- PRIVATE STREAM OVERLAY (Shown when owner restricts broadcast to local network only) -->
     <div class="private-stream-overlay" id="privateStreamOverlay" style="display: none;">
