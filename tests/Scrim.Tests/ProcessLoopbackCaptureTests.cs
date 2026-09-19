@@ -37,7 +37,9 @@ namespace Scrim.Tests {
 
         [Fact]
         public async Task Test_WasapiLoopbackCapture_Initializes() {
+#pragma warning disable CS0618
             var wasapi = new NAudio.Wave.WasapiLoopbackCapture();
+#pragma warning restore CS0618
             _output.WriteLine($"WasapiLoopbackCapture initialized. WaveFormat: {wasapi.WaveFormat.SampleRate}Hz, {wasapi.WaveFormat.Channels}ch, {wasapi.WaveFormat.BitsPerSample}bits");
             int totalBytes = 0;
             wasapi.DataAvailable += (s, e) => {
