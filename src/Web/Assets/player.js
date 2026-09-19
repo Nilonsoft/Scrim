@@ -849,36 +849,33 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         }
 
-        if (branding.customNavLinks && Array.isArray(branding.customNavLinks) && branding.customNavLinks.length > 0) {
-            const navContainer = document.getElementById('navLinksContainer');
-            if (navContainer) {
-                navContainer.innerHTML = '';
-                branding.customNavLinks.forEach(link => {
-                    const a = document.createElement('a');
-                    a.href = link.url || '#';
-                    if (link.url && (link.url.startsWith('http://') || link.url.startsWith('https://'))) {
-                        a.target = '_blank';
-                        a.rel = 'noopener noreferrer';
-                    }
-                    a.className = 'nav-link';
-                    a.textContent = link.label;
-                    navContainer.appendChild(a);
-                });
-            }
-        } else if (branding.navLinks) {
-            const navContainer = document.getElementById('navLinksContainer');
-            if (navContainer) {
-                const links = branding.navLinks.split(',').map(s => s.trim()).filter(Boolean);
-                if (links.length > 0) {
-                    navContainer.innerHTML = '';
-                    links.forEach(link => {
+        const navContainer = document.getElementById('navLinksContainer');
+        if (navContainer) {
+            navContainer.innerHTML = '';
+            if (branding.customNavLinks && Array.isArray(branding.customNavLinks)) {
+                if (branding.customNavLinks.length > 0) {
+                    branding.customNavLinks.forEach(link => {
                         const a = document.createElement('a');
-                        a.href = '#' + link.toLowerCase().replace(/\s+/g, '-');
+                        a.href = link.url || '#';
+                        if (link.url && (link.url.startsWith('http://') || link.url.startsWith('https://'))) {
+                            a.target = '_blank';
+                            a.rel = 'noopener noreferrer';
+                        }
                         a.className = 'nav-link';
-                        a.textContent = link;
+                        a.textContent = link.label;
                         navContainer.appendChild(a);
                     });
                 }
+                // If customNavLinks is empty array, it means broadcaster removed all links - leave navContainer empty
+            } else if (branding.navLinks) {
+                const links = branding.navLinks.split(',').map(s => s.trim()).filter(Boolean);
+                links.forEach(link => {
+                    const a = document.createElement('a');
+                    a.href = '#' + link.toLowerCase().replace(/\s+/g, '-');
+                    a.className = 'nav-link';
+                    a.textContent = link;
+                    navContainer.appendChild(a);
+                });
             }
         }
     }
@@ -1319,10 +1316,24 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // ==========================================================================
-    // Live Station Chat Logic
+    // Live Station Chat & Identification Logic
     // ==========================================================================
+    let anonClientId = '';
+    try {
+        anonClientId = localStorage.getItem('scrim_anon_uid') || '';
+    } catch (e) {}
+    if (!anonClientId) {
+        anonClientId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+            ? crypto.randomUUID()
+            : 'c_' + Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
+        try {
+            localStorage.setItem('scrim_anon_uid', anonClientId);
+        } catch (e) {}
+    }
+
     const chatStatusPill = document.getElementById('chatStatusPill');
     const chatDisabledBanner = document.getElementById('chatDisabledBanner');
+    const chatBannedBanner = document.getElementById('chatBannedBanner');
     const chatMessagesContainer = document.getElementById('chatMessagesContainer');
     const chatMessagesList = document.getElementById('chatMessagesList');
     const chatEmptyHint = document.getElementById('chatEmptyHint');
@@ -1330,6 +1341,12 @@ document.addEventListener('DOMContentLoaded', function () {
     const chatNicknameInput = document.getElementById('chatNicknameInput');
     const chatMessageInput = document.getElementById('chatMessageInput');
     const chatSendBtn = document.getElementById('chatSendBtn');
+
+    const chatRulesModal = document.getElementById('chatRulesModal');
+    const chatRulesAgreeBtn = document.getElementById('chatRulesAgreeBtn');
+    const chatRulesCancelBtn = document.getElementById('chatRulesCancelBtn');
+    let isUserBanned = false;
+    let pendingChatSubmit = null;
 
     let isChatEnabled = true;
     const seenMessageIds = new Set();
@@ -1376,16 +1393,76 @@ document.addEventListener('DOMContentLoaded', function () {
                 chatStatusPill.classList.add('paused');
             }
         }
-        if (chatDisabledBanner) {
+        if (chatDisabledBanner && !isUserBanned) {
             chatDisabledBanner.style.display = isChatEnabled ? 'none' : 'flex';
         }
-        if (chatMessageInput) {
+        if (chatMessageInput && !isUserBanned) {
             chatMessageInput.disabled = !isChatEnabled;
             chatMessageInput.placeholder = isChatEnabled ? 'Type a message...' : 'Chat is currently paused by the host';
         }
-        if (chatSendBtn) {
+        if (chatSendBtn && !isUserBanned) {
             chatSendBtn.disabled = !isChatEnabled;
         }
+    }
+
+    function setUserBanned(banned) {
+        isUserBanned = !!banned;
+        if (chatBannedBanner) {
+            chatBannedBanner.style.display = isUserBanned ? 'flex' : 'none';
+        }
+        if (isUserBanned) {
+            if (chatDisabledBanner) chatDisabledBanner.style.display = 'none';
+            if (chatMessageInput) {
+                chatMessageInput.disabled = true;
+                chatMessageInput.placeholder = 'You are banned from station chat';
+            }
+            if (chatSendBtn) {
+                chatSendBtn.disabled = true;
+            }
+        } else {
+            setChatStatus(isChatEnabled);
+        }
+    }
+
+    function hasAgreedToChatRules() {
+        try {
+            return localStorage.getItem('scrim_chat_rules_agreed') === 'true';
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function showChatRulesModal(pendingFn) {
+        pendingChatSubmit = pendingFn;
+        if (chatRulesModal) {
+            chatRulesModal.style.display = 'flex';
+        }
+    }
+
+    function hideChatRulesModal() {
+        pendingChatSubmit = null;
+        if (chatRulesModal) {
+            chatRulesModal.style.display = 'none';
+        }
+    }
+
+    if (chatRulesAgreeBtn) {
+        chatRulesAgreeBtn.addEventListener('click', function () {
+            try {
+                localStorage.setItem('scrim_chat_rules_agreed', 'true');
+            } catch (e) {}
+            const fn = pendingChatSubmit;
+            hideChatRulesModal();
+            if (typeof fn === 'function') {
+                fn();
+            }
+        });
+    }
+
+    if (chatRulesCancelBtn) {
+        chatRulesCancelBtn.addEventListener('click', function () {
+            hideChatRulesModal();
+        });
     }
 
     function escapeHtml(str) {
@@ -1480,10 +1557,13 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // Fetch initial chat state & recent history
-    fetch('/api/chat')
+    fetch('/api/chat?clientId=' + encodeURIComponent(anonClientId))
         .then(function (r) { return r.json(); })
         .then(function (data) {
             if (data) {
+                if (data.isBanned) {
+                    setUserBanned(true);
+                }
                 if (data.enabled !== undefined) {
                     setChatStatus(data.enabled);
                 }
@@ -1499,48 +1579,57 @@ document.addEventListener('DOMContentLoaded', function () {
             console.warn("Could not load initial chat", err);
         });
 
+    function submitChatMessage(sender, text) {
+        if (chatSendBtn) chatSendBtn.disabled = true;
+
+        fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sender: sender, text: text, clientId: anonClientId })
+        }).then(function (res) {
+            if (chatSendBtn) chatSendBtn.disabled = !isChatEnabled || isUserBanned;
+            if (res.ok) {
+                chatMessageInput.value = '';
+                chatMessageInput.focus();
+            } else if (res.status === 403) {
+                return res.json().then(function (errData) {
+                    if (errData && errData.isBanned) {
+                        setUserBanned(true);
+                    } else {
+                        setChatStatus(false);
+                    }
+                }).catch(function () {
+                    setChatStatus(false);
+                });
+            }
+        }).catch(function (err) {
+            if (chatSendBtn) chatSendBtn.disabled = !isChatEnabled || isUserBanned;
+            console.error("Failed to post chat message", err);
+        });
+    }
+
     // Chat form submission
     if (chatForm && chatMessageInput) {
         chatForm.addEventListener('submit', function (e) {
             e.preventDefault();
-            if (!isChatEnabled) return;
+            if (!isChatEnabled || isUserBanned) return;
             const text = chatMessageInput.value.trim();
             if (!text) return;
 
             const sender = (chatNicknameInput ? chatNicknameInput.value.trim() : '') || 'Anonymous';
 
-            if (chatSendBtn) chatSendBtn.disabled = true;
+            if (!hasAgreedToChatRules()) {
+                showChatRulesModal(function () {
+                    submitChatMessage(sender, text);
+                });
+                return;
+            }
 
-            fetch('/api/chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ sender: sender, text: text })
-            }).then(function (res) {
-                if (chatSendBtn) chatSendBtn.disabled = !isChatEnabled;
-                if (res.ok) {
-                    chatMessageInput.value = '';
-                    chatMessageInput.focus();
-                } else if (res.status === 403) {
-                    setChatStatus(false);
-                }
-            }).catch(function (err) {
-                if (chatSendBtn) chatSendBtn.disabled = !isChatEnabled;
-                console.error("Failed to post chat message", err);
-            });
+            submitChatMessage(sender, text);
         });
     }
 
     // Song Reactions System (Single-Vote Switcher & Per-Song Memory)
-    let anonClientId = localStorage.getItem('scrim_anon_uid');
-    if (!anonClientId) {
-        anonClientId = (typeof crypto !== 'undefined' && crypto.randomUUID)
-            ? crypto.randomUUID()
-            : 'c_' + Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
-        try {
-            localStorage.setItem('scrim_anon_uid', anonClientId);
-        } catch (e) {}
-    }
-
     let currentUserReaction = null;
 
     function highlightUserReaction(reaction) {

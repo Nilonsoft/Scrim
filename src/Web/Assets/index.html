@@ -39,12 +39,7 @@
         </div>
 
         <div class="header-right">
-            <nav class="nav-links" id="navLinksContainer">
-                <a href="#discover" class="nav-link">Discover</a>
-                <a href="#schedule" class="nav-link">Schedule</a>
-                <a href="#shows" class="nav-link">Shows</a>
-                <a href="#about" class="nav-link">About</a>
-            </nav>
+            <nav class="nav-links" id="navLinksContainer"></nav>
             <div class="header-icons">
                 <button class="icon-btn pwa-install-btn" id="pwaInstallBtn" title="Install Scrim as Desktop or Mobile App" style="display: none;">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -266,6 +261,14 @@
                     <span>Chat paused by host</span>
                 </div>
 
+                <div class="chat-disabled-banner chat-banned-banner" id="chatBannedBanner" style="display: none;">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
+                    </svg>
+                    <span>You have been banned from station chat</span>
+                </div>
+
                 <div class="chat-messages-container" id="chatMessagesContainer">
                     <div class="chat-messages-list" id="chatMessagesList">
                         <div class="chat-empty-hint" id="chatEmptyHint">Welcome! Say hello to the DJ and listeners.</div>
@@ -309,6 +312,44 @@
             </div>
         </aside>
     </main>
+
+    <!-- CHAT RULES AGREEMENT MODAL (Shown only once on listener's first chat submission) -->
+    <div class="chat-rules-modal-overlay" id="chatRulesModal" style="display: none;">
+        <div class="chat-rules-card">
+            <div class="chat-rules-header">
+                <div class="chat-rules-badge">STATION CHAT</div>
+                <h2 class="chat-rules-title">Community Guidelines</h2>
+                <p class="chat-rules-subtitle">Please review and agree to our station chat rules before posting for the first time.</p>
+            </div>
+            <div class="chat-rules-list">
+                <div class="chat-rule-item">
+                    <span class="chat-rule-icon">🤝</span>
+                    <div class="chat-rule-body">
+                        <strong>Be Respectful</strong>
+                        <p>Treat the broadcaster and other listeners with kindness. Harassment, hate speech, or abuse will result in an immediate ban.</p>
+                    </div>
+                </div>
+                <div class="chat-rule-item">
+                    <span class="chat-rule-icon">✨</span>
+                    <div class="chat-rule-body">
+                        <strong>Keep Good Vibes</strong>
+                        <p>Keep the music conversation enjoyable for everyone. No vulgarity, explicit content, or disruptive behavior.</p>
+                    </div>
+                </div>
+                <div class="chat-rule-item">
+                    <span class="chat-rule-icon">🚫</span>
+                    <div class="chat-rule-body">
+                        <strong>No Spam or Advertising</strong>
+                        <p>Do not flood the chat with repeated messages, unsolicited URLs, or unauthorized self-promotion.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="chat-rules-actions">
+                <button type="button" class="chat-rules-agree-btn" id="chatRulesAgreeBtn">I Agree & Send</button>
+                <button type="button" class="chat-rules-cancel-btn" id="chatRulesCancelBtn">Cancel</button>
+            </div>
+        </div>
+    </div>
 
     <!-- PRIVATE STREAM OVERLAY (Shown when owner restricts broadcast to local network only) -->
     <div class="private-stream-overlay" id="privateStreamOverlay" style="display: none;">

@@ -83,5 +83,72 @@ namespace Scrim.Tests {
             service.NotifyStatusChanged(true);
             Assert.True(statusReceived);
         }
+
+        [Fact]
+        public void AddMessage_WithUserId_StoresUserId() {
+            var service = new LiveChatService();
+            var msg = service.AddMessage("Listener", "Hey!", isHost: false, userId: "hash_abc_123");
+
+            Assert.Equal("hash_abc_123", msg.UserId);
+        }
+
+        [Fact]
+        public void BanUser_BansUser_PurgesTheirMessagesAndFiresEvent() {
+            var service = new LiveChatService();
+            service.AddMessage("GoodUser", "Nice music!", userId: "user_1");
+            service.AddMessage("BadUser", "Spam message 1", userId: "user_2");
+            service.AddMessage("BadUser", "Spam message 2", userId: "user_2");
+            service.AddMessage("GoodUser", "Loving the vibes", userId: "user_1");
+
+            Assert.Equal(4, service.GetRecentMessages().Count);
+            Assert.False(service.IsUserBanned("user_2"));
+
+            string? bannedIdReceived = null;
+            service.UserBanned += uid => bannedIdReceived = uid;
+
+            service.BanUser("user_2", "BadUser");
+
+            Assert.True(service.IsUserBanned("user_2"));
+            Assert.Equal("user_2", bannedIdReceived);
+
+            var remaining = service.GetRecentMessages();
+            Assert.Equal(2, remaining.Count);
+            Assert.All(remaining, m => Assert.Equal("user_1", m.UserId));
+            Assert.Single(service.GetBannedUsers());
+            Assert.Equal("user_2", service.GetBannedUsers().First().UserId);
+            Assert.Equal("BadUser", service.GetBannedUsers().First().Nickname);
+        }
+
+        [Fact]
+        public void UnbanUser_RemovesBanAndFiresEvent() {
+            var service = new LiveChatService();
+            service.BanUser("user_xyz", "Troll");
+            Assert.True(service.IsUserBanned("user_xyz"));
+
+            string? unbannedIdReceived = null;
+            service.UserUnbanned += uid => unbannedIdReceived = uid;
+
+            service.UnbanUser("user_xyz");
+
+            Assert.False(service.IsUserBanned("user_xyz"));
+            Assert.Equal("user_xyz", unbannedIdReceived);
+            Assert.Empty(service.GetBannedUsers());
+        }
+
+        [Fact]
+        public void SyncBannedUsers_PopulatesBannedUsersDictionary() {
+            var service = new LiveChatService();
+            var bans = new System.Collections.Generic.List<Scrim.Configuration.BannedChatUser> {
+                new() { UserId = "u1", Nickname = "Nick1" },
+                new() { UserId = "u2", Nickname = "Nick2" }
+            };
+
+            service.SyncBannedUsers(bans);
+
+            Assert.True(service.IsUserBanned("u1"));
+            Assert.True(service.IsUserBanned("u2"));
+            Assert.False(service.IsUserBanned("u3"));
+            Assert.Equal(2, service.GetBannedUsers().Count);
+        }
     }
 }
