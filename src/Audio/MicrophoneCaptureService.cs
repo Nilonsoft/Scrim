@@ -6,7 +6,9 @@ using NAudio.CoreAudioApi;
 namespace Scrim.Audio {
     public class MicrophoneCaptureService : IMicrophoneCaptureService {
         private readonly Channel<byte[]> _channel;
+#pragma warning disable CS0618 // Type or member is obsolete
         private WasapiCapture? _capture;
+#pragma warning restore CS0618 // Type or member is obsolete
         private readonly VoiceEffectLoader _effectLoader;
         
         public ChannelReader<byte[]> MicrophoneStream => _channel.Reader;
@@ -32,6 +34,7 @@ namespace Scrim.Audio {
         public void StartCapture(string? deviceId = null) {
             if (_capture != null) return;
             
+#pragma warning disable CS0618 // Type or member is obsolete
             if (string.IsNullOrEmpty(deviceId)) {
                 _capture = new WasapiCapture();
             } else {
@@ -39,6 +42,7 @@ namespace Scrim.Audio {
                 var device = enumerator.GetDevice(deviceId);
                 _capture = new WasapiCapture(device);
             }
+#pragma warning restore CS0618 // Type or member is obsolete
 
             // Force 44100Hz 16-bit stereo for uniformity with Loopback
             _capture.WaveFormat = new WaveFormat(44100, 16, 2);

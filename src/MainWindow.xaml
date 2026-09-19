@@ -21,7 +21,6 @@
 
         <tb:TaskbarIcon x:Name="TrayIcon"
                         ToolTipText="Scrim Console"
-                        IconSource="/favicon.ico"
                         TrayMouseDoubleClick="TrayIcon_TrayMouseDoubleClick">
             <tb:TaskbarIcon.ContextMenu>
                 <ContextMenu>

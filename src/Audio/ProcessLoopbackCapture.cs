@@ -88,7 +88,7 @@ namespace Scrim.Audio {
 
             _audioClient.Start();
 
-            _captureTask = Task.Run(() => CaptureLoop(_cts.Token));
+            _captureTask = Task.Run(() => CaptureLoop(_cts!.Token));
 
             return 0;
         }
