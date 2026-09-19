@@ -830,6 +830,44 @@ body {
     letter-spacing: -0.5px;
 }
 
+.track-title-link {
+    color: inherit;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    transition: color 0.2s ease;
+}
+
+.track-title-link[href]:hover {
+    color: var(--accent-color, #00d2ff);
+    cursor: pointer;
+}
+
+.track-title-link .song-search-icon {
+    opacity: 0;
+    color: var(--accent-color, #00d2ff);
+    transform: translateX(-4px);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    flex-shrink: 0;
+}
+
+.track-title-link[href]:hover .song-search-icon {
+    opacity: 0.9;
+    transform: translateX(0);
+}
+
+.bottom-track-link {
+    text-decoration: none;
+    display: inline-block;
+    color: inherit;
+}
+
+.bottom-track-link[href]:hover .bottom-track-name {
+    color: var(--accent-color, #00d2ff);
+    cursor: pointer;
+}
+
 .track-artist {
     font-size: 16px;
     font-weight: 700;

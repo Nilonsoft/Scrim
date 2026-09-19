@@ -135,7 +135,15 @@
                         </div>
                     </div>
 
-                    <h1 class="track-title" id="trackTitle">Awaiting Track Info...</h1>
+                    <h1 class="track-title" id="trackTitleContainer">
+                        <a id="trackTitleLink" href="#" target="_blank" rel="noopener noreferrer" class="track-title-link" title="Search song on Google">
+                            <span id="trackTitle">Awaiting Track Info...</span>
+                            <svg class="song-search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                            </svg>
+                        </a>
+                    </h1>
                     <h2 class="track-artist" id="trackArtist">LIVE BROADCAST</h2>
                     <div class="show-subtitle" id="showSubtitle">Live Studio Transmission</div>
 
@@ -191,7 +199,9 @@
 
             <!-- Bottom Transport & Volume Controls -->
             <div class="player-bottom-bar">
-                <div class="bottom-track-name" id="bottomTrackName">Awaiting Stream...</div>
+                <a id="bottomTrackLink" href="#" target="_blank" rel="noopener noreferrer" class="bottom-track-link" title="Search song on Google">
+                    <div class="bottom-track-name" id="bottomTrackName">Awaiting Stream...</div>
+                </a>
 
                 <div class="center-playback-controls">
                     <!-- Huge Glowing Circular Play/Pause Button -->

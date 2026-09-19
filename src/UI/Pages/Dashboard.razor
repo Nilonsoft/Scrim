@@ -2234,7 +2234,14 @@
                     }
                 </div>
                 <div>
-                    <h4 class="media-meta-title">@CurrentTrackTitle</h4>
+                    <h4 class="media-meta-title" style="display: flex; align-items: center; gap: 6px;">
+                        <span>@CurrentTrackTitle</span>
+                        @if (!string.IsNullOrWhiteSpace(CurrentTrackTitle) && CurrentTrackTitle != "Awaiting Audio Source..." && CurrentTrackTitle != "Awaiting Track Info...") {
+                            <a href="@($"https://www.google.com/search?q={Uri.EscapeDataString(CurrentTrackTitle + " " + CurrentTrackArtist)}")" target="_blank" rel="noopener noreferrer" style="color: #64748b; font-size: 13px; text-decoration: none; cursor: pointer;" title="Search song on Google" onmouseover="this.style.color='#00d2ff'" onmouseout="this.style.color='#64748b'">
+                                🔍
+                            </a>
+                        }
+                    </h4>
                     <div class="media-meta-artist">@CurrentTrackArtist</div>
                     <div class="media-meta-extra">@CurrentTrackExtra</div>
                     <div class="media-reactions-row" style="display: flex; gap: 8px; align-items: center; margin-top: 6px; font-size: 12px; color: #94a3b8; flex-wrap: wrap;">

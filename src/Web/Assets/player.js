@@ -14,8 +14,10 @@ document.addEventListener('DOMContentLoaded', function () {
     const topVolMuteIcon = topSpeakerBtn ? topSpeakerBtn.querySelector('.icon-top-vol-mute') : null;
     const pwaInstallBtn = document.getElementById('pwaInstallBtn');
     const trackTitle = document.getElementById('trackTitle');
+    const trackTitleLink = document.getElementById('trackTitleLink');
     const trackArtist = document.getElementById('trackArtist');
     const bottomTrackName = document.getElementById('bottomTrackName');
+    const bottomTrackLink = document.getElementById('bottomTrackLink');
     const listenerCount = document.getElementById('listenerCount');
     const clockTime = document.getElementById('clockTime');
     const stationBannerWrap = document.getElementById('stationBannerWrap');
@@ -1037,6 +1039,17 @@ document.addEventListener('DOMContentLoaded', function () {
         }, 250);
     }
 
+    // Restore cached track & artwork from sessionStorage for zero-flash page reloads
+    try {
+        const cachedRaw = sessionStorage.getItem('scrim_cached_track');
+        if (cachedRaw) {
+            const cached = JSON.parse(cachedRaw);
+            if (cached && cached.title) {
+                updateTrackMetadata(cached.title, cached.artist, cached.album, cached.albumArtUrl, cached.hasArt, cached.duration, cached.position, cached.isPlaying);
+            }
+        }
+    } catch { }
+
     // Initial Metadata Fetch
     fetch('/api/metadata')
         .then(function (r) { return r.json(); })
@@ -1067,28 +1080,35 @@ document.addEventListener('DOMContentLoaded', function () {
         if (trackChanged) {
             refreshReactionsState();
         }
+        const lowerTitle = cleanTitle.toLowerCase();
         const hasRealTrack = cleanTitle !== "" && 
             cleanTitle !== "Awaiting Audio Source..." && 
             cleanTitle !== "Awaiting Track Info..." && 
             cleanTitle !== "Unknown Track" &&
-            cleanTitle.toLowerCase() !== "stream" &&
-            cleanTitle.toLowerCase() !== "stream.mp3" &&
-            cleanTitle.toLowerCase() !== "live" &&
-            cleanTitle.toLowerCase() !== "listen" &&
-            !cleanTitle.startsWith("http://") &&
-            !cleanTitle.startsWith("https://") &&
-            !cleanTitle.includes("localhost:") &&
-            !cleanTitle.includes("127.0.0.1:");
+            lowerTitle !== "stream" &&
+            lowerTitle !== "stream.mp3" &&
+            lowerTitle !== "live" &&
+            lowerTitle !== "listen" &&
+            !lowerTitle.startsWith("http://") &&
+            !lowerTitle.startsWith("https://") &&
+            !lowerTitle.includes("localhost:") &&
+            !lowerTitle.includes("127.0.0.1:") &&
+            !lowerTitle.startsWith("scrim") &&
+            !lowerTitle.includes("scrim broadcast") &&
+            !lowerTitle.includes("live broadcast player");
 
         if (hasRealTrack) {
             // Real track info received: reveal actual artwork and clean typography
             if (albumArt) {
                 albumArt.classList.remove('loading');
                 if (hasArt && albumArtUrl) {
-                    const cacheBuster = albumArtUrl.startsWith('/') ? (albumArtUrl.includes('?') ? '&' : '?') + 't=' + Date.now() : '';
-                    albumArt.style.backgroundImage = "url('" + albumArtUrl + cacheBuster + "')";
-                    albumArt.style.backgroundSize = "cover";
-                    albumArt.style.backgroundPosition = "center";
+                    const isNewTrack = trackChanged || !albumArt.style.backgroundImage || albumArt.style.backgroundImage.includes('linear-gradient');
+                    if (isNewTrack) {
+                        const cacheBuster = (trackChanged && albumArtUrl.startsWith('/')) ? '?t=' + Date.now() : '';
+                        albumArt.style.backgroundImage = "url('" + albumArtUrl + cacheBuster + "')";
+                        albumArt.style.backgroundSize = "cover";
+                        albumArt.style.backgroundPosition = "center";
+                    }
                 } else if (!hasArt && !albumArt.style.backgroundImage) {
                     albumArt.style.backgroundImage = "linear-gradient(135deg, #1b3d68 0%, #059669 50%, #dc2626 100%)";
                 }
@@ -1099,8 +1119,34 @@ document.addEventListener('DOMContentLoaded', function () {
             if (trackArtist) trackArtist.textContent = (artist || "LIVE STREAM").toUpperCase();
             if (bottomTrackName) bottomTrackName.textContent = cleanTitle;
 
+            // Google search link for current song + artist
+            const searchTerms = cleanArtist ? (cleanTitle + ' ' + cleanArtist) : cleanTitle;
+            const searchUrl = 'https://www.google.com/search?q=' + encodeURIComponent(searchTerms);
+            if (trackTitleLink) {
+                trackTitleLink.href = searchUrl;
+                trackTitleLink.title = 'Search "' + cleanTitle + '" on Google';
+            }
+            if (bottomTrackLink) {
+                bottomTrackLink.href = searchUrl;
+                bottomTrackLink.title = 'Search "' + cleanTitle + '" on Google';
+            }
+
             if (albumBadge) albumBadge.textContent = cleanTitle;
             if (albumSub) albumSub.textContent = (artist || "LIVE STREAM").toUpperCase();
+
+            // Cache in sessionStorage so refreshing immediately preserves artwork and track info
+            try {
+                sessionStorage.setItem('scrim_cached_track', JSON.stringify({
+                    title: cleanTitle,
+                    artist: cleanArtist,
+                    album: album,
+                    albumArtUrl: albumArtUrl,
+                    hasArt: hasArt,
+                    duration: duration,
+                    position: position,
+                    isPlaying: isPlaying
+                }));
+            } catch { }
         } else {
             // If already displaying a valid track, don't revert to placeholder on temporary stream/connection events
             const currentTitle = trackTitle ? trackTitle.textContent : "";
@@ -1118,6 +1164,15 @@ document.addEventListener('DOMContentLoaded', function () {
             if (trackTitle) trackTitle.textContent = "Awaiting Track Info...";
             if (trackArtist) trackArtist.textContent = "LIVE BROADCAST";
             if (bottomTrackName) bottomTrackName.textContent = "Awaiting Stream...";
+
+            if (trackTitleLink) {
+                trackTitleLink.removeAttribute('href');
+                trackTitleLink.title = 'Awaiting Track Info...';
+            }
+            if (bottomTrackLink) {
+                bottomTrackLink.removeAttribute('href');
+                bottomTrackLink.title = 'Awaiting Stream...';
+            }
 
             if (albumBadge) albumBadge.textContent = "ON AIR";
             if (albumSub) albumSub.textContent = "LIVE BROADCAST";

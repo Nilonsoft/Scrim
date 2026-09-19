@@ -176,9 +176,13 @@ namespace Scrim.Metadata {
                     byte[]? artBytes = CurrentMetadata.AlbumArt;
                     string? artUrl = CurrentMetadata.AlbumArtUrl;
 
-                    if (trackChanged) {
-                        artBytes = null;
-                        artUrl = null;
+                    bool needsArtFetch = trackChanged || ((artBytes == null || artBytes.Length == 0) && string.IsNullOrEmpty(artUrl));
+
+                    if (needsArtFetch) {
+                        if (trackChanged) {
+                            artBytes = null;
+                            artUrl = null;
+                        }
 
                         // 1. Try extracting local thumbnail from Windows Media Session
                         if (props.Thumbnail != null) {
@@ -208,11 +212,13 @@ namespace Scrim.Metadata {
                         }
                     }
 
+                    bool artRestored = (artBytes != null && CurrentMetadata.AlbumArt == null) || 
+                                       (!string.IsNullOrEmpty(artUrl) && string.IsNullOrEmpty(CurrentMetadata.AlbumArtUrl));
                     bool timelineChanged = Math.Abs((position - CurrentMetadata.Position).TotalSeconds) >= 0.8 || 
                         duration != CurrentMetadata.Duration || 
                         isPlaying != CurrentMetadata.IsPlaying;
 
-                    if (trackChanged || timelineChanged) {
+                    if (trackChanged || timelineChanged || artRestored) {
                         var newMeta = new MediaMetadata {
                             Title = string.IsNullOrEmpty(title) ? CurrentMetadata.Title : title,
                             Artist = string.IsNullOrEmpty(artist) ? CurrentMetadata.Artist : artist,
@@ -235,7 +241,9 @@ namespace Scrim.Metadata {
             string t = title.Trim().ToLowerInvariant();
             if (t == "stream" || t == "stream.mp3" || t == "live" || t == "listen" || 
                 t == "localhost" || t.StartsWith("localhost:") || t.StartsWith("127.0.0.1:") || 
-                t.StartsWith("http://") || t.StartsWith("https://") || t == "scrim" ||
+                t.StartsWith("http://") || t.StartsWith("https://") ||
+                t == "scrim" || t.StartsWith("scrim") || t.Contains("scrim broadcast") ||
+                t.Contains("scrim •") || t.Contains("scrim -") || t.Contains("live broadcast player") ||
                 t == "awaiting audio source..." || t == "awaiting track info..." || t == "unknown track") {
                 return true;
             }
@@ -248,7 +256,16 @@ namespace Scrim.Metadata {
             try {
                 var sessions = _sessionManager.GetSessions();
                 if (sessions == null || sessions.Count == 0) {
-                    return _sessionManager.GetCurrentSession();
+                    var curr = _sessionManager.GetCurrentSession();
+                    if (curr != null) {
+                        try {
+                            var cp = await curr.TryGetMediaPropertiesAsync();
+                            if (cp != null && IsStreamArtifactOrEmpty(cp.Title, cp.Artist)) {
+                                return null;
+                            }
+                        } catch { }
+                    }
+                    return curr;
                 }
 
                 GlobalSystemMediaTransportControlsSession? bestSession = null;
@@ -275,9 +292,22 @@ namespace Scrim.Metadata {
                     } catch { }
                 }
 
-                return bestSession ?? _sessionManager.GetCurrentSession();
+                if (bestSession != null) {
+                    return bestSession;
+                }
+
+                var fallback = _sessionManager.GetCurrentSession();
+                if (fallback != null) {
+                    try {
+                        var fp = await fallback.TryGetMediaPropertiesAsync();
+                        if (fp != null && IsStreamArtifactOrEmpty(fp.Title, fp.Artist)) {
+                            return null;
+                        }
+                    } catch { }
+                }
+                return fallback;
             } catch {
-                return _sessionManager?.GetCurrentSession();
+                return null;
             }
         }
 
