@@ -64,6 +64,13 @@
         <button class="scrim-btn-secondary" style="padding: 4px 12px; font-size: 11px;" @onclick="@(() => ShowAddCardMenu = !ShowAddCardMenu)" title="Change Column Widths & Layout Proportions">
             📐 Columns: @GetLayoutModeName()
         </button>
+
+        <button class="scrim-btn-secondary" style="padding: 4px 12px; font-size: 11px; background: rgba(139, 92, 246, 0.15); border: 1px solid rgba(139, 92, 246, 0.45); color: #c084fc; display: flex; align-items: center; gap: 6px; cursor: pointer;" @onclick="@(() => ShowPluginsModal = !ShowPluginsModal)" title="Manage Installed Plugins">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+            </svg>
+            <span>🔌 Plugins (@PluginLoader.Plugins.Count(p => p.IsEnabled)/@PluginLoader.Plugins.Count)</span>
+        </button>
     </div>
 
     <!-- Center ON AIR Glowing Badge & Stream TX Indicator -->
@@ -402,6 +409,9 @@
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
             <span style="font-weight: 700; font-size: 13px; color: #cbd5e1; letter-spacing: 0.5px;">CUSTOMIZE CONSOLE CARDS & LAYOUT</span>
             <div style="display: flex; gap: 8px;">
+                <button class="scrim-btn-secondary" style="padding: 4px 12px; font-size: 11px; background: rgba(139, 92, 246, 0.15); border: 1px solid rgba(139, 92, 246, 0.45); color: #c084fc; display: flex; align-items: center; gap: 6px;" @onclick="@(() => { ShowPluginsModal = true; ShowAddCardMenu = false; })" title="Open Plugin Manager">
+                    🔌 Plugin Manager
+                </button>
                 <button class="scrim-btn-secondary" style="padding: 4px 10px; font-size: 11px;" @onclick="ResetLayoutToDefault">Reset to Default</button>
                 <button class="scrim-dots-btn" @onclick="@(() => ShowAddCardMenu = false)">✕</button>
             </div>
