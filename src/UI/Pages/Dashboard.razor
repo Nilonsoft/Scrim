@@ -544,7 +544,8 @@
         { "card-encoding", "Encoding & Broadcast" },
         { "card-media-player", "Media Player" },
         { "card-soundboard", "Soundboard" },
-        { "card-web-branding", "Website Branding & Links" }
+        { "card-web-branding", "Website Branding & Links" },
+        { "card-plugins", "Plugins & Extensions" }
     };
 
     private bool ShowAddCardMenu = false;
@@ -676,28 +677,23 @@
             IsPlayingMedia = MetadataService.CurrentMetadata.IsPlaying;
         }
 
-        // Restore user choices from persisted profile (ignoring virtual cables for voice microphone)
+        // Restore user choices from persisted profile
         if (!string.IsNullOrEmpty(p.SelectedMicrophoneId) && Devices.Any(d => d.Id == p.SelectedMicrophoneId)) {
-            var savedDev = Devices.FirstOrDefault(d => d.Id == p.SelectedMicrophoneId);
-            bool isVirtual = savedDev != null && (savedDev.Name.Contains("cable", StringComparison.OrdinalIgnoreCase) ||
-                                                 savedDev.Name.Contains("vb-audio", StringComparison.OrdinalIgnoreCase) ||
-                                                 savedDev.Name.Contains("virtual", StringComparison.OrdinalIgnoreCase));
-            if (!isVirtual) {
-                SelectedDeviceId = p.SelectedMicrophoneId;
-            } else {
-                var physicalMic = Devices.FirstOrDefault(d => !d.Name.Contains("cable", StringComparison.OrdinalIgnoreCase) &&
-                                                              !d.Name.Contains("vb-audio", StringComparison.OrdinalIgnoreCase) &&
-                                                              !d.Name.Contains("virtual", StringComparison.OrdinalIgnoreCase));
-                SelectedDeviceId = physicalMic?.Id ?? "";
-                p.SelectedMicrophoneId = SelectedDeviceId;
-                ProfileManager.SaveProfile(p);
-            }
-        } else if (string.IsNullOrEmpty(SelectedDeviceId)) {
+            SelectedDeviceId = p.SelectedMicrophoneId;
+        } else if (!string.IsNullOrEmpty(p.SelectedMicrophoneName) && Devices.Any(d => string.Equals(d.Name, p.SelectedMicrophoneName, StringComparison.OrdinalIgnoreCase))) {
+            var dev = Devices.FirstOrDefault(d => string.Equals(d.Name, p.SelectedMicrophoneName, StringComparison.OrdinalIgnoreCase));
+            SelectedDeviceId = dev?.Id ?? "";
+            p.SelectedMicrophoneId = SelectedDeviceId;
+            ProfileManager.SaveProfile(p);
+        } else if (string.IsNullOrEmpty(p.SelectedMicrophoneId)) {
+            SelectedDeviceId = "";
+        } else if (string.IsNullOrEmpty(SelectedDeviceId) && Devices.Any()) {
             var physicalMic = Devices.FirstOrDefault(d => !d.Name.Contains("cable", StringComparison.OrdinalIgnoreCase) &&
                                                           !d.Name.Contains("vb-audio", StringComparison.OrdinalIgnoreCase) &&
                                                           !d.Name.Contains("virtual", StringComparison.OrdinalIgnoreCase));
-            SelectedDeviceId = physicalMic?.Id ?? "";
+            SelectedDeviceId = physicalMic?.Id ?? Devices.First().Id;
             p.SelectedMicrophoneId = SelectedDeviceId;
+            p.SelectedMicrophoneName = physicalMic?.Name ?? Devices.First().Name;
             ProfileManager.SaveProfile(p);
         }
 
@@ -716,10 +712,8 @@
         // Auto-select target window by saved name/ID if available, or default to system audio
         WindowInfo? initialWin = null;
         if (!string.IsNullOrEmpty(p.TargetProcessName) && !p.TargetProcessName.Equals("System Audio", StringComparison.OrdinalIgnoreCase)) {
-            initialWin = Windows.FirstOrDefault(w => string.Equals(w.ProcessName, p.TargetProcessName, StringComparison.OrdinalIgnoreCase));
-            if (initialWin == null) {
-                initialWin = Windows.FirstOrDefault(w => w.Title.Contains(p.TargetProcessName, StringComparison.OrdinalIgnoreCase));
-            }
+            initialWin = Windows.FirstOrDefault(w => string.Equals(w.ProcessName, p.TargetProcessName, StringComparison.OrdinalIgnoreCase))
+                      ?? Windows.FirstOrDefault(w => w.Title.Contains(p.TargetProcessName, StringComparison.OrdinalIgnoreCase));
         }
         if (initialWin == null && p.TargetProcessId > 0) {
             initialWin = Windows.FirstOrDefault(w => w.ProcessId == (uint)p.TargetProcessId);
@@ -730,21 +724,34 @@
             SelectedProcessDisplayName = !string.IsNullOrEmpty(initialWin.ProcessName) ? initialWin.ProcessName : initialWin.Title;
             MetadataService.StartMonitoring(SelectedProcessId);
             EnsureAudioMonitoring(SelectedProcessId);
+        } else if (!string.IsNullOrEmpty(p.TargetProcessName) && !p.TargetProcessName.Equals("System Audio", StringComparison.OrdinalIgnoreCase)) {
+            SelectedProcessId = (uint)(p.TargetProcessId > 0 ? p.TargetProcessId : 999999);
+            SelectedProcessDisplayName = p.TargetProcessName;
+            EnsureAudioMonitoring(0);
         } else {
             SelectedProcessId = 0;
             SelectedProcessDisplayName = "System Audio";
             EnsureAudioMonitoring(0);
         }
 
-        // Restore and ensure Virtual Cable routing if previously configured
+        // Restore and ensure Virtual Cable or selected audio device routing if previously configured
         if (!string.IsNullOrEmpty(p.CaptureDeviceId)) {
             if (!RenderDevices.Any(d => d.Id == p.CaptureDeviceId)) {
-                if (IsVbCableInstalled && !string.IsNullOrEmpty(VbCableDeviceId)) {
-                    p.CaptureDeviceId = VbCableDeviceId;
-                    ProfileManager.SaveProfile(p);
-                } else if (IsVirtualDeviceReady && !string.IsNullOrEmpty(DetectedVirtualDeviceId)) {
-                    p.CaptureDeviceId = DetectedVirtualDeviceId;
-                    ProfileManager.SaveProfile(p);
+                if (!string.IsNullOrEmpty(p.CaptureDeviceName)) {
+                    var matched = RenderDevices.FirstOrDefault(d => string.Equals(d.Name, p.CaptureDeviceName, StringComparison.OrdinalIgnoreCase));
+                    if (matched.Id != null) {
+                        p.CaptureDeviceId = matched.Id;
+                        ProfileManager.SaveProfile(p);
+                    }
+                }
+                if (!RenderDevices.Any(d => d.Id == p.CaptureDeviceId)) {
+                    if (IsVbCableInstalled && !string.IsNullOrEmpty(VbCableDeviceId)) {
+                        p.CaptureDeviceId = VbCableDeviceId;
+                        ProfileManager.SaveProfile(p);
+                    } else if (IsVirtualDeviceReady && !string.IsNullOrEmpty(DetectedVirtualDeviceId)) {
+                        p.CaptureDeviceId = DetectedVirtualDeviceId;
+                        ProfileManager.SaveProfile(p);
+                    }
                 }
             }
         }
@@ -834,6 +841,7 @@
     }
 
     private void OnCaptureDeviceChanged() {
+        ProfileManager.CurrentProfile.CaptureDeviceName = RenderDevices.FirstOrDefault(d => d.Id == ProfileManager.CurrentProfile.CaptureDeviceId).Name ?? "";
         ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
         MicService.SetVirtualOutputDevice(null);
         EnsureAudioMonitoring(SelectedProcessId);
@@ -865,7 +873,8 @@
     private void OnMetadataReceived(object? sender, MediaMetadata meta) {
         InvokeAsync(() => {
             if (!string.IsNullOrWhiteSpace(meta.Title)) {
-                bool trackChanged = meta.Title != CurrentTrackTitle || meta.Artist != CurrentTrackArtist;
+                bool trackChanged = !string.Equals(meta.Title, CurrentTrackTitle, StringComparison.OrdinalIgnoreCase) ||
+                                    !string.Equals(meta.Artist, CurrentTrackArtist, StringComparison.OrdinalIgnoreCase);
                 CurrentTrackTitle = meta.Title;
                 CurrentTrackArtist = string.IsNullOrWhiteSpace(meta.Artist) ? "Live Stream" : meta.Artist;
                 CurrentTrackExtra = string.IsNullOrWhiteSpace(meta.Album) ? "Broadcast Audio" : meta.Album;
@@ -979,19 +988,21 @@
                 !newWindows.Select(w => (w.ProcessId, w.Title)).SequenceEqual(Windows.Select(w => (w.ProcessId, w.Title)));
             if (changed) {
                 Windows = newWindows;
-                var savedName = ProfileManager.CurrentProfile.TargetProcessName;
-                if (!string.IsNullOrEmpty(savedName) && !savedName.Equals("System Audio", StringComparison.OrdinalIgnoreCase)) {
-                    if (SelectedProcessId == 0 || !Windows.Any(w => w.ProcessId == SelectedProcessId)) {
-                        var reconnected = Windows.FirstOrDefault(w => string.Equals(w.ProcessName, savedName, StringComparison.OrdinalIgnoreCase))
-                                       ?? Windows.FirstOrDefault(w => w.Title.Contains(savedName, StringComparison.OrdinalIgnoreCase));
-                        if (reconnected != null) {
-                            SelectedProcessId = reconnected.ProcessId;
-                            SelectedProcessDisplayName = !string.IsNullOrEmpty(reconnected.ProcessName) ? reconnected.ProcessName : reconnected.Title;
-                            EnsureAudioMonitoring(SelectedProcessId);
-                            MetadataService.StartMonitoring(SelectedProcessId);
-                        }
+            }
+            var savedName = ProfileManager.CurrentProfile.TargetProcessName;
+            if (!string.IsNullOrEmpty(savedName) && !savedName.Equals("System Audio", StringComparison.OrdinalIgnoreCase)) {
+                if (SelectedProcessId == 0 || SelectedProcessId == 999999 || !Windows.Any(w => w.ProcessId == SelectedProcessId)) {
+                    var reconnected = Windows.FirstOrDefault(w => string.Equals(w.ProcessName, savedName, StringComparison.OrdinalIgnoreCase))
+                                   ?? Windows.FirstOrDefault(w => w.Title.Contains(savedName, StringComparison.OrdinalIgnoreCase));
+                    if (reconnected != null) {
+                        SelectedProcessId = reconnected.ProcessId;
+                        SelectedProcessDisplayName = !string.IsNullOrEmpty(reconnected.ProcessName) ? reconnected.ProcessName : reconnected.Title;
+                        EnsureAudioMonitoring(SelectedProcessId);
+                        MetadataService.StartMonitoring(SelectedProcessId);
                     }
                 }
+            }
+            if (changed) {
                 InvokeAsync(StateHasChanged);
             }
         } catch { }
@@ -1174,6 +1185,7 @@
 
     private void OnMicrophoneChanged() {
         ProfileManager.CurrentProfile.SelectedMicrophoneId = SelectedDeviceId;
+        ProfileManager.CurrentProfile.SelectedMicrophoneName = Devices.FirstOrDefault(d => d.Id == SelectedDeviceId)?.Name ?? "";
         ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
         MicService.StartCapture(SelectedDeviceId);
     }
@@ -3121,6 +3133,75 @@
             <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px; font-size: 10px; color: #64748b;">
                 <span>Sending as verified <strong>@(string.IsNullOrWhiteSpace(ProfileManager.CurrentProfile.HostName) ? "DJ" : $"{ProfileManager.CurrentProfile.HostName} [DJ]")</strong></span>
                 <span>Press Enter to send</span>
+            </div>
+        </div>,
+
+        "card-plugins" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#c084fc" stroke-width="2">
+                        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+                    </svg>
+                    <h3 class="scrim-card-title" style="margin: 0;">Plugins & Extensions</h3>
+                    <span style="font-size: 11px; padding: 2px 7px; border-radius: 10px; background: rgba(139, 92, 246, 0.15); color: #c084fc; font-weight: 700;">
+                        @PluginLoader.Plugins.Count(p => p.IsEnabled)/@PluginLoader.Plugins.Count Active
+                    </span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <button class="scrim-dots-btn" @onclick="ReloadPlugins" title="Reload & Rescan Plugins">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="23 4 23 10 17 10"></polyline>
+                            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                        </svg>
+                    </button>
+                    <button class="scrim-dots-btn" @onclick="OpenPluginsFolder" title="Open Plugins Folder in File Explorer">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                        </svg>
+                    </button>
+                    <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
+                </div>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 8px; max-height: 480px; overflow-y: auto; padding-right: 4px;">
+                @if (PluginLoader.Plugins.Count == 0) {
+                    <div style="text-align: center; padding: 24px 12px; color: #64748b; font-size: 12px;">
+                        No plugins detected. Place plugin .dll assemblies into <code>~/.scrim/plugins/</code>.
+                    </div>
+                } else {
+                    @foreach (var plugin in PluginLoader.Plugins) {
+                        <div style="background: #14171e; border: 1px solid @(plugin.IsEnabled ? "rgba(139, 92, 246, 0.3)" : "#232731"); border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; transition: border-color 0.2s ease;">
+                            <div style="flex: 1; min-width: 0;">
+                                <div style="display: flex; align-items: center; gap: 6px;">
+                                    <span style="font-size: 13px; font-weight: 600; color: #f1f5f9;">@plugin.Name</span>
+                                    <span style="font-size: 9px; padding: 1px 5px; border-radius: 4px; background: @(plugin.IsEnabled ? "rgba(34, 197, 94, 0.15)" : "rgba(100, 116, 139, 0.2)"); color: @(plugin.IsEnabled ? "#4ade80" : "#94a3b8"); font-weight: 700;">
+                                        @(plugin.IsEnabled ? "ON" : "OFF")
+                                    </span>
+                                </div>
+
+                                <div style="font-size: 10px; color: #64748b; margin-top: 2px;">
+                                    <span>v@(plugin.Version)</span>
+                                    @if (!string.IsNullOrWhiteSpace(plugin.Author)) {
+                                        <span> • @plugin.Author</span>
+                                    }
+                                </div>
+                            </div>
+                            <label class="scrim-switch" style="flex-shrink: 0;" title="@(plugin.IsEnabled ? "Click to Disable" : "Click to Enable")">
+                                <input type="checkbox" checked="@plugin.IsEnabled" @onchange="@(() => TogglePlugin(plugin.Id))" />
+                                <span class="scrim-slider"></span>
+                            </label>
+                        </div>
+                    }
+                }
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06); font-size: 11px;">
+                <button class="pill-option" style="padding: 3px 10px; font-size: 10px; color: #c084fc; border-color: rgba(139, 92, 246, 0.3);" @onclick="OpenPluginsFolder">
+                    📁 Open Folder
+                </button>
+                <button class="pill-option" style="padding: 3px 10px; font-size: 10px; color: #38bdf8;" @onclick="ReloadPlugins">
+                    🔄 Rescan
+                </button>
             </div>
         </div>,
 

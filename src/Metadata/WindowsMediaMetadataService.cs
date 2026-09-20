@@ -9,6 +9,8 @@ namespace Scrim.Metadata {
     public class WindowsMediaMetadataService : IMetadataService {
         private static readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(4) };
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string? ArtUrl, TimeSpan Duration, DateTime CheckedAt)> _itunesCache = new();
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (byte[]? ArtBytes, string? ArtUrl)> _artCache = new(StringComparer.OrdinalIgnoreCase);
+        private readonly SemaphoreSlim _updateSemaphore = new(1, 1);
         private uint _targetProcessId;
         private CancellationTokenSource? _cts;
         private GlobalSystemMediaTransportControlsSessionManager? _sessionManager;
@@ -109,21 +111,25 @@ namespace Scrim.Metadata {
         }
 
         private async Task UpdateMetadataAsync() {
-            if (_sessionManager == null) {
-                try {
-                    _sessionManager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
-                    if (_sessionManager != null) {
-                        _sessionManager.SessionsChanged += SessionManager_SessionsChanged;
-                        _sessionManager.CurrentSessionChanged += SessionManager_CurrentSessionChanged;
-                        HookCurrentSession();
-                    }
-                } catch {
-                    _sessionManager = null;
-                    return;
-                }
+            if (!await _updateSemaphore.WaitAsync(0)) {
+                return;
             }
 
             try {
+                if (_sessionManager == null) {
+                    try {
+                        _sessionManager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
+                        if (_sessionManager != null) {
+                            _sessionManager.SessionsChanged += SessionManager_SessionsChanged;
+                            _sessionManager.CurrentSessionChanged += SessionManager_CurrentSessionChanged;
+                            HookCurrentSession();
+                        }
+                    } catch {
+                        _sessionManager = null;
+                        return;
+                    }
+                }
+
                 var session = await GetBestMediaSessionAsync();
                 if (session == null) return;
 
@@ -176,7 +182,8 @@ namespace Scrim.Metadata {
 
                     bool trackChanged = !string.IsNullOrEmpty(title) && 
                         !IsStreamArtifactOrEmpty(title, artist) &&
-                        (title != CurrentMetadata.Title || artist != CurrentMetadata.Artist || album != CurrentMetadata.Album);
+                        (!string.Equals(title, CurrentMetadata.Title, StringComparison.OrdinalIgnoreCase) ||
+                         !string.Equals(artist, CurrentMetadata.Artist, StringComparison.OrdinalIgnoreCase));
 
                     // Retain known duration if session temporarily drops timeline properties (common in Spotify/browsers)
                     if (!trackChanged && duration <= TimeSpan.Zero && CurrentMetadata.Duration > TimeSpan.Zero) {
@@ -190,17 +197,24 @@ namespace Scrim.Metadata {
                         }
                     }
 
+                    string artCacheKey = string.IsNullOrWhiteSpace(artist) ? title.Trim() : $"{artist.Trim()} - {title.Trim()}";
                     byte[]? artBytes = CurrentMetadata.AlbumArt;
                     string? artUrl = CurrentMetadata.AlbumArtUrl;
 
                     bool needsArtFetch = trackChanged || ((artBytes == null || artBytes.Length == 0) && string.IsNullOrEmpty(artUrl));
 
-                    if (needsArtFetch) {
-                        if (trackChanged) {
+                    if (trackChanged) {
+                        if (_artCache.TryGetValue(artCacheKey, out var cachedArt) && (cachedArt.ArtBytes != null || !string.IsNullOrEmpty(cachedArt.ArtUrl))) {
+                            artBytes = cachedArt.ArtBytes;
+                            artUrl = cachedArt.ArtUrl;
+                            needsArtFetch = false;
+                        } else {
                             artBytes = null;
                             artUrl = null;
                         }
+                    }
 
+                    if (needsArtFetch) {
                         // 1. Try extracting local thumbnail from Windows Media Session (skip generic browser icons)
                         if (props.Thumbnail != null && !isBrowser) {
                             try {
@@ -227,6 +241,10 @@ namespace Scrim.Metadata {
                                 }
                             } catch { }
                         }
+
+                        if (artBytes != null || !string.IsNullOrEmpty(artUrl)) {
+                            _artCache[artCacheKey] = (artBytes, artUrl);
+                        }
                     }
 
                     // Preserve duration if previously resolved
@@ -234,8 +252,16 @@ namespace Scrim.Metadata {
                         duration = CurrentMetadata.Duration;
                     }
 
-                    bool artRestored = (artBytes != null && CurrentMetadata.AlbumArt == null) || 
-                                       (!string.IsNullOrEmpty(artUrl) && string.IsNullOrEmpty(CurrentMetadata.AlbumArtUrl));
+                    byte[]? finalArt = artBytes ?? (!trackChanged ? CurrentMetadata.AlbumArt : null);
+                    string? finalArtUrl = artUrl ?? (!trackChanged ? CurrentMetadata.AlbumArtUrl : null);
+
+                    if (finalArt == null && string.IsNullOrEmpty(finalArtUrl) && _artCache.TryGetValue(artCacheKey, out var fallbackCached)) {
+                        finalArt = fallbackCached.ArtBytes;
+                        finalArtUrl = fallbackCached.ArtUrl;
+                    }
+
+                    bool artRestored = (finalArt != null && CurrentMetadata.AlbumArt == null) || 
+                                       (!string.IsNullOrEmpty(finalArtUrl) && string.IsNullOrEmpty(CurrentMetadata.AlbumArtUrl));
                     bool timelineChanged = Math.Abs((position - CurrentMetadata.Position).TotalSeconds) >= 0.8 || 
                         duration != CurrentMetadata.Duration || 
                         isPlaying != CurrentMetadata.IsPlaying;
@@ -245,8 +271,8 @@ namespace Scrim.Metadata {
                             Title = string.IsNullOrEmpty(title) ? CurrentMetadata.Title : title,
                             Artist = string.IsNullOrEmpty(artist) ? CurrentMetadata.Artist : artist,
                             Album = string.IsNullOrEmpty(album) ? CurrentMetadata.Album : album,
-                            AlbumArt = artBytes ?? (!trackChanged ? CurrentMetadata.AlbumArt : null),
-                            AlbumArtUrl = artUrl ?? (!trackChanged ? CurrentMetadata.AlbumArtUrl : null),
+                            AlbumArt = finalArt,
+                            AlbumArtUrl = finalArtUrl,
                             Duration = duration > TimeSpan.Zero ? duration : CurrentMetadata.Duration,
                             Position = position,
                             IsPlaying = isPlaying
@@ -255,7 +281,9 @@ namespace Scrim.Metadata {
                         MetadataChanged?.Invoke(this, newMeta);
                     }
                 }
-            } catch { }
+            } catch { } finally {
+                _updateSemaphore.Release();
+            }
         }
 
         private static bool IsStreamArtifactOrEmpty(string? title, string? artist) {

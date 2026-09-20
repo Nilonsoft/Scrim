@@ -6,6 +6,7 @@ namespace Scrim.Configuration {
         public int TargetProcessId { get; set; }
         public string TargetProcessName { get; set; } = "";
         public string SelectedMicrophoneId { get; set; } = "";
+        public string SelectedMicrophoneName { get; set; } = "";
         public string SelectedVoiceEffect { get; set; } = "normal";
         public string MicControlMode { get; set; } = "PushToTalk";
         public bool MicMonitoring { get; set; } = false;
@@ -19,6 +20,7 @@ namespace Scrim.Configuration {
         public bool MuteAppLocally { get; set; } = false;
         public int AppStreamVolume { get; set; } = 100;
         public string CaptureDeviceId { get; set; } = "";
+        public string CaptureDeviceName { get; set; } = "";
         public string CustomPublicUrl { get; set; } = "";
         public bool UseHttps { get; set; } = false;
         public bool UseReverseProxy { get; set; } = false;
