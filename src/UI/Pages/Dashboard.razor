@@ -273,7 +273,7 @@
                 @if (PluginLoader.Plugins.Count == 0) {
                     <div style="text-align: center; padding: 40px 20px; color: #64748b;">
                         <p style="font-size: 14px;">No plugins detected.</p>
-                        <p style="font-size: 12px; margin-top: 6px;">Place plugin <code>.dll</code> files in <code>~/.scrim/plugins/</code>.</p>
+                        <p style="font-size: 12px; margin-top: 6px;">Place plugin assemblies (<code>.dll</code>) or Python plugins into <code>~/.scrim/plugins/</code>.</p>
                     </div>
                 } else {
                     @foreach (var plugin in PluginLoader.Plugins) {
@@ -281,6 +281,9 @@
                             <div style="flex: 1; min-width: 0;">
                                 <div style="display: flex; align-items: center; gap: 8px;">
                                     <span style="font-size: 14px; font-weight: 600; color: #f1f5f9;">@plugin.Name</span>
+                                    @if (plugin.PluginType == "Python") {
+                                        <span style="font-size: 10px; padding: 1px 6px; border-radius: 4px; background: rgba(59, 130, 246, 0.15); color: #60a5fa; font-weight: 700; border: 1px solid rgba(59, 130, 246, 0.3);">Python</span>
+                                    }
                                     <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: @(plugin.IsEnabled ? "rgba(34, 197, 94, 0.15)" : "rgba(100, 116, 139, 0.2)"); color: @(plugin.IsEnabled ? "#4ade80" : "#94a3b8"); font-weight: 600;">
                                         @(plugin.IsEnabled ? "ACTIVE" : "DISABLED")
                                     </span>
@@ -3224,7 +3227,7 @@
             <div style="display: flex; flex-direction: column; gap: 8px; max-height: 480px; overflow-y: auto; padding-right: 4px;">
                 @if (PluginLoader.Plugins.Count == 0) {
                     <div style="text-align: center; padding: 24px 12px; color: #64748b; font-size: 12px;">
-                        No plugins detected. Place plugin .dll assemblies into <code>~/.scrim/plugins/</code>.
+                        No plugins detected. Place plugin assemblies (.dll) or Python plugins into <code>~/.scrim/plugins/</code>.
                     </div>
                 } else {
                     @foreach (var plugin in PluginLoader.Plugins) {
@@ -3232,6 +3235,9 @@
                             <div style="flex: 1; min-width: 0;">
                                 <div style="display: flex; align-items: center; gap: 6px;">
                                     <span style="font-size: 13px; font-weight: 600; color: #f1f5f9;">@plugin.Name</span>
+                                    @if (plugin.PluginType == "Python") {
+                                        <span style="font-size: 9px; padding: 1px 5px; border-radius: 4px; background: rgba(59, 130, 246, 0.15); color: #60a5fa; font-weight: 700; border: 1px solid rgba(59, 130, 246, 0.3);">Python</span>
+                                    }
                                     <span style="font-size: 9px; padding: 1px 5px; border-radius: 4px; background: @(plugin.IsEnabled ? "rgba(34, 197, 94, 0.15)" : "rgba(100, 116, 139, 0.2)"); color: @(plugin.IsEnabled ? "#4ade80" : "#94a3b8"); font-weight: 700;">
                                         @(plugin.IsEnabled ? "ON" : "OFF")
                                     </span>

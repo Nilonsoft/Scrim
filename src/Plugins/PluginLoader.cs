@@ -12,6 +12,7 @@ namespace Scrim.Plugins {
         public string Version { get; set; } = string.Empty;
         public string Author { get; set; } = string.Empty;
         public string AssemblyPath { get; set; } = string.Empty;
+        public string PluginType { get; set; } = "CSharp";
         public bool IsEnabled { get; set; } = true;
         public IScrimPlugin? Instance { get; set; }
     }
@@ -121,6 +122,7 @@ namespace Scrim.Plugins {
                 } catch { }
 
                 foreach (var dir in searchDirs) {
+                    // 1. Discover and load C# DLL plugins
                     try {
                         var dlls = Directory.GetFiles(dir, "*.dll");
                         foreach (var dll in dlls) {
@@ -140,6 +142,7 @@ namespace Scrim.Plugins {
                                             Version = plugin.Version,
                                             Author = plugin.Author,
                                             AssemblyPath = dll,
+                                            PluginType = "CSharp",
                                             IsEnabled = isEnabled,
                                             Instance = plugin
                                         };
@@ -158,6 +161,79 @@ namespace Scrim.Plugins {
                             } catch {
                                 // Ignore load errors for individual DLLs
                             }
+                        }
+                    } catch { }
+
+                    // 2. Discover and load Python plugin folders
+                    try {
+                        var subDirs = Directory.GetDirectories(dir);
+                        foreach (var subDir in subDirs) {
+                            try {
+                                var pyPlugin = PythonPlugin.FromDirectory(subDir);
+                                if (pyPlugin != null) {
+                                    string id = pyPlugin.Id;
+                                    bool isEnabled = !_disabledPluginIds.Contains(id);
+
+                                    var item = new PluginItem {
+                                        Id = id,
+                                        Name = pyPlugin.Name,
+                                        Version = pyPlugin.Version,
+                                        Author = pyPlugin.Author,
+                                        AssemblyPath = pyPlugin.ScriptPath,
+                                        PluginType = "Python",
+                                        IsEnabled = isEnabled,
+                                        Instance = pyPlugin
+                                    };
+
+                                    _pluginItems.Add(item);
+
+                                    if (isEnabled) {
+                                        try {
+                                            pyPlugin.Initialize(this);
+                                        } catch (Exception ex) {
+                                            Console.WriteLine($"[PluginLoader] Error initializing Python plugin {pyPlugin.Name}: {ex.Message}");
+                                        }
+                                    }
+                                }
+                            } catch { }
+                        }
+                    } catch { }
+
+                    // 3. Discover and load standalone .py script plugins
+                    try {
+                        var pyFiles = Directory.GetFiles(dir, "*.py");
+                        foreach (var pyFile in pyFiles) {
+                            string fileName = Path.GetFileName(pyFile);
+                            if (string.Equals(fileName, "scrim.py", StringComparison.OrdinalIgnoreCase)) {
+                                continue;
+                            }
+
+                            try {
+                                var pyPlugin = PythonPlugin.FromScript(pyFile);
+                                string id = pyPlugin.Id;
+                                bool isEnabled = !_disabledPluginIds.Contains(id);
+
+                                var item = new PluginItem {
+                                    Id = id,
+                                    Name = pyPlugin.Name,
+                                    Version = pyPlugin.Version,
+                                    Author = pyPlugin.Author,
+                                    AssemblyPath = pyPlugin.ScriptPath,
+                                    PluginType = "Python",
+                                    IsEnabled = isEnabled,
+                                    Instance = pyPlugin
+                                };
+
+                                _pluginItems.Add(item);
+
+                                if (isEnabled) {
+                                    try {
+                                        pyPlugin.Initialize(this);
+                                    } catch (Exception ex) {
+                                        Console.WriteLine($"[PluginLoader] Error initializing Python script {pyPlugin.Name}: {ex.Message}");
+                                    }
+                                }
+                            } catch { }
                         }
                     } catch { }
                 }
@@ -210,6 +286,11 @@ namespace Scrim.Plugins {
                     if (item.IsEnabled) {
                         try {
                             item.Instance?.Shutdown();
+                        } catch { }
+                    }
+                    if (item.Instance is IDisposable disposable) {
+                        try {
+                            disposable.Dispose();
                         } catch { }
                     }
                 }

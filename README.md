@@ -49,6 +49,12 @@
 - **4 Selectable Visualizers**: Choose between Neon Frequency Spectrum, Dynamic Waveform, Glowing Retro VU Meter, or Pulsing Sound Bars.
 - **Listener Song Requests & Dedications**: Remote listeners can submit song requests with free-form dedications (e.g. for a friend, partner, or crew), visible in the live queue and the DJ's moderation card.
 
+### 🔌 Extensible C# & Python Plugin System
+- **Dual Runtime Support**: Dynamically discover and execute compiled .NET class libraries (`.dll`) and pure Python plugins (`.py` or packaged folders with `plugin.json`).
+- **Crash-Resilient Worker Bridge**: Python plugins run in isolated child processes communicating over bidirectional JSON-RPC, protecting live radio broadcasts from script crashes or hangs.
+- **Dedicated Virtual Environments**: Each Python plugin can run in its own `.venv` to leverage third-party `pip` packages (Discord webhooks, Twitch bots, databases, analytics).
+- **Interactive Console Management**: Toggle plugins ON/OFF dynamically from the Scrim Dashboard with real-time runtime badges, version tags, and integrated logging.
+
 ---
 
 ## Prerequisites
@@ -87,7 +93,7 @@ Comprehensive guides, specifications, and architecture documents are located in 
 - 🎨 **[Web Player Themes & Custom Theme Guide](docs/web-themes.md)**: Guide to built-in themes (Dark, Goth, Pink, Flowers, Light, Rock & Roll) and creating user JSON themes in `~/.scrim/themes/`.
 - 🌐 **[Network & Outside Broadcasting Guide](docs/network-broadcasting.md)**: Details on local LAN sharing, UPnP port forwarding, custom domain overrides, and media player endpoints.
 - 📐 **[Project Specification & Architecture](docs/spec.md)**: Deep technical dive into the WASAPI loopback capture, mixing pipelines, and transcoding engine.
-- 🔌 **[Plugin Development Guide](docs/plugin-development.md)**: Complete guide to authoring custom Scrim plugins, with details on the ten built-in reference plugins: **Discord Notifier**, **OBS Overlay**, **Show Logger**, **Lyrics Ticker**, **Twitch Bot**, **Stream Deck Companion**, **Last.fm Scrobbler**, **Jingle Sweeper**, **Stream Archiver**, and **MIDI Controller Surface**.
+- 🔌 **[Plugin Development Guide](docs/plugin-development.md)**: Complete guide to authoring custom Scrim plugins in **C# (.NET assemblies)** and **Python** (via isolated subprocess worker bridge and `scrim.py` SDK), with details on the ten built-in reference plugins: **Discord Notifier**, **OBS Overlay**, **Show Logger**, **Lyrics Ticker**, **Twitch Bot**, **Stream Deck Companion**, **Last.fm Scrobbler**, **Jingle Sweeper**, **Stream Archiver**, and **MIDI Controller Surface**.
 
 ---
 

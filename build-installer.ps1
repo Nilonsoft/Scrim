@@ -90,8 +90,13 @@ if (-not (Test-Path $pluginsDir)) {
     New-Item -ItemType Directory -Path $pluginsDir -Force | Out-Null
 }
 $plReadme = Join-Path $pluginsDir "readme.txt"
-if (-not (Test-Path $plReadme)) {
-    Set-Content -Path $plReadme -Value "Custom Scrim plugins (.dll) can be placed here or in ~/.scrim/plugins/."
+Set-Content -Path $plReadme -Value "Custom Scrim plugins (.dll assemblies or Python .py/folders) can be placed here or in ~/.scrim/plugins/."
+
+# Copy scrim.py SDK into Plugins directory for Python plugin developers
+$scrimPySource = Join-Path $scriptRoot "src\Plugins\scrim.py"
+if (Test-Path $scrimPySource) {
+    Copy-Item -Path $scrimPySource -Destination (Join-Path $pluginsDir "scrim.py") -Force
+    Write-Host "Packaged scrim.py SDK into Plugins/." -ForegroundColor Gray
 }
 
 # Build and package all built-in plugins from plugins/ directory

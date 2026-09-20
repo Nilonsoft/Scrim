@@ -6,12 +6,13 @@ This guide provides a complete, step-by-step walkthrough for building, compiling
 
 ## 1. Overview & Architecture
 
-Scrim features a modular plugin architecture that dynamically discovers and executes .NET assemblies at startup. Plugins can:
+Scrim features a modular plugin architecture that dynamically discovers and executes both compiled **.NET assemblies** (`.dll`) and **Python plugins** (`.py` or packaged folders) at startup. Plugins can:
 - **Hook into Real-Time Metadata**: Detect track changes, song durations, album art, and playback states from Spotify, media players, or browser streams.
 - **Monitor Live Broadcasts**: Track active listener counts, bitrate, format, transmitter (TX) state, and ON AIR toggles.
 - **Interact with Station Profiles**: Read and adapt to station branding, port settings, audio presets, and themes.
 - **Moderate & Automate Song Requests**: Inspect, approve, or reject incoming listener song requests and dedications.
-- **Inject Custom Dashboard Cards**: Add custom drag-and-drop Blazor cards into the DJ console layout (`IUiExtension`).
+- **Inject Custom Dashboard Cards**: Add custom drag-and-drop Blazor cards into the DJ console layout (`IUiExtension`, for .NET plugins).
+- **Run Isolated Python Workflows**: Write automations, webhooks, analytics, and bots in pure Python with full access to `pip` packages without compiling C# code.
 
 ---
 
@@ -324,4 +325,213 @@ Scrim ships with ten production-ready reference plugins in the `plugins/` direct
 | **Station Jingle & Sweeper Player** | `JingleSweeper.dll` | Plays station IDs and audio drops from `%USERPROFILE%\.scrim\jingles\*.wav` at periodic intervals (e.g. every 15m) into the audio mixer with ducking. Configured via `jingle_config.json`. |
 | **Live Stream Audio Archiver** | `StreamArchiver.dll` | Captures live broadcast stream frames while ON AIR and writes continuous MP3/AAC audio files directly into `%USERPROFILE%\.scrim\recordings\`. Configured via `archiver_config.json`. |
 | **MIDI Controller Surface** | `MidiController.dll` | Maps USB/MIDI hardware faders (CC 7 volume) and pads (notes 36-39 for mic mute, broadcast toggle, skip, play/pause) to live Scrim controls. Configured via `midi_config.json`. |
+
+---
+
+## 12. Building Plugins in Python
+
+Scrim supports plugins written entirely in **Python** without compiling C# code or requiring the .NET SDK. Python plugins run as isolated child processes communicating with Scrim over bidirectional JSON-RPC via standard I/O (`stdin`/`stdout`).
+
+### Why Write Plugins in Python?
+- **Crash Isolation**: Errors, exceptions, or hangs in Python scripts cannot terminate the Scrim desktop application or interrupt the live audio broadcast.
+- **Full `pip` Ecosystem**: Use any standard library or third-party package (e.g. `requests`, `websockets`, `discord.py`, `pydantic`, `pandas`) without library version conflicts.
+- **Virtual Environment Support**: Each plugin can bundle its own `.venv` or `venv` directory containing its required packages.
+- **First-Class UI Integration**: Python plugins appear in the Scrim Dashboard with a blue **Python** badge, full ON/OFF toggles, version info, and error reporting.
+
+---
+
+### Python Plugin Structure
+
+Scrim discovers Python plugins in `%USERPROFILE%\.scrim\plugins\` (or `<InstallDir>\Plugins\`) in two formats:
+
+#### Format A: Packaged Plugin Folder (Recommended)
+```
+%USERPROFILE%\.scrim\plugins\
+  └── MyWebhookNotifier\
+      ├── plugin.json          # Plugin metadata & entry script
+      ├── main.py              # Main Python script
+      ├── requirements.txt     # Optional pip dependencies
+      └── .venv\               # Optional dedicated virtual environment
+```
+
+#### Format B: Standalone Python Script
+A single `.py` file placed directly in `%USERPROFILE%\.scrim\plugins\my_quick_script.py`. Scrim will automatically derive the plugin name from the file name and run it using system Python.
+
+---
+
+### The `plugin.json` Manifest
+
+When using a folder structure, create a `plugin.json` file in the root of your plugin directory:
+
+```json
+{
+  "id": "my-webhook-notifier",
+  "name": "Discord Webhook Notifier",
+  "version": "1.0.0",
+  "author": "DJ Alex",
+  "entry": "main.py",
+  "description": "Sends rich Discord embeds whenever tracks change or the broadcast goes live."
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `string` | Unique identifier for state persistence (enabled/disabled). |
+| `name` | `string` | Human-readable name displayed in the Scrim Dashboard. |
+| `version` | `string` | Version string (e.g. `1.0.0`). |
+| `author` | `string` | Author name or studio handle. |
+| `entry` | `string` | Script entrypoint (defaults to `main.py`). |
+| `description` | `string` | Optional summary of the plugin's functionality. |
+
+---
+
+### Using the `scrim.py` SDK
+
+Scrim includes a lightweight Python helper module named `scrim.py` (packaged directly in Scrim's `Plugins/` directory and available on `PYTHONPATH`).
+
+To build a plugin, subclass `ScrimPlugin` and implement any of the lifecycle hooks:
+
+```python
+from scrim import ScrimPlugin, TrackInfo
+
+class MyNotifierPlugin(ScrimPlugin):
+    def on_init(self, station_info: dict):
+        """Called when Scrim initializes your plugin."""
+        self.log(f"Initialized for station: {self.station_name} on port {self.port}")
+
+    def on_metadata_changed(self, track: TrackInfo):
+        """Triggered whenever a new song or track starts playing."""
+        self.log(f"Now playing: {track.artist} - {track.title} ({track.album})")
+
+    def on_broadcast_state_changed(self, is_live: bool):
+        """Triggered when the DJ toggles ON AIR / OFFLINE."""
+        status = "ON AIR" if is_live else "OFFLINE"
+        self.log(f"Transmitter status changed to: {status}")
+
+    def on_listener_count_changed(self, count: int):
+        """Triggered when active listener count updates."""
+        self.log(f"Current listeners: {count}")
+
+    def on_shutdown(self):
+        """Called when the plugin is turned OFF or Scrim exits."""
+        self.log("Shutting down cleanly...")
+
+if __name__ == "__main__":
+    MyNotifierPlugin().run()
+```
+
+---
+
+### Python SDK Hook Reference
+
+| Method / Hook | Parameters | Description |
+|---|---|---|
+| `on_init(station_info)` | `station_info: dict` | Contains `station_name` and `port`. |
+| `on_metadata_changed(track)` | `track: TrackInfo` | Attributes: `track.title`, `track.artist`, `track.album`, `track.duration_seconds`. |
+| `on_broadcast_state_changed(is_live)` | `is_live: bool` | `True` when broadcasting live, `False` when offline. |
+| `on_listener_count_changed(count)` | `count: int` | Total connected HTTP audio stream listeners. |
+| `on_song_requested(request)` | `request: dict` | Listener song request details. |
+| `on_shutdown()` | None | Clean up network sessions, open files, or timers. |
+| `self.log(message)` | `message: str` | Sends a log string back to Scrim's console and crash logs. |
+| `self.update_metadata(artist, title, album)` | `artist: str, title: str, album: Optional[str]` | Requests Scrim to update active broadcast metadata. |
+
+---
+
+### Complete Example: Python Discord Webhook Notifier
+
+Here is a complete, production-ready Python plugin that posts now-playing tracks to a Discord channel:
+
+**`plugin.json`**:
+```json
+{
+  "id": "python-discord-webhook",
+  "name": "Python Discord Announcer",
+  "version": "1.0.0",
+  "author": "Radio Host",
+  "entry": "main.py"
+}
+```
+
+**`main.py`**:
+```python
+import urllib.request
+import json
+from scrim import ScrimPlugin, TrackInfo
+
+# Set your Discord incoming webhook URL here
+WEBHOOK_URL = "https://discord.com/api/webhooks/YOUR_WEBHOOK_URL_HERE"
+
+class DiscordAnnouncer(ScrimPlugin):
+    def send_discord_embed(self, title: str, description: str, color: int = 0x8b5cf6):
+        if "YOUR_WEBHOOK_URL_HERE" in WEBHOOK_URL:
+            return
+
+        payload = {
+            "embeds": [{
+                "title": title,
+                "description": description,
+                "color": color,
+                "footer": {"text": f"Broadcast via {self.station_name}"}
+            }]
+        }
+
+        try:
+            req = urllib.request.Request(
+                WEBHOOK_URL,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json", "User-Agent": "ScrimPythonPlugin/1.0"}
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                pass
+        except Exception as ex:
+            self.log(f"Failed to send Discord webhook: {ex}")
+
+    def on_broadcast_state_changed(self, is_live: bool):
+        if is_live:
+            self.send_discord_embed(
+                title="🔴 Station is NOW LIVE!",
+                description=f"Tune in live now at http://localhost:{self.port}/stream",
+                color=0xef4444
+            )
+        else:
+            self.send_discord_embed(
+                title="⚪ Station is OFFLINE",
+                description="Thanks for listening!",
+                color=0x64748b
+            )
+
+    def on_metadata_changed(self, track: TrackInfo):
+        if not track.title and not track.artist:
+            return
+        
+        self.send_discord_embed(
+            title="🎵 Now Playing",
+            description=f"**{track.artist}** — {track.title}\n*Album: {track.album or 'Single'}*",
+            color=0x8b5cf6
+        )
+
+if __name__ == "__main__":
+    DiscordAnnouncer().run()
+```
+
+---
+
+### Managing Dependencies & Virtual Environments
+
+If your plugin requires third-party packages (e.g. `requests`, `websockets`):
+
+1. Open PowerShell and navigate into your plugin folder:
+   ```powershell
+   cd "$HOME\.scrim\plugins\MyWebhookNotifier"
+   ```
+2. Create a virtual environment named `.venv`:
+   ```powershell
+   python -m venv .venv
+   ```
+3. Install your dependencies into that virtual environment:
+   ```powershell
+   .\.venv\Scripts\pip install requests
+   ```
+4. Scrim will automatically detect `.venv\Scripts\python.exe` and execute your plugin using its dedicated environment and dependencies!
+
 
