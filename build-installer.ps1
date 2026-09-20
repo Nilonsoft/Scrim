@@ -50,7 +50,247 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "Publish completed successfully." -ForegroundColor Green
 
-# Clean up any leftover developer documentation in publish directory
+# Helper function to convert markdown documentation into standalone styled HTML for end users
+function Convert-MarkdownToHtml {
+    param(
+        [string]$MarkdownPath,
+        [string]$OutputPath,
+        [string]$Title = "Scrim Documentation"
+    )
+
+    if (-not (Test-Path $MarkdownPath)) {
+        return
+    }
+
+    $rawContent = Get-Content -Path $MarkdownPath -Raw -Encoding utf8
+
+    # Convert GitHub alert blockquotes to styled alert divs
+    $alertRegex = '(?ms)^>\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*\r?\n((?:^>.*?(?:\r?\n|$))+)'
+    $processed = [System.Text.RegularExpressions.Regex]::Replace($rawContent, $alertRegex, {
+        param($match)
+        $type = $match.Groups[1].Value.ToLower()
+        $body = $match.Groups[2].Value -replace '(?m)^>\s?', ''
+        $icon = switch ($type) {
+            'note' { 'ℹ️' }
+            'tip' { '💡' }
+            'important' { '⭐' }
+            'warning' { '⚠️' }
+            'caution' { '🛑' }
+            default { 'ℹ️' }
+        }
+        return "`n<div class=`"alert alert-$type`"><div class=`"alert-title`">$icon $($match.Groups[1].Value)</div>`n$body`n</div>`n"
+    })
+
+    $htmlBody = ($processed | ConvertFrom-Markdown).Html
+
+    $htmlDocument = @"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>$Title - Scrim</title>
+    <style>
+        :root {
+            --bg-color: #0d1117;
+            --surface-color: #161b22;
+            --border-color: #30363d;
+            --text-color: #e6edf3;
+            --text-muted: #8b949e;
+            --accent-color: #58a6ff;
+            --code-bg: #1c2128;
+        }
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            line-height: 1.6;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            max-width: 920px;
+            margin: 0 auto;
+            padding: 40px 24px 80px 24px;
+        }
+        .header-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-bottom: 24px;
+            margin-bottom: 32px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 700;
+            font-size: 18px;
+            color: #ffffff;
+        }
+        .brand-badge {
+            background: linear-gradient(135deg, #8b5cf6, #3b82f6);
+            color: #ffffff;
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-weight: 600;
+        }
+        h1, h2, h3, h4 {
+            color: #ffffff;
+            font-weight: 600;
+            margin-top: 1.5em;
+            margin-bottom: 0.5em;
+            line-height: 1.3;
+        }
+        h1 {
+            font-size: 28px;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 12px;
+            margin-top: 0;
+        }
+        h2 {
+            font-size: 20px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid rgba(48, 54, 61, 0.5);
+        }
+        h3 { font-size: 16px; }
+        p, li {
+            font-size: 14px;
+            color: var(--text-color);
+        }
+        a {
+            color: var(--accent-color);
+            text-decoration: none;
+        }
+        a:hover { text-decoration: underline; }
+        pre {
+            background-color: var(--code-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+            overflow-x: auto;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        code {
+            font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+            font-size: 85%;
+            background-color: rgba(110, 118, 129, 0.2);
+            padding: 0.2em 0.4em;
+            border-radius: 4px;
+        }
+        pre code {
+            background: transparent;
+            padding: 0;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 20px 0;
+            font-size: 13px;
+        }
+        table th, table td {
+            border: 1px solid var(--border-color);
+            padding: 10px 14px;
+            text-align: left;
+        }
+        table th {
+            background-color: var(--surface-color);
+            font-weight: 600;
+            color: #ffffff;
+        }
+        table tr:nth-child(even) {
+            background-color: rgba(22, 27, 34, 0.5);
+        }
+        hr {
+            border: none;
+            border-top: 1px solid var(--border-color);
+            margin: 32px 0;
+        }
+        .alert {
+            border-radius: 8px;
+            padding: 14px 18px;
+            margin: 20px 0;
+            border-left: 4px solid;
+            background: var(--surface-color);
+            font-size: 13px;
+        }
+        .alert-title {
+            font-weight: 700;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            font-size: 11px;
+            letter-spacing: 0.5px;
+        }
+        .alert-tip {
+            border-color: #2ea043;
+            background: rgba(46, 160, 67, 0.1);
+        }
+        .alert-tip .alert-title { color: #3fb950; }
+        .alert-note {
+            border-color: #1f6feb;
+            background: rgba(31, 111, 235, 0.1);
+        }
+        .alert-note .alert-title { color: #58a6ff; }
+        .alert-important {
+            border-color: #8957e5;
+            background: rgba(137, 87, 229, 0.1);
+        }
+        .alert-important .alert-title { color: #a371f7; }
+        .alert-warning {
+            border-color: #d29922;
+            background: rgba(210, 153, 34, 0.1);
+        }
+        .alert-warning .alert-title { color: #e3b341; }
+        .alert-caution {
+            border-color: #f85149;
+            background: rgba(248, 81, 73, 0.1);
+        }
+        .alert-caution .alert-title { color: #f85149; }
+        footer {
+            margin-top: 60px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border-color);
+            font-size: 12px;
+            color: var(--text-muted);
+            display: flex;
+            justify-content: space-between;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header-bar">
+            <div class="brand">
+                <span>📻 Scrim</span>
+                <span class="brand-badge">Documentation</span>
+            </div>
+            <div style="font-size: 12px; color: var(--text-muted);">
+                Live Audio Streaming Console
+            </div>
+        </div>
+        $htmlBody
+        <footer>
+            <div>Scrim Studio Documentation</div>
+            <div>Built for Scrim v$Version</div>
+        </footer>
+    </div>
+</body>
+</html>
+"@
+
+    $dir = Split-Path -Path $OutputPath -Parent
+    if (-not (Test-Path $dir)) {
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+
+    [System.IO.File]::WriteAllText($OutputPath, $htmlDocument, [System.Text.Encoding]::UTF8)
+}
+
+# Clean up any leftover developer documentation and markdown files in publish directory
 $oldDocs = Join-Path $publishDir "docs"
 if (Test-Path $oldDocs) {
     Remove-Item -Path $oldDocs -Recurse -Force
@@ -59,21 +299,23 @@ $oldReadme = Join-Path $publishDir "README.md"
 if (Test-Path $oldReadme) {
     Remove-Item -Path $oldReadme -Force
 }
+Get-ChildItem -Path $publishDir -Filter "*.md" -ErrorAction SilentlyContinue | Remove-Item -Force
 
-# Package the end-user guide and plugin development guide
+# Convert and package rich HTML documentation for installer
 $userGuideSource = Join-Path $scriptRoot "docs\user-guide.md"
-$userGuideDest = Join-Path $publishDir "UserGuide.md"
-if (Test-Path $userGuideSource) {
-    Copy-Item -Path $userGuideSource -Destination $userGuideDest -Force
-    Write-Host "Packaged clean UserGuide.md for installer." -ForegroundColor Gray
-}
+$userGuideDest = Join-Path $publishDir "UserGuide.html"
+Convert-MarkdownToHtml -MarkdownPath $userGuideSource -OutputPath $userGuideDest -Title "Scrim User Guide"
+Write-Host "Packaged UserGuide.html for installer." -ForegroundColor Gray
 
 $pluginGuideSource = Join-Path $scriptRoot "docs\plugin-development.md"
-$pluginGuideDest = Join-Path $publishDir "PluginGuide.md"
-if (Test-Path $pluginGuideSource) {
-    Copy-Item -Path $pluginGuideSource -Destination $pluginGuideDest -Force
-    Write-Host "Packaged PluginGuide.md for installer." -ForegroundColor Gray
-}
+$pluginGuideDest = Join-Path $publishDir "PluginGuide.html"
+Convert-MarkdownToHtml -MarkdownPath $pluginGuideSource -OutputPath $pluginGuideDest -Title "Scrim Plugin Development Guide"
+Write-Host "Packaged PluginGuide.html for installer." -ForegroundColor Gray
+
+$streamingGuideSource = Join-Path $scriptRoot "docs\easy-streaming-guide.md"
+$streamingGuideDest = Join-Path $publishDir "EasyStreamingGuide.html"
+Convert-MarkdownToHtml -MarkdownPath $streamingGuideSource -OutputPath $streamingGuideDest -Title "Scrim Easy Streaming Guide (Caddy & HTTPS)"
+Write-Host "Packaged EasyStreamingGuide.html for installer." -ForegroundColor Gray
 
 # Ensure VoiceEffects and Plugins directories exist and are packaged into MSI
 $voiceEffectsDir = Join-Path $publishDir "VoiceEffects"

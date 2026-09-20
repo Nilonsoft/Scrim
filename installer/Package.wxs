@@ -46,12 +46,17 @@
         <Shortcut Id="ApplicationUserGuideShortcut"
                   Name="Scrim User Guide"
                   Description="User Guide and Setup Instructions"
-                  Target="[INSTALLFOLDER]UserGuide.md"
+                  Target="[INSTALLFOLDER]UserGuide.html"
                   WorkingDirectory="INSTALLFOLDER" />
         <Shortcut Id="ApplicationPluginGuideShortcut"
                   Name="Scrim Plugin Development Guide"
                   Description="Guide to building custom Scrim plugins without source code"
-                  Target="[INSTALLFOLDER]PluginGuide.md"
+                  Target="[INSTALLFOLDER]PluginGuide.html"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <Shortcut Id="ApplicationEasyStreamingGuideShortcut"
+                  Name="Scrim Easy Streaming Guide (Caddy &amp; HTTPS)"
+                  Description="Step-by-step guide to streaming without ports using Caddy and free HTTPS"
+                  Target="[INSTALLFOLDER]EasyStreamingGuide.html"
                   WorkingDirectory="INSTALLFOLDER" />
         <RemoveFolder Id="CleanUpProgramMenuFolder" On="uninstall" />
         <RegistryValue Root="HKCU" Key="Software\ScrimStudio\Scrim" Name="installed" Type="integer" Value="1" KeyPath="yes" />
