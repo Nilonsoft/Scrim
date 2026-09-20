@@ -708,6 +708,7 @@
         ReactionService.CountsReset += OnReactionCountsReset;
         HistoryService.HistoryChanged += OnHistoryChanged;
         PluginLoader.PluginsChanged += OnPluginsChanged;
+        RequestController.QueueChanged += OnQueueChanged;
 
         if (!string.IsNullOrWhiteSpace(MetadataService.CurrentMetadata.Title)) {
             CurrentTrackTitle = MetadataService.CurrentMetadata.Title;
@@ -1045,25 +1046,40 @@
     private void RefreshWindows() {
         try {
             var newWindows = _enumerator.GetActiveWindows().ToList();
-            bool changed = newWindows.Count != Windows.Count() ||
-                !newWindows.Select(w => (w.ProcessId, w.Title)).SequenceEqual(Windows.Select(w => (w.ProcessId, w.Title)));
-            if (changed) {
+            var currentPids = Windows.Select(w => w.ProcessId).ToHashSet();
+            var newPids = newWindows.Select(w => w.ProcessId).ToHashSet();
+
+            bool pidsChanged = !currentPids.SetEquals(newPids);
+            if (pidsChanged) {
                 Windows = newWindows;
+            } else {
+                // Same processes: update titles in-place without replacing collection or recreating DOM elements
+                var newMap = newWindows.ToDictionary(w => w.ProcessId);
+                foreach (var w in Windows) {
+                    if (newMap.TryGetValue(w.ProcessId, out var updated) && w.Title != updated.Title) {
+                        w.Title = updated.Title;
+                    }
+                }
             }
+
             var savedName = ProfileManager.CurrentProfile.TargetProcessName;
             if (!string.IsNullOrEmpty(savedName) && !savedName.Equals("System Audio", StringComparison.OrdinalIgnoreCase)) {
                 if (SelectedProcessId == 0 || SelectedProcessId == 999999 || !Windows.Any(w => w.ProcessId == SelectedProcessId)) {
                     var reconnected = Windows.FirstOrDefault(w => string.Equals(w.ProcessName, savedName, StringComparison.OrdinalIgnoreCase))
                                    ?? Windows.FirstOrDefault(w => w.Title.Contains(savedName, StringComparison.OrdinalIgnoreCase));
-                    if (reconnected != null) {
+                    if (reconnected != null && reconnected.ProcessId != SelectedProcessId) {
                         SelectedProcessId = reconnected.ProcessId;
                         SelectedProcessDisplayName = !string.IsNullOrEmpty(reconnected.ProcessName) ? reconnected.ProcessName : reconnected.Title;
+                        ProfileManager.CurrentProfile.TargetProcessId = (int)SelectedProcessId;
+                        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
                         EnsureAudioMonitoring(SelectedProcessId);
                         MetadataService.StartMonitoring(SelectedProcessId);
+                        InvokeAsync(StateHasChanged);
                     }
                 }
             }
-            if (changed) {
+
+            if (pidsChanged) {
                 InvokeAsync(StateHasChanged);
             }
         } catch { }
@@ -1880,6 +1896,7 @@
         ReactionService.CountsReset -= OnReactionCountsReset;
         HistoryService.HistoryChanged -= OnHistoryChanged;
         PluginLoader.PluginsChanged -= OnPluginsChanged;
+        RequestController.QueueChanged -= OnQueueChanged;
         _dotNetRef?.Dispose();
         _refreshTimer?.Dispose();
         _vuTimer?.Dispose();
@@ -1908,12 +1925,12 @@
             <div style="margin-bottom: 14px;">
                 <label class="scrim-label">Application Window</label>
                 <select class="scrim-select" @bind="SelectedProcessId" @bind:after="OnProcessChanged">
-                    <option value="0">System Audio (All Apps / Master Desktop Mix)</option>
+                    <option @key="0" value="0">System Audio (All Apps / Master Desktop Mix)</option>
                     @if (SelectedProcessId != 0 && !Windows.Any(w => w.ProcessId == SelectedProcessId)) {
-                        <option value="@SelectedProcessId">@(string.IsNullOrEmpty(SelectedProcessDisplayName) ? "Selected Application" : SelectedProcessDisplayName)</option>
+                        <option @key="SelectedProcessId" value="@SelectedProcessId">@(string.IsNullOrEmpty(SelectedProcessDisplayName) ? "Selected Application" : SelectedProcessDisplayName)</option>
                     }
                     @foreach (var w in Windows) {
-                        <option value="@w.ProcessId">@(!string.IsNullOrEmpty(w.ProcessName) && !w.Title.StartsWith(w.ProcessName, StringComparison.OrdinalIgnoreCase) ? $"{w.ProcessName} - {w.Title}" : w.Title)</option>
+                        <option @key="w.ProcessId" value="@w.ProcessId">@(!string.IsNullOrEmpty(w.ProcessName) && !w.Title.StartsWith(w.ProcessName, StringComparison.OrdinalIgnoreCase) ? $"{w.ProcessName} - {w.Title}" : w.Title)</option>
                     }
                 </select>
             </div>
@@ -2281,33 +2298,73 @@
         </div>,
 
         "card-queue" => @<div class="scrim-card">
-            <div class="scrim-card-header scrim-drag-handle">
-                <h3 class="scrim-card-title">Song Requests</h3>
-                <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
-            </div>
             @{
                 var liveQueue = RequestController.GetLiveQueue().ToList();
             }
+            <div class="scrim-card-header scrim-drag-handle">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <h3 class="scrim-card-title">Song Requests</h3>
+                    <span style="font-size: 11px; padding: 2px 7px; border-radius: 10px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-weight: 700;">
+                        @liveQueue.Count
+                    </span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    @if (liveQueue.Any()) {
+                        <button class="pill-option" style="padding: 2px 8px; font-size: 10px; color: #f87171; border-color: rgba(239, 68, 68, 0.35);" 
+                                @onclick="ClearSongRequests" 
+                                title="Clear all song requests from queue">
+                            🗑️ Clear All
+                        </button>
+                    }
+                    <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
+                </div>
+            </div>
             @if (!liveQueue.Any()) {
-                <div style="color: #6c7384; font-size: 13px; text-align: center; padding: 12px 0;">No listener requests pending.</div>
+                <div style="color: #6c7384; font-size: 13px; text-align: center; padding: 24px 0;">No listener requests pending.</div>
             } else {
-                @foreach (var req in liveQueue) {
-                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #22252c;">
-                        <div style="flex: 1; padding-right: 10px;">
-                            <div style="font-weight: 600; font-size: 13px; color: #fff;">@req.Query</div>
-                            @if (!string.IsNullOrWhiteSpace(req.Dedication)) {
-                                <div style="font-size: 11px; color: #f43f5e; background: rgba(244, 63, 94, 0.12); border: 1px solid rgba(244, 63, 94, 0.28); border-radius: 4px; padding: 2px 7px; display: inline-flex; align-items: center; gap: 4px; margin-top: 3px; font-weight: 500;">
-                                    <span>❤️ Dedicated to: <strong style="color: #fff;">@req.Dedication</strong></span>
+                <div style="display: flex; flex-direction: column; gap: 6px; max-height: 460px; overflow-y: auto; padding-right: 4px;">
+                    @for (int i = 0; i < liveQueue.Count; i++) {
+                        var req = liveQueue[i];
+                        int index = i;
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: #14171e; border: 1px solid #232731; border-radius: 8px; gap: 10px;">
+                            <!-- Reorder buttons -->
+                            <div style="display: flex; flex-direction: column; gap: 2px;">
+                                <button class="scrim-dots-btn" style="width: 20px; height: 18px; font-size: 9px; padding: 0; line-height: 1; @(index == 0 ? "opacity: 0.25; cursor: not-allowed;" : "")" 
+                                        disabled="@(index == 0)" 
+                                        @onclick="@(() => MoveSongRequestUp(req.Id))" 
+                                        title="Move Up">▲</button>
+                                <button class="scrim-dots-btn" style="width: 20px; height: 18px; font-size: 9px; padding: 0; line-height: 1; @(index == liveQueue.Count - 1 ? "opacity: 0.25; cursor: not-allowed;" : "")" 
+                                        disabled="@(index == liveQueue.Count - 1)" 
+                                        @onclick="@(() => MoveSongRequestDown(req.Id))" 
+                                        title="Move Down">▼</button>
+                            </div>
+
+                            <div style="flex: 1; min-width: 0;">
+                                <div style="display: flex; align-items: center; gap: 6px;">
+                                    <span style="font-size: 11px; font-weight: 700; color: #64748b; font-family: monospace;">#@(index + 1)</span>
+                                    <div style="font-weight: 600; font-size: 13px; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">@req.Query</div>
                                 </div>
-                            }
-                            <div style="font-size: 11px; color: #727988; margin-top: 2px;">@req.RequestedAt.ToLocalTime().ToString("t") • Status: @req.Status</div>
+                                @if (!string.IsNullOrWhiteSpace(req.Dedication)) {
+                                    <div style="font-size: 11px; color: #f43f5e; background: rgba(244, 63, 94, 0.12); border: 1px solid rgba(244, 63, 94, 0.28); border-radius: 4px; padding: 2px 7px; display: inline-flex; align-items: center; gap: 4px; margin-top: 3px; font-weight: 500;">
+                                        <span>❤️ Dedicated to: <strong style="color: #fff;">@req.Dedication</strong></span>
+                                    </div>
+                                }
+                                <div style="font-size: 10px; color: #727988; margin-top: 2px; display: flex; align-items: center; gap: 6px;">
+                                    <span>@req.RequestedAt.ToLocalTime().ToString("t")</span>
+                                    <span>•</span>
+                                    <span style="font-weight: 600; color: @(req.Status == "Accepted" ? "#4ade80" : req.Status == "Declined" ? "#f87171" : "#facc15");">@req.Status</span>
+                                </div>
+                            </div>
+
+                            <!-- Actions: Accept, Decline, Remove -->
+                            <div style="display: flex; align-items: center; gap: 5px;">
+                                <button class="scrim-btn-secondary" style="padding: 4px 8px; font-size: 11px; color: #22c55e;" @onclick="@(() => RequestController.UpdateStatus(req.Id, "Accepted"))" title="Accept Request">✓</button>
+                                <button class="scrim-btn-secondary" style="padding: 4px 8px; font-size: 11px; color: #f59e0b;" @onclick="@(() => RequestController.UpdateStatus(req.Id, "Declined"))" title="Decline Request">✗</button>
+                                <button class="scrim-dots-btn" style="color: #ef4444; font-size: 12px; width: 26px; height: 26px;" @onclick="@(() => RemoveSongRequest(req.Id))" title="Remove Request">🗑️</button>
+                            </div>
                         </div>
-                        <div style="display: flex; gap: 6px;">
-                            <button class="scrim-btn-secondary" style="padding: 4px 8px; font-size: 11px; color: #22c55e;" @onclick="@(() => RequestController.UpdateStatus(req.Id, "Accepted"))" title="Accept Request">✓</button>
-                            <button class="scrim-btn-secondary" style="padding: 4px 8px; font-size: 11px; color: #ef4444;" @onclick="@(() => RequestController.UpdateStatus(req.Id, "Declined"))" title="Decline Request">✗</button>
-                        </div>
-                    </div>
-                }
+                    }
+                </div>
             }
         </div>,
 
@@ -4094,6 +4151,26 @@
 
     private void OnPluginsChanged(object? sender, EventArgs e) {
         InvokeAsync(StateHasChanged);
+    }
+
+    private void OnQueueChanged(object? sender, EventArgs e) {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void RemoveSongRequest(string id) {
+        RequestController.RemoveRequest(id);
+    }
+
+    private void ClearSongRequests() {
+        RequestController.ClearQueue();
+    }
+
+    private void MoveSongRequestUp(string id) {
+        RequestController.MoveUp(id);
+    }
+
+    private void MoveSongRequestDown(string id) {
+        RequestController.MoveDown(id);
     }
 
     // ==========================================

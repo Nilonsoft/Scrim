@@ -63,5 +63,46 @@ namespace Scrim.Tests {
             Assert.Equal("Bohemian Rhapsody", queue[0].Query);
             Assert.Equal("For Sarah on her birthday!", queue[0].Dedication);
         }
+
+        [Fact]
+        public void ClearQueue_EmptiesAllRequests() {
+            var controller = new SongRequestController();
+            controller.SubmitRequest("Song 1");
+            controller.SubmitRequest("Song 2");
+            Assert.Equal(2, controller.GetLiveQueue().Count());
+
+            controller.ClearQueue();
+            Assert.Empty(controller.GetLiveQueue());
+        }
+
+        [Fact]
+        public void MoveUp_MovesRequestUpInQueue() {
+            var controller = new SongRequestController();
+            controller.SubmitRequest("First");
+            controller.SubmitRequest("Second");
+
+            var second = controller.GetLiveQueue().Last();
+            bool moved = controller.MoveUp(second.Id);
+
+            Assert.True(moved);
+            var queue = controller.GetLiveQueue().ToList();
+            Assert.Equal("Second", queue[0].Query);
+            Assert.Equal("First", queue[1].Query);
+        }
+
+        [Fact]
+        public void MoveDown_MovesRequestDownInQueue() {
+            var controller = new SongRequestController();
+            controller.SubmitRequest("First");
+            controller.SubmitRequest("Second");
+
+            var first = controller.GetLiveQueue().First();
+            bool moved = controller.MoveDown(first.Id);
+
+            Assert.True(moved);
+            var queue = controller.GetLiveQueue().ToList();
+            Assert.Equal("Second", queue[0].Query);
+            Assert.Equal("First", queue[1].Query);
+        }
     }
 }
