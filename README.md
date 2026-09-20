@@ -64,6 +64,10 @@
   ```powershell
   winget install ffmpeg
   ```
+- **Python 3.12 (Recommended / Optional)**: Required if you wish to run Python plugins (`.py` scripts or packages). **Python 3.12** is strongly preferred for full compatibility with PyTorch, AMD ROCm acceleration, and AI/machine learning audio plugins. Scrim automatically detects `python.exe`, `python3.exe`, or `py.exe` on your system `PATH`, or a dedicated `.venv` virtual environment inside the plugin's folder:
+  ```powershell
+  winget install Python.Python.3.12
+  ```
 
 ---
 
