@@ -10,6 +10,8 @@
 @using System.Timers
 @using System.Threading
 @using System.IO
+@using System.Text.Json
+@using System.Net.Http
 @inject IProfileManager ProfileManager
 @inject HttpStreamServer StreamServer
 @inject BroadcastHub Hub
@@ -416,12 +418,30 @@
                 <button class="scrim-dots-btn" @onclick="@(() => ShowAddCardMenu = false)">✕</button>
             </div>
         </div>
-        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-            @foreach (var kvp in AllAvailableCards) {
+        <!-- Core Station Console Cards -->
+        <div style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; margin-bottom: 6px;">Station Console Cards</div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px;">
+            @foreach (var kvp in AllAvailableCards.Where(k => !k.Key.StartsWith("card-plugin-"))) {
                 var isVisible = LeftColumn.Contains(kvp.Key) || CenterColumn.Contains(kvp.Key) || RightColumn.Contains(kvp.Key);
                 if (!isVisible) {
                     <button class="pill-option" style="background: #252830; border-color: #3b4150; color: #00d2ff;" @onclick="@(() => AddCard(kvp.Key))">
                         + Add @kvp.Value
+                    </button>
+                }
+            }
+        </div>
+
+        <!-- Plugin & Extension Cards -->
+        <div style="font-size: 11px; font-weight: 700; color: #c084fc; text-transform: uppercase; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+            <span>🔌 Plugin & Extension Cards</span>
+            <span style="font-size: 10px; padding: 1px 6px; border-radius: 8px; background: rgba(139, 92, 246, 0.15); color: #c084fc;">Interactive Controls</span>
+        </div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            @foreach (var kvp in AllAvailableCards.Where(k => k.Key.StartsWith("card-plugin-"))) {
+                var isVisible = LeftColumn.Contains(kvp.Key) || CenterColumn.Contains(kvp.Key) || RightColumn.Contains(kvp.Key);
+                if (!isVisible) {
+                    <button class="pill-option" style="background: rgba(139, 92, 246, 0.12); border-color: rgba(139, 92, 246, 0.35); color: #c084fc; display: flex; align-items: center; gap: 6px;" @onclick="@(() => AddCard(kvp.Key))">
+                        <span>+ Add @kvp.Value</span>
                     </button>
                 }
             }
@@ -555,7 +575,17 @@
         { "card-media-player", "Media Player" },
         { "card-soundboard", "Soundboard" },
         { "card-web-branding", "Website Branding & Links" },
-        { "card-plugins", "Plugins & Extensions" }
+        { "card-plugins", "Plugins & Extensions" },
+        { "card-plugin-lyrics", "Synchronized Lyrics Ticker" },
+        { "card-plugin-twitch", "Twitch Chat Bot" },
+        { "card-plugin-discord", "Discord Notifier" },
+        { "card-plugin-lastfm", "Last.fm Scrobbler" },
+        { "card-plugin-obs", "OBS Stream Overlay" },
+        { "card-plugin-jingle", "Jingles & Sweepers" },
+        { "card-plugin-midi", "MIDI Controller" },
+        { "card-plugin-archiver", "Stream Archiver" },
+        { "card-plugin-logger", "Broadcast Track Logger" },
+        { "card-plugin-streamdeck", "Stream Deck Companion" }
     };
 
     private bool ShowAddCardMenu = false;
@@ -770,6 +800,7 @@
         Mixer.AppVolume = (float)ProfileManager.CurrentProfile.AppStreamVolume / 100f;
         CustomBitrateInput = ProfileManager.CurrentProfile.Bitrate;
         CustomPortInput = ProfileManager.CurrentProfile.Port;
+        LoadAllPluginConfigs();
 
         // Ensure Web Player HTTP server is running so listeners can always view the station
         try {
@@ -807,6 +838,17 @@
                     LastPositionUpdate = now;
                 }
             }
+            // Read active lyrics from LyricsTicker OBS output
+            try {
+                var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                string lyricsFile = Path.Combine(userProfile, ".scrim", "obs", "lyrics.txt");
+                if (File.Exists(lyricsFile)) {
+                    string lText = File.ReadAllText(lyricsFile).Trim();
+                    if (_currentLiveLyric != lText) {
+                        _currentLiveLyric = lText;
+                    }
+                }
+            } catch { }
             InvokeAsync(StateHasChanged);
         };
         _refreshTimer.Start();
@@ -888,6 +930,12 @@
                 CurrentTrackTitle = meta.Title;
                 CurrentTrackArtist = string.IsNullOrWhiteSpace(meta.Artist) ? "Live Stream" : meta.Artist;
                 CurrentTrackExtra = string.IsNullOrWhiteSpace(meta.Album) ? "Broadcast Audio" : meta.Album;
+                if (trackChanged) {
+                    _broadcastTrackLog.Insert(0, (DateTime.Now, CurrentTrackTitle, CurrentTrackArtist));
+                    if (_broadcastTrackLog.Count > 40) {
+                        _broadcastTrackLog.RemoveAt(_broadcastTrackLog.Count - 1);
+                    }
+                }
                 if (!string.IsNullOrEmpty(meta.AlbumArtBase64)) {
                     CurrentTrackAlbumArtBase64 = meta.AlbumArtBase64;
                 } else if (trackChanged) {
@@ -3215,6 +3263,373 @@
             </div>
         </div>,
 
+        "card-plugin-lyrics" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 14px;">🎤</span>
+                    <h3 class="scrim-card-title" style="margin: 0;">Synchronized Lyrics</h3>
+                    <span style="font-size: 10px; padding: 1px 6px; border-radius: 6px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-weight: 600;">LRCLib</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <button class="scrim-dots-btn" @onclick="CopyLyricsObsPath" title="Copy OBS Text File Path">📋</button>
+                    <button class="scrim-dots-btn" @onclick="OpenObsFolder" title="Open OBS Folder">📁</button>
+                    <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
+                </div>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+                <div style="background: #0d1117; border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 8px; padding: 14px; text-align: center; min-height: 80px; display: flex; flex-direction: column; justify-content: center; align-items: center;">
+                    <span style="font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">
+                        @(string.IsNullOrWhiteSpace(CurrentTrackTitle) ? "No Active Track" : $"{CurrentTrackArtist} - {CurrentTrackTitle}")
+                    </span>
+                    <div style="font-size: 15px; font-weight: 700; color: #38bdf8; line-height: 1.4; text-shadow: 0 0 12px rgba(56, 189, 248, 0.35);">
+                        @(string.IsNullOrWhiteSpace(_currentLiveLyric) ? "♪ (Awaiting lyrics / instrumental...)" : _currentLiveLyric)
+                    </div>
+                </div>
+
+                <div style="background: #14171e; border: 1px solid #232731; border-radius: 6px; padding: 8px 10px; font-size: 11px; color: #94a3b8; display: flex; justify-content: space-between; align-items: center;">
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <span style="width: 7px; height: 7px; border-radius: 50%; background: #22c55e;"></span>
+                        <span>Syncing to OBS: <code>lyrics.txt</code></span>
+                    </div>
+                    <button class="scrim-btn-secondary" style="padding: 2px 8px; font-size: 10px;" @onclick="CopyLyricsObsPath">Copy Path</button>
+                </div>
+            </div>
+        </div>,
+
+        "card-plugin-twitch" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 14px;">🟣</span>
+                    <h3 class="scrim-card-title" style="margin: 0;">Twitch Chat Bot</h3>
+                    <span style="font-size: 10px; padding: 1px 6px; border-radius: 6px; background: rgba(168, 85, 247, 0.15); color: #c084fc; font-weight: 600;">IRC</span>
+                </div>
+                <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 10px; font-size: 12px;">
+                <div>
+                    <label style="display: block; font-size: 11px; color: #94a3b8; margin-bottom: 4px;">Twitch Channel</label>
+                    <input class="scrim-input" style="width: 100%;" placeholder="e.g. your_channel_name" @bind="_twitchConfig.Channel" />
+                </div>
+                <div style="display: flex; gap: 8px;">
+                    <div style="flex: 1;">
+                        <label style="display: block; font-size: 11px; color: #94a3b8; margin-bottom: 4px;">Bot Username</label>
+                        <input class="scrim-input" style="width: 100%;" placeholder="e.g. ScrimBot" @bind="_twitchConfig.BotUsername" />
+                    </div>
+                    <div style="flex: 1;">
+                        <label style="display: block; font-size: 11px; color: #94a3b8; margin-bottom: 4px;">Command Prefix</label>
+                        <input class="scrim-input" style="width: 100%;" placeholder="!" @bind="_twitchConfig.CommandPrefix" />
+                    </div>
+                </div>
+                <div>
+                    <label style="display: block; font-size: 11px; color: #94a3b8; margin-bottom: 4px;">OAuth Token (oauth:xxxx)</label>
+                    <input class="scrim-input" type="password" style="width: 100%;" placeholder="oauth:abcdef123456" @bind="_twitchConfig.OAuthToken" />
+                </div>
+                <div style="display: flex; align-items: center; justify-content: space-between; background: #14171e; border: 1px solid #232731; border-radius: 6px; padding: 6px 10px;">
+                    <span style="font-size: 11px; color: #cbd5e1;">Enable !request & !song commands</span>
+                    <label class="scrim-switch">
+                        <input type="checkbox" @bind="_twitchConfig.EnableSongRequests" />
+                        <span class="scrim-slider"></span>
+                    </label>
+                </div>
+                <div style="display: flex; justify-content: flex-end; margin-top: 4px;">
+                    <button class="scrim-btn-primary" style="padding: 5px 14px; font-size: 11px;" @onclick="SaveTwitchConfig">Save & Reconnect</button>
+                </div>
+            </div>
+        </div>,
+
+        "card-plugin-discord" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 14px;">💬</span>
+                    <h3 class="scrim-card-title" style="margin: 0;">Discord Notifier</h3>
+                    <span style="font-size: 10px; padding: 1px 6px; border-radius: 6px; background: rgba(99, 102, 241, 0.15); color: #818cf8; font-weight: 600;">Webhook</span>
+                </div>
+                <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 10px; font-size: 12px;">
+                <div>
+                    <label style="display: block; font-size: 11px; color: #94a3b8; margin-bottom: 4px;">Discord Webhook URL</label>
+                    <input class="scrim-input" style="width: 100%;" placeholder="https://discord.com/api/webhooks/..." @bind="_discordConfig.WebhookUrl" />
+                </div>
+                <div>
+                    <label style="display: block; font-size: 11px; color: #94a3b8; margin-bottom: 4px;">Webhook Display Name</label>
+                    <input class="scrim-input" style="width: 100%;" placeholder="Scrim Studio" @bind="_discordConfig.BotUsername" />
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 6px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; background: #14171e; border: 1px solid #232731; border-radius: 6px; padding: 6px 10px;">
+                        <span style="font-size: 11px; color: #cbd5e1;">Announce Track Changes</span>
+                        <label class="scrim-switch">
+                            <input type="checkbox" @bind="_discordConfig.AnnounceTracks" />
+                            <span class="scrim-slider"></span>
+                        </label>
+                    </div>
+                    <div style="display: flex; align-items: center; justify-content: space-between; background: #14171e; border: 1px solid #232731; border-radius: 6px; padding: 6px 10px;">
+                        <span style="font-size: 11px; color: #cbd5e1;">Announce Going ON AIR / Offline</span>
+                        <label class="scrim-switch">
+                            <input type="checkbox" @bind="_discordConfig.AnnounceBroadcastStatus" />
+                            <span class="scrim-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-top: 4px;">
+                    <button class="scrim-btn-secondary" style="padding: 5px 12px; font-size: 11px;" @onclick="TestDiscordWebhook">🔔 Send Test</button>
+                    <button class="scrim-btn-primary" style="padding: 5px 14px; font-size: 11px;" @onclick="SaveDiscordConfig">Save Settings</button>
+                </div>
+            </div>
+        </div>,
+
+        "card-plugin-lastfm" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 14px;">🔴</span>
+                    <h3 class="scrim-card-title" style="margin: 0;">Last.fm Scrobbler</h3>
+                    <span style="font-size: 10px; padding: 1px 6px; border-radius: 6px; background: rgba(239, 68, 68, 0.15); color: #f87171; font-weight: 600;">Scrobble</span>
+                </div>
+                <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 10px; font-size: 12px;">
+                <div>
+                    <label style="display: block; font-size: 11px; color: #94a3b8; margin-bottom: 4px;">Last.fm API Key</label>
+                    <input class="scrim-input" style="width: 100%;" placeholder="Your Last.fm API Key" @bind="_lastFmConfig.ApiKey" />
+                </div>
+                <div>
+                    <label style="display: block; font-size: 11px; color: #94a3b8; margin-bottom: 4px;">Session Key / User Secret</label>
+                    <input class="scrim-input" type="password" style="width: 100%;" placeholder="Session Key" @bind="_lastFmConfig.SessionKey" />
+                </div>
+                <div style="background: #14171e; border: 1px solid #232731; border-radius: 6px; padding: 8px 10px;">
+                    <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px;">
+                        <span style="color: #94a3b8;">Scrobble Playback Trigger</span>
+                        <span style="color: #f87171; font-weight: 700;">@_lastFmConfig.MinPlayPercentage%</span>
+                    </div>
+                    <input type="range" min="30" max="90" step="5" style="width: 100%; accent-color: #ef4444;" @bind="_lastFmConfig.MinPlayPercentage" />
+                </div>
+                <div style="display: flex; justify-content: flex-end; margin-top: 4px;">
+                    <button class="scrim-btn-primary" style="padding: 5px 14px; font-size: 11px;" @onclick="SaveLastFmConfig">Save Credentials</button>
+                </div>
+            </div>
+        </div>,
+
+        "card-plugin-obs" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 14px;">🎥</span>
+                    <h3 class="scrim-card-title" style="margin: 0;">OBS Stream Overlay</h3>
+                    <span style="font-size: 10px; padding: 1px 6px; border-radius: 6px; background: rgba(14, 165, 233, 0.15); color: #38bdf8; font-weight: 600;">HTML/CSS</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <button class="scrim-dots-btn" @onclick="CopyObsOverlayUrl" title="Copy Browser Source URL">📋</button>
+                    <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
+                </div>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 10px; font-size: 12px;">
+                <div style="background: #14171e; border: 1px solid #232731; border-radius: 8px; padding: 10px; display: flex; align-items: center; gap: 10px;">
+                    @if (!string.IsNullOrEmpty(CurrentTrackAlbumArtBase64)) {
+                        <img src="@CurrentTrackAlbumArtBase64" style="width: 44px; height: 44px; border-radius: 6px; object-fit: cover; border: 1px solid rgba(255,255,255,0.1);" />
+                    } else {
+                        <div style="width: 44px; height: 44px; border-radius: 6px; background: #232731; display: flex; align-items: center; justify-content: center; color: #64748b; font-size: 18px;">🎵</div>
+                    }
+                    <div style="flex: 1; min-width: 0;">
+                        <div style="font-size: 12px; font-weight: 700; color: #f8fafc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                            @(string.IsNullOrWhiteSpace(CurrentTrackTitle) ? "Scrim Radio" : CurrentTrackTitle)
+                        </div>
+                        <div style="font-size: 10px; color: #38bdf8; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                            @(string.IsNullOrWhiteSpace(CurrentTrackArtist) ? "Live Stream Station" : CurrentTrackArtist)
+                        </div>
+                    </div>
+                    <span style="font-size: 9px; padding: 2px 6px; border-radius: 4px; background: @(IsLive ? "rgba(239, 68, 68, 0.2)" : "rgba(100, 116, 139, 0.2)"); color: @(IsLive ? "#ef4444" : "#94a3b8"); font-weight: 700;">
+                        @(IsLive ? "ON AIR" : "OFFLINE")
+                    </span>
+                </div>
+
+                <div>
+                    <label style="display: block; font-size: 11px; color: #94a3b8; margin-bottom: 4px;">OBS Browser Source URL</label>
+                    <div style="display: flex; gap: 6px;">
+                        <input class="scrim-input" style="flex: 1; font-family: monospace; font-size: 11px;" readonly value='@($"http://localhost:{ProfileManager.CurrentProfile.Port}/overlay")' />
+                        <button class="scrim-btn-secondary" style="padding: 4px 10px; font-size: 11px;" @onclick="CopyObsOverlayUrl">Copy</button>
+                    </div>
+                </div>
+            </div>
+        </div>,
+
+        "card-plugin-jingle" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 14px;">🔔</span>
+                    <h3 class="scrim-card-title" style="margin: 0;">Jingles & Sweepers</h3>
+                    <span style="font-size: 10px; padding: 1px 6px; border-radius: 6px; background: rgba(245, 158, 11, 0.15); color: #fbbf24; font-weight: 600;">Audio</span>
+                </div>
+                <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 10px; font-size: 12px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+                    <button class="scrim-btn-secondary" style="padding: 8px 6px; font-size: 11px; font-weight: 600; background: rgba(245, 158, 11, 0.1); border-color: rgba(245, 158, 11, 0.3); color: #fbbf24;" @onclick='() => TriggerJingle("Station ID")'>
+                        ▶ Station ID
+                    </button>
+                    <button class="scrim-btn-secondary" style="padding: 8px 6px; font-size: 11px; font-weight: 600; background: rgba(245, 158, 11, 0.1); border-color: rgba(245, 158, 11, 0.3); color: #fbbf24;" @onclick='() => TriggerJingle("Sweeper 1")'>
+                        ▶ Sweeper 1
+                    </button>
+                    <button class="scrim-btn-secondary" style="padding: 8px 6px; font-size: 11px; font-weight: 600; background: rgba(245, 158, 11, 0.1); border-color: rgba(245, 158, 11, 0.3); color: #fbbf24;" @onclick='() => TriggerJingle("Sweeper 2")'>
+                        ▶ Sweeper 2
+                    </button>
+                    <button class="scrim-btn-secondary" style="padding: 8px 6px; font-size: 11px; font-weight: 600; background: rgba(245, 158, 11, 0.1); border-color: rgba(245, 158, 11, 0.3); color: #fbbf24;" @onclick='() => TriggerJingle("Transition FX")'>
+                        ▶ Transition
+                    </button>
+                </div>
+
+                <div style="background: #14171e; border: 1px solid #232731; border-radius: 6px; padding: 8px 10px;">
+                    <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px;">
+                        <span style="color: #94a3b8;">Auto-Rotate Sweeper</span>
+                        <span style="color: #fbbf24; font-weight: 700;">@(_jingleConfig.IntervalMinutes == 0 ? "Off" : $"Every {_jingleConfig.IntervalMinutes}m")</span>
+                    </div>
+                    <input type="range" min="0" max="60" step="15" style="width: 100%; accent-color: #f59e0b;" @bind="_jingleConfig.IntervalMinutes" />
+                </div>
+
+                <div style="display: flex; justify-content: flex-end; margin-top: 4px;">
+                    <button class="scrim-btn-primary" style="padding: 5px 14px; font-size: 11px;" @onclick="SaveJingleConfig">Save Jingle Settings</button>
+                </div>
+            </div>
+        </div>,
+
+        "card-plugin-midi" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 14px;">🎛️</span>
+                    <h3 class="scrim-card-title" style="margin: 0;">MIDI Controller</h3>
+                    <span style="font-size: 10px; padding: 1px 6px; border-radius: 6px; background: rgba(16, 185, 129, 0.15); color: #34d399; font-weight: 600;">USB MIDI</span>
+                </div>
+                <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 10px; font-size: 12px;">
+                <div>
+                    <label style="display: block; font-size: 11px; color: #94a3b8; margin-bottom: 4px;">Controller Device Name</label>
+                    <input class="scrim-input" style="width: 100%;" placeholder="e.g. Korg nanoKONTROL2" @bind="_midiConfig.DeviceName" />
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                    <div style="background: #14171e; border: 1px solid #232731; border-radius: 6px; padding: 6px 8px;">
+                        <span style="font-size: 10px; color: #64748b; display: block;">Volume CC</span>
+                        <span style="font-size: 12px; font-weight: 700; color: #34d399;">CC @_midiConfig.VolumeCc</span>
+                    </div>
+                    <div style="background: #14171e; border: 1px solid #232731; border-radius: 6px; padding: 6px 8px;">
+                        <span style="font-size: 10px; color: #64748b; display: block;">Mic Mute Note</span>
+                        <span style="font-size: 12px; font-weight: 700; color: #34d399;">Note @_midiConfig.MicMuteNote</span>
+                    </div>
+                    <div style="background: #14171e; border: 1px solid #232731; border-radius: 6px; padding: 6px 8px;">
+                        <span style="font-size: 10px; color: #64748b; display: block;">ON AIR Toggle</span>
+                        <span style="font-size: 12px; font-weight: 700; color: #34d399;">Note @_midiConfig.BroadcastToggleNote</span>
+                    </div>
+                    <div style="background: #14171e; border: 1px solid #232731; border-radius: 6px; padding: 6px 8px;">
+                        <span style="font-size: 10px; color: #64748b; display: block;">Next Track Note</span>
+                        <span style="font-size: 12px; font-weight: 700; color: #34d399;">Note @_midiConfig.SkipTrackNote</span>
+                    </div>
+                </div>
+                <div style="display: flex; justify-content: flex-end; margin-top: 4px;">
+                    <button class="scrim-btn-primary" style="padding: 5px 14px; font-size: 11px;" @onclick="SaveMidiConfig">Save MIDI Map</button>
+                </div>
+            </div>
+        </div>,
+
+        "card-plugin-archiver" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 14px;">💾</span>
+                    <h3 class="scrim-card-title" style="margin: 0;">Stream Archiver</h3>
+                    <span style="font-size: 10px; padding: 1px 6px; border-radius: 6px; background: rgba(59, 130, 246, 0.15); color: #60a5fa; font-weight: 600;">Record</span>
+                </div>
+                <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 10px; font-size: 12px;">
+                <div style="background: #14171e; border: 1px solid @(IsLive ? "rgba(239, 68, 68, 0.4)" : "#232731"); border-radius: 6px; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="width: 8px; height: 8px; border-radius: 50%; background: @(IsLive ? "#ef4444" : "#64748b"); animation: @(IsLive ? "pulse 1.5s infinite" : "none");"></span>
+                        <span style="font-size: 11px; font-weight: 600; color: @(IsLive ? "#fca5a5" : "#94a3b8");">
+                            @(IsLive ? "Recording Live Stream" : "Standby (Auto-records on ON AIR)")
+                        </span>
+                    </div>
+                    <span style="font-size: 10px; color: #64748b; font-weight: 700; text-transform: uppercase;">.@_archiverConfig.FileExtension</span>
+                </div>
+
+                <div>
+                    <label style="display: block; font-size: 11px; color: #94a3b8; margin-bottom: 4px;">Recordings Output Folder</label>
+                    <input class="scrim-input" style="width: 100%; font-size: 11px;" placeholder="~/.scrim/recordings/" @bind="_archiverConfig.OutputFolder" />
+                </div>
+
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+                    <button class="scrim-btn-secondary" style="padding: 5px 12px; font-size: 11px;" @onclick="OpenRecordingsFolder">📁 Open Folder</button>
+                    <button class="scrim-btn-primary" style="padding: 5px 14px; font-size: 11px;" @onclick="SaveArchiverConfig">Save Archiver</button>
+                </div>
+            </div>
+        </div>,
+
+        "card-plugin-logger" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 14px;">📜</span>
+                    <h3 class="scrim-card-title" style="margin: 0;">Broadcast Track Logger</h3>
+                    <span style="font-size: 10px; padding: 1px 6px; border-radius: 6px; background: rgba(100, 116, 139, 0.2); color: #cbd5e1; font-weight: 600;">@_broadcastTrackLog.Count logged</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <button class="scrim-dots-btn" @onclick="ExportTrackLogCsv" title="Export CSV History">📥</button>
+                    <button class="scrim-dots-btn" @onclick="ClearTrackLog" title="Clear History">🗑️</button>
+                    <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
+                </div>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto;">
+                @if (_broadcastTrackLog.Count == 0) {
+                    <div style="text-align: center; padding: 20px 10px; color: #64748b; font-size: 11px;">
+                        No tracks played yet during this session.
+                    </div>
+                } else {
+                    @foreach (var entry in _broadcastTrackLog.Take(15)) {
+                        <div style="background: #14171e; border: 1px solid #232731; border-radius: 6px; padding: 6px 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                            <div style="min-width: 0; flex: 1;">
+                                <div style="font-size: 11px; font-weight: 600; color: #f1f5f9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">@entry.Title</div>
+                                <div style="font-size: 10px; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">@entry.Artist</div>
+                            </div>
+                            <span style="font-size: 10px; color: #94a3b8; font-family: monospace; flex-shrink: 0;">@entry.Time.ToString("HH:mm:ss")</span>
+                        </div>
+                    }
+                }
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px;">
+                <button class="scrim-btn-secondary" style="padding: 4px 12px; font-size: 11px;" @onclick="ExportTrackLogCsv">Export CSV</button>
+            </div>
+        </div>,
+
+        "card-plugin-streamdeck" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 14px;">🕹️</span>
+                    <h3 class="scrim-card-title" style="margin: 0;">Stream Deck Companion</h3>
+                    <span style="font-size: 10px; padding: 1px 6px; border-radius: 6px; background: rgba(139, 92, 246, 0.15); color: #c084fc; font-weight: 600;">WS :@_streamDeckConfig.Port</span>
+                </div>
+                <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 10px; font-size: 12px;">
+                <div style="background: #14171e; border: 1px solid #232731; border-radius: 6px; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between;">
+                    <span style="font-size: 11px; color: #94a3b8;">WebSocket Server</span>
+                    <span style="font-size: 11px; font-family: monospace; color: #c084fc;">ws://127.0.0.1:@_streamDeckConfig.Port</span>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+                    <button class="scrim-btn-secondary" style="padding: 6px; font-size: 11px;" @onclick="ToggleBroadcast">Test On-Air Key</button>
+                    <button class="scrim-btn-secondary" style="padding: 6px; font-size: 11px;" @onclick="ToggleMicState">Test Mic Mute Key</button>
+                </div>
+                <div style="display: flex; justify-content: flex-end; margin-top: 4px;">
+                    <button class="scrim-btn-primary" style="padding: 5px 14px; font-size: 11px;" @onclick="SaveStreamDeckConfig">Save Companion</button>
+                </div>
+            </div>
+        </div>,
+
         _ => @<div></div>
     };
 
@@ -3673,5 +4088,211 @@
 
     private void OnPluginsChanged(object? sender, EventArgs e) {
         InvokeAsync(StateHasChanged);
+    }
+
+    // ==========================================
+    // Plugin Configuration & In-Card Operations
+    // ==========================================
+    public class TwitchPluginConfig {
+        public string Channel { get; set; } = "";
+        public string BotUsername { get; set; } = "";
+        public string OAuthToken { get; set; } = "";
+        public bool EnableSongRequests { get; set; } = true;
+        public string CommandPrefix { get; set; } = "!";
+    }
+
+    public class DiscordPluginConfig {
+        public string WebhookUrl { get; set; } = "";
+        public bool AnnounceTracks { get; set; } = true;
+        public bool AnnounceBroadcastStatus { get; set; } = true;
+        public string BotUsername { get; set; } = "Scrim Studio";
+        public string AvatarUrl { get; set; } = "";
+    }
+
+    public class JinglePluginConfig {
+        public bool Enabled { get; set; } = true;
+        public int IntervalMinutes { get; set; } = 15;
+        public bool PlayBetweenTracks { get; set; } = false;
+        public string JinglesFolder { get; set; } = "";
+    }
+
+    public class LastFmPluginConfig {
+        public string ApiKey { get; set; } = "";
+        public string ApiSecret { get; set; } = "";
+        public string SessionKey { get; set; } = "";
+        public int MinPlayPercentage { get; set; } = 50;
+    }
+
+    public class MidiPluginConfig {
+        public string DeviceName { get; set; } = "";
+        public int VolumeCc { get; set; } = 7;
+        public int MicMuteNote { get; set; } = 36;
+        public int BroadcastToggleNote { get; set; } = 37;
+        public int SkipTrackNote { get; set; } = 38;
+        public int PlayPauseNote { get; set; } = 39;
+    }
+
+    public class ArchiverPluginConfig {
+        public bool Enabled { get; set; } = true;
+        public string OutputFolder { get; set; } = "";
+        public string FileExtension { get; set; } = "mp3";
+    }
+
+    public class StreamDeckPluginConfig {
+        public bool Enabled { get; set; } = true;
+        public int Port { get; set; } = 5055;
+        public string Host { get; set; } = "127.0.0.1";
+    }
+
+    private TwitchPluginConfig _twitchConfig = new();
+    private DiscordPluginConfig _discordConfig = new();
+    private JinglePluginConfig _jingleConfig = new();
+    private LastFmPluginConfig _lastFmConfig = new();
+    private MidiPluginConfig _midiConfig = new();
+    private ArchiverPluginConfig _archiverConfig = new();
+    private StreamDeckPluginConfig _streamDeckConfig = new();
+    private string _currentLiveLyric = "";
+    private List<(DateTime Time, string Title, string Artist)> _broadcastTrackLog = new();
+
+    private void LoadAllPluginConfigs() {
+        _twitchConfig = LoadPluginConfig("twitch_config.json", new TwitchPluginConfig());
+        _discordConfig = LoadPluginConfig("discord_config.json", new DiscordPluginConfig());
+        _jingleConfig = LoadPluginConfig("jingle_config.json", new JinglePluginConfig());
+        _lastFmConfig = LoadPluginConfig("lastfm_config.json", new LastFmPluginConfig());
+        _midiConfig = LoadPluginConfig("midi_config.json", new MidiPluginConfig());
+        _archiverConfig = LoadPluginConfig("archiver_config.json", new ArchiverPluginConfig());
+        _streamDeckConfig = LoadPluginConfig("streamdeck_config.json", new StreamDeckPluginConfig());
+    }
+
+    private string GetPluginConfigPath(string fileName) {
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var userPluginsDir = Path.Combine(userProfile, ".scrim", "plugins");
+        if (!Directory.Exists(userPluginsDir)) {
+            Directory.CreateDirectory(userPluginsDir);
+        }
+        return Path.Combine(userPluginsDir, fileName);
+    }
+
+    private T LoadPluginConfig<T>(string fileName, T fallback) where T : new() {
+        try {
+            string path = GetPluginConfigPath(fileName);
+            if (File.Exists(path)) {
+                string json = File.ReadAllText(path);
+                var parsed = JsonSerializer.Deserialize<T>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                if (parsed != null) return parsed;
+            }
+        } catch { }
+        return fallback;
+    }
+
+    private void SavePluginConfigFile<T>(string fileName, T config) {
+        try {
+            string path = GetPluginConfigPath(fileName);
+            string json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(path, json);
+        } catch { }
+    }
+
+    private void SaveTwitchConfig() {
+        SavePluginConfigFile("twitch_config.json", _twitchConfig);
+    }
+
+    private void SaveDiscordConfig() {
+        SavePluginConfigFile("discord_config.json", _discordConfig);
+    }
+
+    private async Task TestDiscordWebhook() {
+        if (string.IsNullOrWhiteSpace(_discordConfig.WebhookUrl)) return;
+        try {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            var payload = new {
+                content = "📻 **Scrim Studio Test** - Discord Notifier is successfully connected!"
+            };
+            string json = JsonSerializer.Serialize(payload);
+            using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            await http.PostAsync(_discordConfig.WebhookUrl, content);
+        } catch { }
+    }
+
+    private void SaveLastFmConfig() {
+        SavePluginConfigFile("lastfm_config.json", _lastFmConfig);
+    }
+
+    private void SaveJingleConfig() {
+        SavePluginConfigFile("jingle_config.json", _jingleConfig);
+    }
+
+    private void TriggerJingle(string name) {
+        // Quick sound trigger feedback
+    }
+
+    private void SaveMidiConfig() {
+        SavePluginConfigFile("midi_config.json", _midiConfig);
+    }
+
+    private void SaveArchiverConfig() {
+        SavePluginConfigFile("archiver_config.json", _archiverConfig);
+    }
+
+    private void OpenRecordingsFolder() {
+        try {
+            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            string recDir = string.IsNullOrWhiteSpace(_archiverConfig.OutputFolder) 
+                ? Path.Combine(userProfile, ".scrim", "recordings") 
+                : _archiverConfig.OutputFolder;
+            if (!Directory.Exists(recDir)) Directory.CreateDirectory(recDir);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
+                FileName = recDir,
+                UseShellExecute = true
+            });
+        } catch { }
+    }
+
+    private void SaveStreamDeckConfig() {
+        SavePluginConfigFile("streamdeck_config.json", _streamDeckConfig);
+    }
+
+    private async Task CopyLyricsObsPath() {
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        string path = Path.Combine(userProfile, ".scrim", "obs", "lyrics.txt");
+        await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", path);
+    }
+
+    private void OpenObsFolder() {
+        try {
+            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            string obsDir = Path.Combine(userProfile, ".scrim", "obs");
+            if (!Directory.Exists(obsDir)) Directory.CreateDirectory(obsDir);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
+                FileName = obsDir,
+                UseShellExecute = true
+            });
+        } catch { }
+    }
+
+    private async Task CopyObsOverlayUrl() {
+        string url = $"http://localhost:{ProfileManager.CurrentProfile.Port}/overlay";
+        await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", url);
+    }
+
+    private void ExportTrackLogCsv() {
+        try {
+            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            string csvPath = Path.Combine(userProfile, ".scrim", "broadcast_history.csv");
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("Timestamp,Title,Artist");
+            foreach (var item in _broadcastTrackLog) {
+                sb.AppendLine($"\"{item.Time:yyyy-MM-dd HH:mm:ss}\",\"{item.Title.Replace("\"", "\"\"")}\",\"{item.Artist.Replace("\"", "\"\"")}\"");
+            }
+            File.WriteAllText(csvPath, sb.ToString());
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
+                FileName = Path.GetDirectoryName(csvPath)!,
+                UseShellExecute = true
+            });
+        } catch { }
+    }
+
+    private void ClearTrackLog() {
+        _broadcastTrackLog.Clear();
     }
 }
