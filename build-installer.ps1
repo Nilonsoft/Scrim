@@ -10,11 +10,11 @@
     The build configuration (defaults to Release).
 .EXAMPLE
     .\build-installer.ps1
-    .\build-installer.ps1 -Version 1.0.1
+    .\build-installer.ps1 -Version 1.0.3
 #>
 
 param(
-    [string]$Version = "1.0.1",
+    [string]$Version = "1.0.3",
     [string]$Configuration = "Release",
     [string]$Runtime = "win-x64"
 )
