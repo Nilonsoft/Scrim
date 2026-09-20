@@ -1,3 +1,4 @@
+using Scrim.Audio;
 using Scrim.Configuration;
 using Scrim.Metadata;
 using Scrim.Server;
@@ -8,5 +9,6 @@ namespace Scrim.Plugins {
         IMetadataService Metadata { get; }
         IProfileManager ProfileManager { get; }
         SongRequestController SongRequests { get; }
+        AudioDuckingMixer AudioMixer { get; }
     }
 }

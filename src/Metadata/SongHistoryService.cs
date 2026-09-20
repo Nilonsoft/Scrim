@@ -18,6 +18,7 @@ namespace Scrim.Metadata {
     public interface ISongHistoryService : IDisposable {
         IReadOnlyList<SongHistoryItem> GetHistory(int limit = 10);
         void AddTrack(string title, string artist, string album, string? albumArtUrl = null, byte[]? albumArt = null);
+        void RemoveTrack(string id);
         void Clear();
         event Action<IReadOnlyList<SongHistoryItem>>? HistoryChanged;
     }
@@ -100,6 +101,17 @@ namespace Scrim.Metadata {
                 int takeCount = Math.Max(1, Math.Min(limit, 50));
                 return _history.Take(takeCount).ToList();
             }
+        }
+
+        public void RemoveTrack(string id) {
+            if (string.IsNullOrWhiteSpace(id)) return;
+            IReadOnlyList<SongHistoryItem> snapshot;
+            lock (_lock) {
+                _history.RemoveAll(item => item.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
+                snapshot = _history.Take(50).ToList();
+            }
+
+            HistoryChanged?.Invoke(snapshot);
         }
 
         public void Clear() {

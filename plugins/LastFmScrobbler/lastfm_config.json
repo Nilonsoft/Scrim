@@ -1,0 +1,8 @@
+{
+  "apiKey": "",
+  "apiSecret": "",
+  "sessionKey": "",
+  "listenBrainzToken": "",
+  "minPlayPercentage": 50,
+  "minPlaySeconds": 30
+}

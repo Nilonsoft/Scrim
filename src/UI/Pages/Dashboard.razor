@@ -107,6 +107,12 @@
                 <span>Share Stream</span>
             </button>
         }
+        <button class="listeners-pill" style="background: #14171d; border: 1px solid rgba(139, 92, 246, 0.4); color: #c084fc; cursor: pointer;" @onclick="@(() => ShowPluginsModal = !ShowPluginsModal)" title="Manage Installed Plugins">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+            </svg>
+            <span>Plugins (@PluginLoader.Plugins.Count(p => p.IsEnabled)/@PluginLoader.Plugins.Count)</span>
+        </button>
         <div class="listeners-pill">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
@@ -228,6 +234,76 @@
             
             <div style="margin-top: 18px; text-align: right;">
                 <button class="scrim-btn-secondary" style="padding: 6px 16px; font-size: 12px;" @onclick="@(() => ShowShareModal = false)">Close</button>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Plugins Manager Modal -->
+@if (ShowPluginsModal) {
+    <div style="position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 999;" @onclick="@(() => ShowPluginsModal = false)">
+        <div style="background: #181b22; border: 1px solid #2d323e; border-radius: 14px; padding: 24px; max-width: 680px; width: 92%; max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 20px 50px rgba(0,0,0,0.9);" @onclick:stopPropagation="true">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid #2d323e; padding-bottom: 14px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <div style="background: rgba(139, 92, 246, 0.2); border: 1px solid rgba(139, 92, 246, 0.4); border-radius: 8px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; color: #c084fc;">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect>
+                            <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path>
+                            <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line>
+                        </svg>
+                    </div>
+                    <div>
+                        <h3 style="margin: 0; font-size: 17px; font-weight: 700; color: #f8fafc;">Plugins Manager</h3>
+                        <p style="margin: 2px 0 0 0; font-size: 12px; color: #94a3b8;">Enable or disable installed broadcast plugins</p>
+                    </div>
+                </div>
+                <button class="scrim-dots-btn" @onclick="@(() => ShowPluginsModal = false)">✕</button>
+            </div>
+
+            <div style="overflow-y: auto; flex: 1; padding-right: 6px; display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px;">
+                @if (PluginLoader.Plugins.Count == 0) {
+                    <div style="text-align: center; padding: 40px 20px; color: #64748b;">
+                        <p style="font-size: 14px;">No plugins detected.</p>
+                        <p style="font-size: 12px; margin-top: 6px;">Place plugin <code>.dll</code> files in <code>~/.scrim/plugins/</code>.</p>
+                    </div>
+                } else {
+                    @foreach (var plugin in PluginLoader.Plugins) {
+                        <div style="background: #12141a; border: 1px solid @(plugin.IsEnabled ? "rgba(139, 92, 246, 0.3)" : "#222630"); border-radius: 10px; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; gap: 14px;">
+                            <div style="flex: 1; min-width: 0;">
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <span style="font-size: 14px; font-weight: 600; color: #f1f5f9;">@plugin.Name</span>
+                                    <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: @(plugin.IsEnabled ? "rgba(34, 197, 94, 0.15)" : "rgba(100, 116, 139, 0.2)"); color: @(plugin.IsEnabled ? "#4ade80" : "#94a3b8"); font-weight: 600;">
+                                        @(plugin.IsEnabled ? "ACTIVE" : "DISABLED")
+                                    </span>
+                                </div>
+                                <div style="font-size: 11px; color: #64748b; margin-top: 3px;">
+                                    <span>v@(plugin.Version)</span>
+                                    @if (!string.IsNullOrWhiteSpace(plugin.Author)) {
+                                        <span> • by @plugin.Author</span>
+                                    }
+                                </div>
+                            </div>
+
+                            <button class="scrim-btn @(plugin.IsEnabled ? "scrim-btn-primary" : "scrim-btn-secondary")" 
+                                    style="padding: 6px 14px; font-size: 12px; border-radius: 20px; font-weight: 600; min-width: 72px; text-align: center; cursor: pointer;"
+                                    @onclick="@(() => TogglePlugin(plugin.Id))">
+                                @(plugin.IsEnabled ? "ON" : "OFF")
+                            </button>
+                        </div>
+                    }
+                }
+            </div>
+
+            <div style="border-top: 1px solid #2d323e; padding-top: 14px; display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; gap: 8px;">
+                    <button class="scrim-btn-secondary" style="padding: 6px 14px; font-size: 12px; display: flex; align-items: center; gap: 6px;" @onclick="OpenPluginsFolder">
+                        <span>📁 Open Plugins Folder</span>
+                    </button>
+                    <button class="scrim-btn-secondary" style="padding: 6px 14px; font-size: 12px; display: flex; align-items: center; gap: 6px;" @onclick="ReloadPlugins">
+                        <span>🔄 Rescan</span>
+                    </button>
+                </div>
+                <button class="scrim-btn-primary" style="padding: 6px 18px; font-size: 12px;" @onclick="@(() => ShowPluginsModal = false)">Done</button>
             </div>
         </div>
     </div>
@@ -473,6 +549,7 @@
 
     private bool ShowAddCardMenu = false;
     private bool ShowShareModal = false;
+    private bool ShowPluginsModal = false;
     private string CopiedUrlTarget = "";
     private bool IsLive = false;
     private int ListenerCount => Hub.ActiveClientCount;
@@ -586,6 +663,7 @@
         ReactionService.ReactionReceived += OnReactionReceived;
         ReactionService.CountsReset += OnReactionCountsReset;
         HistoryService.HistoryChanged += OnHistoryChanged;
+        PluginLoader.PluginsChanged += OnPluginsChanged;
 
         if (!string.IsNullOrWhiteSpace(MetadataService.CurrentMetadata.Title)) {
             CurrentTrackTitle = MetadataService.CurrentMetadata.Title;
@@ -736,8 +814,6 @@
 
     private void OnProcessChanged() {
         if (SelectedProcessId != 0) {
-            MetadataService.StartMonitoring(SelectedProcessId);
-
             var win = Windows.FirstOrDefault(w => w.ProcessId == SelectedProcessId);
             ProfileManager.CurrentProfile.TargetProcessId = (int)SelectedProcessId;
             if (win != null) {
@@ -745,13 +821,16 @@
                 ProfileManager.CurrentProfile.TargetProcessName = SelectedProcessDisplayName;
             }
             ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+            MetadataService.StartMonitoring(SelectedProcessId);
+            EnsureAudioMonitoring(SelectedProcessId);
         } else {
             SelectedProcessDisplayName = "System Audio";
             ProfileManager.CurrentProfile.TargetProcessId = 0;
             ProfileManager.CurrentProfile.TargetProcessName = "System Audio";
             ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+            MetadataService.StartMonitoring(0);
+            EnsureAudioMonitoring(0);
         }
-        EnsureAudioMonitoring(SelectedProcessId);
     }
 
     private void OnCaptureDeviceChanged() {
@@ -790,9 +869,15 @@
                 CurrentTrackTitle = meta.Title;
                 CurrentTrackArtist = string.IsNullOrWhiteSpace(meta.Artist) ? "Live Stream" : meta.Artist;
                 CurrentTrackExtra = string.IsNullOrWhiteSpace(meta.Album) ? "Broadcast Audio" : meta.Album;
-                CurrentTrackAlbumArtBase64 = meta.AlbumArtBase64;
+                if (!string.IsNullOrEmpty(meta.AlbumArtBase64)) {
+                    CurrentTrackAlbumArtBase64 = meta.AlbumArtBase64;
+                } else if (trackChanged) {
+                    CurrentTrackAlbumArtBase64 = null;
+                }
                 if (meta.Duration > TimeSpan.Zero) {
                     CurrentTrackDuration = meta.Duration;
+                } else if (trackChanged) {
+                    CurrentTrackDuration = TimeSpan.Zero;
                 }
                 double diff = (meta.Position - CurrentTrackPosition).TotalSeconds;
                 if (trackChanged || Math.Abs(diff) > 2.5 || diff > 0.3 || !meta.IsPlaying) {
@@ -896,7 +981,7 @@
                 Windows = newWindows;
                 var savedName = ProfileManager.CurrentProfile.TargetProcessName;
                 if (!string.IsNullOrEmpty(savedName) && !savedName.Equals("System Audio", StringComparison.OrdinalIgnoreCase)) {
-                    if (SelectedProcessId != 0 && !Windows.Any(w => w.ProcessId == SelectedProcessId)) {
+                    if (SelectedProcessId == 0 || !Windows.Any(w => w.ProcessId == SelectedProcessId)) {
                         var reconnected = Windows.FirstOrDefault(w => string.Equals(w.ProcessName, savedName, StringComparison.OrdinalIgnoreCase))
                                        ?? Windows.FirstOrDefault(w => w.Title.Contains(savedName, StringComparison.OrdinalIgnoreCase));
                         if (reconnected != null) {
@@ -907,6 +992,7 @@
                         }
                     }
                 }
+                InvokeAsync(StateHasChanged);
             }
         } catch { }
     }
@@ -1720,6 +1806,7 @@
         ReactionService.ReactionReceived -= OnReactionReceived;
         ReactionService.CountsReset -= OnReactionCountsReset;
         HistoryService.HistoryChanged -= OnHistoryChanged;
+        PluginLoader.PluginsChanged -= OnPluginsChanged;
         _dotNetRef?.Dispose();
         _refreshTimer?.Dispose();
         _vuTimer?.Dispose();
@@ -1753,7 +1840,7 @@
                         <option value="@SelectedProcessId">@(string.IsNullOrEmpty(SelectedProcessDisplayName) ? "Selected Application" : SelectedProcessDisplayName)</option>
                     }
                     @foreach (var w in Windows) {
-                        <option value="@w.ProcessId">@w.Title</option>
+                        <option value="@w.ProcessId">@(!string.IsNullOrEmpty(w.ProcessName) && !w.Title.StartsWith(w.ProcessName, StringComparison.OrdinalIgnoreCase) ? $"{w.ProcessName} - {w.Title}" : w.Title)</option>
                     }
                 </select>
             </div>
@@ -2279,6 +2366,11 @@
                         <button class="pill-option" style="padding: 1px 8px; font-size: 10px; background: rgba(168, 85, 247, 0.1); border: 1px solid rgba(168, 85, 247, 0.3); color: #c084fc; border-radius: 10px;" @onclick="ToggleSongHistoryManager" title="View & manage session song history">
                             @(ShowSongHistory ? "Hide History" : $"History ({HistoryService.GetHistory(100).Count})")
                         </button>
+                        @if (HistoryService.GetHistory(100).Count > 0) {
+                            <button class="pill-option" style="padding: 1px 8px; font-size: 10px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: #ef4444; border-radius: 10px;" @onclick="ClearSessionHistory" title="Clear all session song history">
+                                Clear History
+                            </button>
+                        }
                     </div>
 
                     @if (ShowSongHistory) {
@@ -2288,7 +2380,7 @@
                                 <div style="display: flex; gap: 8px; align-items: center;">
                                     <span>@(HistoryService.GetHistory(100).Count) tracks</span>
                                     @if (HistoryService.GetHistory(100).Count > 0) {
-                                        <button class="pill-option" style="padding: 1px 6px; font-size: 10px; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #ef4444; border-radius: 6px;" @onclick="ClearSessionHistory" title="Clear session song history">Clear All</button>
+                                        <button class="pill-option" style="padding: 1px 6px; font-size: 10px; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #ef4444; border-radius: 6px;" @onclick="ClearSessionHistory" title="Clear all session song history">Clear All</button>
                                     }
                                 </div>
                             </div>
@@ -2316,6 +2408,7 @@
                                                 <span style="color: #94a3b8;" title="Thumbs Down">👎 @songReactions.ThumbsDown</span>
                                             }
                                             <span style="color: #64748b;">@item.PlayedAtFormatted</span>
+                                            <button class="scrim-dots-btn" style="color: #ef4444; font-size: 11px; padding: 1px 4px;" @onclick="@(() => RemoveHistoryTrack(item.Id))" title="Remove '@item.Title' from history">🗑️</button>
                                         </div>
                                     </div>
                                 }
@@ -2557,15 +2650,22 @@
                 </div>
                 @if (ProfileManager.CurrentProfile.EnableSongHistory) {
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06); gap: 8px; flex-wrap: wrap;">
-                        <span style="font-size: 11px; color: #94a3b8;">Max songs in scrollable box:</span>
-                        <div style="display: flex; gap: 4px; align-items: center;">
-                            @foreach (var count in new[] { 5, 10, 15, 20, 25, 50 }) {
-                                <button class="pill-option @(ProfileManager.CurrentProfile.SongHistoryLimit == count ? "active" : "")" style="padding: 2px 8px; font-size: 10px;" @onclick="@(() => SetSongHistoryLimit(count))">
-                                    @count
-                                </button>
-                            }
-                            <input type="number" min="1" max="100" style="width: 48px; background: #1a1d26; border: 1px solid #2d323e; border-radius: 4px; color: #fff; font-size: 10px; padding: 2px 4px; text-align: center;" value="@ProfileManager.CurrentProfile.SongHistoryLimit" @onchange="OnSongHistoryLimitChanged" title="Custom maximum songs count (1-100)" />
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 11px; color: #94a3b8;">Max songs:</span>
+                            <div style="display: flex; gap: 4px; align-items: center;">
+                                @foreach (var count in new[] { 5, 10, 15, 20, 25, 50 }) {
+                                    <button class="pill-option @(ProfileManager.CurrentProfile.SongHistoryLimit == count ? "active" : "")" style="padding: 2px 8px; font-size: 10px;" @onclick="@(() => SetSongHistoryLimit(count))">
+                                        @count
+                                    </button>
+                                }
+                                <input type="number" min="1" max="100" style="width: 48px; background: #1a1d26; border: 1px solid #2d323e; border-radius: 4px; color: #fff; font-size: 10px; padding: 2px 4px; text-align: center;" value="@ProfileManager.CurrentProfile.SongHistoryLimit" @onchange="OnSongHistoryLimitChanged" title="Custom maximum songs count (1-100)" />
+                            </div>
                         </div>
+                        @if (HistoryService.GetHistory(100).Count > 0) {
+                            <button class="pill-option" style="padding: 2px 8px; font-size: 10px; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #ef4444; border-radius: 6px;" @onclick="ClearSessionHistory" title="Clear all song history from web player and console">
+                                🗑️ Clear History (@(HistoryService.GetHistory(100).Count))
+                            </button>
+                        }
                     </div>
                 }
             </div>
@@ -3177,6 +3277,13 @@
 
     private void ClearSessionHistory() {
         HistoryService.Clear();
+        StreamServer.BroadcastHistoryUpdate();
+        StateHasChanged();
+    }
+
+    private void RemoveHistoryTrack(string id) {
+        HistoryService.RemoveTrack(id);
+        StreamServer.BroadcastHistoryUpdate();
         StateHasChanged();
     }
 
@@ -3449,5 +3556,31 @@
                 UseShellExecute = true
             });
         } catch { }
+    }
+
+    private void TogglePlugin(string id) {
+        PluginLoader.TogglePlugin(id);
+    }
+
+    private void ReloadPlugins() {
+        PluginLoader.ReloadPlugins();
+    }
+
+    private void OpenPluginsFolder() {
+        try {
+            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var path = System.IO.Path.Combine(userProfile, ".scrim", "plugins");
+            if (!System.IO.Directory.Exists(path)) {
+                System.IO.Directory.CreateDirectory(path);
+            }
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
+                FileName = path,
+                UseShellExecute = true
+            });
+        } catch { }
+    }
+
+    private void OnPluginsChanged(object? sender, EventArgs e) {
+        InvokeAsync(StateHasChanged);
     }
 }

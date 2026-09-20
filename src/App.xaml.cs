@@ -24,6 +24,24 @@ namespace Scrim {
                 Environment.SetEnvironmentVariable("WEBVIEW2_USER_DATA_FOLDER", webView2Dir);
             } catch { }
 
+            // Ensure all required user profile directories exist
+            try {
+                var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                var scrimDir = Path.Combine(userProfile, ".scrim");
+                string[] dirs = new[] {
+                    scrimDir,
+                    Path.Combine(scrimDir, "assets"),
+                    Path.Combine(scrimDir, "themes"),
+                    Path.Combine(scrimDir, "voice_effects"),
+                    Path.Combine(scrimDir, "plugins")
+                };
+                foreach (var dir in dirs) {
+                    if (!Directory.Exists(dir)) {
+                        Directory.CreateDirectory(dir);
+                    }
+                }
+            } catch { }
+
             // Global exception handling to prevent silent process crashes
             DispatcherUnhandledException += (s, args) => {
                 LogCrash(args.Exception);

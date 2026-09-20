@@ -13,6 +13,7 @@ namespace Scrim.Server {
         public int ActiveClientCount => _clients.Count;
         public bool IsBroadcasting { get; private set; } = false;
         public event EventHandler<bool>? BroadcastingStateChanged;
+        public event EventHandler<byte[]>? AudioFrameAvailable;
 
         public void StartBroadcasting(ChannelReader<byte[]> encodedStream) {
             StopBroadcasting();
@@ -26,6 +27,7 @@ namespace Scrim.Server {
                     var frame = await encodedStream.ReadAsync(token);
                     
                     _preRollBuffer.PushFrame(frame);
+                    AudioFrameAvailable?.Invoke(this, frame);
 
                     foreach (var client in _clients.Values) {
                         client.AudioChannel.Writer.TryWrite(frame);

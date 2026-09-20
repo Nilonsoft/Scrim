@@ -1,0 +1,7 @@
+{
+  "channel": "",
+  "botUsername": "",
+  "oauthToken": "",
+  "enableSongRequests": true,
+  "commandPrefix": "!"
+}

@@ -8,6 +8,7 @@ using Windows.Media.Control;
 namespace Scrim.Metadata {
     public class WindowsMediaMetadataService : IMetadataService {
         private static readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(4) };
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string? ArtUrl, TimeSpan Duration, DateTime CheckedAt)> _itunesCache = new();
         private uint _targetProcessId;
         private CancellationTokenSource? _cts;
         private GlobalSystemMediaTransportControlsSessionManager? _sessionManager;
@@ -44,7 +45,7 @@ namespace Scrim.Metadata {
                     await UpdateMetadataAsync();
                 }
             } catch {
-                // Ignore errors related to UWP/WinRT initialization if unsupported
+                _sessionManager = null;
             }
 
             while (!token.IsCancellationRequested) {
@@ -90,7 +91,9 @@ namespace Scrim.Metadata {
                         } catch { }
                     }
                 }
-            } catch { }
+            } catch {
+                _sessionManager = null;
+            }
         }
 
         private void CurrentSession_MediaPropertiesChanged(GlobalSystemMediaTransportControlsSession sender, MediaPropertiesChangedEventArgs args) {
@@ -110,9 +113,12 @@ namespace Scrim.Metadata {
                 try {
                     _sessionManager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
                     if (_sessionManager != null) {
+                        _sessionManager.SessionsChanged += SessionManager_SessionsChanged;
+                        _sessionManager.CurrentSessionChanged += SessionManager_CurrentSessionChanged;
                         HookCurrentSession();
                     }
                 } catch {
+                    _sessionManager = null;
                     return;
                 }
             }
@@ -120,6 +126,12 @@ namespace Scrim.Metadata {
             try {
                 var session = await GetBestMediaSessionAsync();
                 if (session == null) return;
+
+                bool isBrowser = session.SourceAppUserModelId != null &&
+                    (session.SourceAppUserModelId.Contains("chrome", StringComparison.OrdinalIgnoreCase) ||
+                     session.SourceAppUserModelId.Contains("msedge", StringComparison.OrdinalIgnoreCase) ||
+                     session.SourceAppUserModelId.Contains("firefox", StringComparison.OrdinalIgnoreCase) ||
+                     session.SourceAppUserModelId.Contains("brave", StringComparison.OrdinalIgnoreCase));
 
                 var props = await session.TryGetMediaPropertiesAsync();
                 if (props != null) {
@@ -166,6 +178,11 @@ namespace Scrim.Metadata {
                         !IsStreamArtifactOrEmpty(title, artist) &&
                         (title != CurrentMetadata.Title || artist != CurrentMetadata.Artist || album != CurrentMetadata.Album);
 
+                    // Retain known duration if session temporarily drops timeline properties (common in Spotify/browsers)
+                    if (!trackChanged && duration <= TimeSpan.Zero && CurrentMetadata.Duration > TimeSpan.Zero) {
+                        duration = CurrentMetadata.Duration;
+                    }
+
                     if (!trackChanged && isPlaying && CurrentMetadata.Position > TimeSpan.Zero) {
                         var diff = (position - CurrentMetadata.Position).TotalSeconds;
                         if (diff < 0 && Math.Abs(diff) <= 2.5) {
@@ -184,8 +201,8 @@ namespace Scrim.Metadata {
                             artUrl = null;
                         }
 
-                        // 1. Try extracting local thumbnail from Windows Media Session
-                        if (props.Thumbnail != null) {
+                        // 1. Try extracting local thumbnail from Windows Media Session (skip generic browser icons)
+                        if (props.Thumbnail != null && !isBrowser) {
                             try {
                                 using var stream = await props.Thumbnail.OpenReadAsync();
                                 if (stream.Size > 0) {
@@ -197,12 +214,12 @@ namespace Scrim.Metadata {
                             } catch { }
                         }
 
-                        // 2. Fallback to iTunes Search API if local thumbnail is absent
+                        // 2. Fallback to iTunes Search API if local thumbnail is absent or from a browser
                         if ((artBytes == null || artBytes.Length == 0) && !string.IsNullOrEmpty(title)) {
                             try {
                                 var (foundArtUrl, itunesDuration) = await FetchItunesInfoAsync(artist, title);
-                                artUrl = foundArtUrl;
-                                if (!string.IsNullOrEmpty(artUrl)) {
+                                if (!string.IsNullOrEmpty(foundArtUrl)) {
+                                    artUrl = foundArtUrl;
                                     artBytes = await _httpClient.GetByteArrayAsync(artUrl);
                                 }
                                 if (duration <= TimeSpan.Zero && itunesDuration > TimeSpan.Zero) {
@@ -210,6 +227,11 @@ namespace Scrim.Metadata {
                                 }
                             } catch { }
                         }
+                    }
+
+                    // Preserve duration if previously resolved
+                    if (duration <= TimeSpan.Zero && !trackChanged && CurrentMetadata.Duration > TimeSpan.Zero) {
+                        duration = CurrentMetadata.Duration;
                     }
 
                     bool artRestored = (artBytes != null && CurrentMetadata.AlbumArt == null) || 
@@ -223,9 +245,9 @@ namespace Scrim.Metadata {
                             Title = string.IsNullOrEmpty(title) ? CurrentMetadata.Title : title,
                             Artist = string.IsNullOrEmpty(artist) ? CurrentMetadata.Artist : artist,
                             Album = string.IsNullOrEmpty(album) ? CurrentMetadata.Album : album,
-                            AlbumArt = artBytes,
-                            AlbumArtUrl = artUrl,
-                            Duration = duration,
+                            AlbumArt = artBytes ?? (!trackChanged ? CurrentMetadata.AlbumArt : null),
+                            AlbumArtUrl = artUrl ?? (!trackChanged ? CurrentMetadata.AlbumArtUrl : null),
+                            Duration = duration > TimeSpan.Zero ? duration : CurrentMetadata.Duration,
                             Position = position,
                             IsPlaying = isPlaying
                         };
@@ -254,9 +276,23 @@ namespace Scrim.Metadata {
             if (_sessionManager == null) return null;
 
             try {
-                var sessions = _sessionManager.GetSessions();
+                IReadOnlyList<GlobalSystemMediaTransportControlsSession>? sessions = null;
+                try {
+                    sessions = _sessionManager.GetSessions();
+                } catch {
+                    _sessionManager = null;
+                    return null;
+                }
+
                 if (sessions == null || sessions.Count == 0) {
-                    var curr = _sessionManager.GetCurrentSession();
+                    GlobalSystemMediaTransportControlsSession? curr = null;
+                    try {
+                        curr = _sessionManager.GetCurrentSession();
+                    } catch {
+                        _sessionManager = null;
+                        return null;
+                    }
+
                     if (curr != null) {
                         try {
                             var cp = await curr.TryGetMediaPropertiesAsync();
@@ -268,8 +304,15 @@ namespace Scrim.Metadata {
                     return curr;
                 }
 
+                string? targetProcessName = null;
+                if (_targetProcessId != 0) {
+                    try {
+                        targetProcessName = System.Diagnostics.Process.GetProcessById((int)_targetProcessId).ProcessName;
+                    } catch { }
+                }
+
                 GlobalSystemMediaTransportControlsSession? bestSession = null;
-                bool bestHasArt = false;
+                int bestScore = -1;
 
                 foreach (var s in sessions) {
                     try {
@@ -278,16 +321,30 @@ namespace Scrim.Metadata {
                         string t = props.Title?.Trim() ?? "";
                         if (IsStreamArtifactOrEmpty(t, props.Artist)) continue;
 
+                        string sourceApp = s.SourceAppUserModelId ?? "";
+                        bool isTargetApp = !string.IsNullOrEmpty(targetProcessName) && 
+                            sourceApp.Contains(targetProcessName, StringComparison.OrdinalIgnoreCase);
+
+                        bool isBrowser = sourceApp.Contains("chrome", StringComparison.OrdinalIgnoreCase) ||
+                                         sourceApp.Contains("msedge", StringComparison.OrdinalIgnoreCase) ||
+                                         sourceApp.Contains("firefox", StringComparison.OrdinalIgnoreCase) ||
+                                         sourceApp.Contains("brave", StringComparison.OrdinalIgnoreCase);
+
                         var pb = s.GetPlaybackInfo();
                         bool isPlaying = pb != null && pb.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
-                        bool hasThumb = props.Thumbnail != null;
+                        bool hasThumb = props.Thumbnail != null && !isBrowser;
+                        bool hasArtist = !string.IsNullOrWhiteSpace(props.Artist);
 
-                        if (bestSession == null) {
+                        int score = 0;
+                        if (isTargetApp) score += 100; // Prioritize explicitly selected app (e.g. Spotify)
+                        if (isPlaying) score += 10;
+                        if (hasThumb) score += 4;
+                        if (hasArtist) score += 2;
+                        if (isBrowser && !isTargetApp) score -= 5; // Deprioritize background browser noise
+
+                        if (score > bestScore) {
+                            bestScore = score;
                             bestSession = s;
-                            bestHasArt = hasThumb;
-                        } else if (isPlaying && (!bestHasArt || hasThumb)) {
-                            bestSession = s;
-                            bestHasArt = hasThumb;
                         }
                     } catch { }
                 }
@@ -296,24 +353,43 @@ namespace Scrim.Metadata {
                     return bestSession;
                 }
 
-                var fallback = _sessionManager.GetCurrentSession();
-                if (fallback != null) {
-                    try {
-                        var fp = await fallback.TryGetMediaPropertiesAsync();
-                        if (fp != null && IsStreamArtifactOrEmpty(fp.Title, fp.Artist)) {
-                            return null;
-                        }
-                    } catch { }
+                try {
+                    var fallback = _sessionManager.GetCurrentSession();
+                    if (fallback != null) {
+                        try {
+                            var fp = await fallback.TryGetMediaPropertiesAsync();
+                            if (fp != null && IsStreamArtifactOrEmpty(fp.Title, fp.Artist)) {
+                                return null;
+                            }
+                        } catch { }
+                    }
+                    return fallback;
+                } catch {
+                    _sessionManager = null;
+                    return null;
                 }
-                return fallback;
             } catch {
+                _sessionManager = null;
                 return null;
             }
         }
 
         private static async Task<(string? ArtUrl, TimeSpan Duration)> FetchItunesInfoAsync(string artist, string title) {
             try {
-                string query = string.IsNullOrWhiteSpace(artist) ? title : $"{artist} {title}";
+                string query = string.IsNullOrWhiteSpace(artist) ? title.Trim() : $"{artist.Trim()} {title.Trim()}";
+                string cacheKey = query.ToLowerInvariant();
+
+                // Check cache to avoid hammering iTunes API every second (prevents HTTP 429 rate limits)
+                if (_itunesCache.TryGetValue(cacheKey, out var entry)) {
+                    if (!string.IsNullOrEmpty(entry.ArtUrl) || entry.Duration > TimeSpan.Zero) {
+                        return (entry.ArtUrl, entry.Duration);
+                    }
+                    // Negative cache: avoid retrying failed lookups for 10 minutes
+                    if ((DateTime.UtcNow - entry.CheckedAt) < TimeSpan.FromMinutes(10)) {
+                        return (null, TimeSpan.Zero);
+                    }
+                }
+
                 string url = $"https://itunes.apple.com/search?term={Uri.EscapeDataString(query)}&entity=song&limit=1";
                 string json = await _httpClient.GetStringAsync(url);
 
@@ -343,8 +419,14 @@ namespace Scrim.Metadata {
                     }
                 }
 
+                _itunesCache[cacheKey] = (art, dur, DateTime.UtcNow);
                 return (art, dur);
-            } catch { }
+            } catch {
+                try {
+                    string query = string.IsNullOrWhiteSpace(artist) ? title.Trim() : $"{artist.Trim()} {title.Trim()}";
+                    _itunesCache[query.ToLowerInvariant()] = (null, TimeSpan.Zero, DateTime.UtcNow);
+                } catch { }
+            }
             return (null, TimeSpan.Zero);
         }
 

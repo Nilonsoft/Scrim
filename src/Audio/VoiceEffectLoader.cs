@@ -14,9 +14,11 @@ namespace Scrim.Audio {
 
         public VoiceEffectLoader() {
             _effectsDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "VoiceEffects");
-            if (!Directory.Exists(_effectsDir)) {
-                Directory.CreateDirectory(_effectsDir);
-            }
+            try {
+                if (!Directory.Exists(_effectsDir)) {
+                    Directory.CreateDirectory(_effectsDir);
+                }
+            } catch { }
 
             // Load Built-Ins
             RegisterBuiltIn("normal", "Normal", VoiceEffect.Normal);
@@ -29,38 +31,62 @@ namespace Scrim.Audio {
         }
 
         public void LoadEffects() {
-            // Load DLLs
-            foreach (var file in Directory.GetFiles(_effectsDir, "*.dll")) {
+            var searchDirs = new List<string>();
+            if (Directory.Exists(_effectsDir)) {
+                searchDirs.Add(_effectsDir);
+            }
+
+            try {
+                var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                var userEffectsDir = Path.Combine(userProfile, ".scrim", "voice_effects");
+                if (!Directory.Exists(userEffectsDir)) {
+                    Directory.CreateDirectory(userEffectsDir);
+                }
+                if (Directory.Exists(userEffectsDir)) {
+                    searchDirs.Add(userEffectsDir);
+                }
+            } catch { }
+
+            foreach (var dir in searchDirs) {
+                // Load DLLs
                 try {
-                    var asm = Assembly.LoadFrom(file);
-                    foreach (var type in asm.GetTypes()) {
-                        if (typeof(IVoiceChangerProvider).IsAssignableFrom(type) && !type.IsInterface && !type.IsAbstract) {
-                            if (Activator.CreateInstance(type) is IVoiceChangerProvider provider) {
-                                _providers[provider.Id] = provider;
+                    foreach (var file in Directory.GetFiles(dir, "*.dll")) {
+                        try {
+                            var asm = Assembly.LoadFrom(file);
+                            foreach (var type in asm.GetTypes()) {
+                                if (typeof(IVoiceChangerProvider).IsAssignableFrom(type) && !type.IsInterface && !type.IsAbstract) {
+                                    if (Activator.CreateInstance(type) is IVoiceChangerProvider provider) {
+                                        _providers[provider.Id] = provider;
+                                    }
+                                }
                             }
-                        }
+                        } catch { /* Ignore loading errors for specific DLLs */ }
                     }
-                } catch { /* Ignore loading errors for specific DLLs */ }
-            }
-
-            // Load JSONs
-            foreach (var file in Directory.GetFiles(_effectsDir, "*.json")) {
-                try {
-                    var json = File.ReadAllText(file);
-                    var doc = JsonDocument.Parse(json);
-                    string name = doc.RootElement.GetProperty("name").GetString() ?? "Unknown";
-                    string id = Path.GetFileNameWithoutExtension(file);
-                    var chain = new JsonChainProvider(id, name, doc);
-                    _providers[id] = chain;
                 } catch { }
-            }
 
-            // Load Lua Scripts
-            foreach (var file in Directory.GetFiles(_effectsDir, "*.lua")) {
+                // Load JSONs
                 try {
-                    string id = Path.GetFileNameWithoutExtension(file);
-                    var luaProv = new LuaScriptProvider(id, file);
-                    _providers[id] = luaProv;
+                    foreach (var file in Directory.GetFiles(dir, "*.json")) {
+                        try {
+                            var json = File.ReadAllText(file);
+                            var doc = JsonDocument.Parse(json);
+                            string name = doc.RootElement.GetProperty("name").GetString() ?? "Unknown";
+                            string id = Path.GetFileNameWithoutExtension(file);
+                            var chain = new JsonChainProvider(id, name, doc);
+                            _providers[id] = chain;
+                        } catch { }
+                    }
+                } catch { }
+
+                // Load Lua Scripts
+                try {
+                    foreach (var file in Directory.GetFiles(dir, "*.lua")) {
+                        try {
+                            string id = Path.GetFileNameWithoutExtension(file);
+                            var luaProv = new LuaScriptProvider(id, file);
+                            _providers[id] = luaProv;
+                        } catch { }
+                    }
                 } catch { }
             }
         }

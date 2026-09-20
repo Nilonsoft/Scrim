@@ -64,6 +64,9 @@ namespace Scrim.Configuration {
         }
 
         public IEnumerable<string> GetAvailableProfiles() {
+            if (!Directory.Exists(_configDir)) {
+                return new[] { "Default" };
+            }
             var files = Directory.GetFiles(_configDir, "*.json");
             var names = files.Select(Path.GetFileNameWithoutExtension).ToList();
             if (!names.Contains("Default")) {

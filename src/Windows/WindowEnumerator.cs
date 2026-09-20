@@ -58,6 +58,45 @@ namespace Scrim.Windows {
                 return true;
             }, nint.Zero);
 
+            // Ensure running music players (like Spotify) are always present even when minimized to background or tray
+            try {
+                string[] knownAudioApps = new[] { "Spotify", "AppleMusic", "TIDAL", "foobar2000", "vlc", "MusicBee", "AIMP", "iTunes" };
+                foreach (var appName in knownAudioApps) {
+                    try {
+                        var procs = Process.GetProcessesByName(appName);
+                        if (procs.Length > 0) {
+                            bool alreadyInMap = windowMap.Values.Any(w => w.ProcessName.Equals(appName, StringComparison.OrdinalIgnoreCase));
+                            if (!alreadyInMap) {
+                                var mainProc = procs.OrderBy(p => {
+                                    try {
+                                        return p.StartTime;
+                                    } catch {
+                                        return DateTime.MaxValue;
+                                    }
+                                }).First();
+
+                                string title = appName;
+                                foreach (var p in procs) {
+                                    try {
+                                        if (!string.IsNullOrWhiteSpace(p.MainWindowTitle)) {
+                                            title = p.MainWindowTitle;
+                                            break;
+                                        }
+                                    } catch { }
+                                }
+
+                                uint mainPid = (uint)mainProc.Id;
+                                windowMap[mainPid] = new WindowInfo {
+                                    ProcessId = mainPid,
+                                    Title = title,
+                                    ProcessName = appName
+                                };
+                            }
+                        }
+                    } catch { }
+                }
+            } catch { }
+
             return windowMap.Values
                 .OrderBy(w => w.ProcessName, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(w => w.Title, StringComparer.OrdinalIgnoreCase)

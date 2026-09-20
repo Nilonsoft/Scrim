@@ -2,4 +2,16 @@
   <Folder Name="/src/">
     <Project Path="src/Scrim.csproj" />
   </Folder>
+  <Folder Name="/plugins/">
+    <Project Path="plugins/DiscordNotifier/DiscordNotifier.csproj" />
+    <Project Path="plugins/ObsOverlay/ObsOverlay.csproj" />
+    <Project Path="plugins/BroadcastLogger/BroadcastLogger.csproj" />
+    <Project Path="plugins/LyricsTicker/LyricsTicker.csproj" />
+    <Project Path="plugins/TwitchBot/TwitchBot.csproj" />
+    <Project Path="plugins/StreamDeckCompanion/StreamDeckCompanion.csproj" />
+    <Project Path="plugins/LastFmScrobbler/LastFmScrobbler.csproj" />
+    <Project Path="plugins/JingleSweeper/JingleSweeper.csproj" />
+    <Project Path="plugins/StreamArchiver/StreamArchiver.csproj" />
+    <Project Path="plugins/MidiController/MidiController.csproj" />
+  </Folder>
 </Solution>

@@ -194,6 +194,26 @@ namespace Scrim.Audio {
             }
         }
 
+        public void PlayAudioFile(string filePath) {
+            if (string.IsNullOrWhiteSpace(filePath) || !System.IO.File.Exists(filePath)) {
+                return;
+            }
+
+            try {
+                using var reader = new NAudio.Wave.WaveFileReader(filePath);
+                byte[] data = new byte[reader.Length];
+                int read = reader.Read(data, 0, data.Length);
+                if (read > 0) {
+                    if (read < data.Length) {
+                        Array.Resize(ref data, read);
+                    }
+                    PlaySoundEffect(data);
+                }
+            } catch (Exception ex) {
+                System.Diagnostics.Debug.WriteLine($"[AudioDuckingMixer] Failed to play audio file {filePath}: {ex.Message}");
+            }
+        }
+
         private void ProcessMix(byte[] appBuffer, byte[] micBuffer) {
             byte[] outBuffer = new byte[appBuffer.Length];
             bool micActive = IsMicLive;

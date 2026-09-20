@@ -1,0 +1,7 @@
+{
+  "webhookUrl": "",
+  "announceTracks": true,
+  "announceBroadcastStatus": true,
+  "botUsername": "Scrim Studio",
+  "avatarUrl": "https://raw.githubusercontent.com/Nilonsoft/Scrim/main/src/Web/Assets/app-icon.png"
+}

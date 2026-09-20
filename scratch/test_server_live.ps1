@@ -1,4 +1,5 @@
-Add-Type -Path "C:\Users\donwo\source\Scrim\src\bin\Debug\net10.0-windows10.0.19041.0\Scrim.dll"
+$dllPath = Join-Path $PSScriptRoot "..\src\bin\Debug\net10.0-windows10.0.19041.0\Scrim.dll"
+if (Test-Path $dllPath) { Add-Type -Path $dllPath }
 
 $profile = New-Object Scrim.Configuration.ScrimProfile
 $profile.Port = 19444

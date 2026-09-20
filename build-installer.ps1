@@ -60,13 +60,67 @@ if (Test-Path $oldReadme) {
     Remove-Item -Path $oldReadme -Force
 }
 
-# Package ONLY the end-user guide (no developer specs, git links, or repository docs)
+# Package the end-user guide and plugin development guide
 $userGuideSource = Join-Path $scriptRoot "docs\user-guide.md"
 $userGuideDest = Join-Path $publishDir "UserGuide.md"
 if (Test-Path $userGuideSource) {
     Copy-Item -Path $userGuideSource -Destination $userGuideDest -Force
     Write-Host "Packaged clean UserGuide.md for installer." -ForegroundColor Gray
 }
+
+$pluginGuideSource = Join-Path $scriptRoot "docs\plugin-development.md"
+$pluginGuideDest = Join-Path $publishDir "PluginGuide.md"
+if (Test-Path $pluginGuideSource) {
+    Copy-Item -Path $pluginGuideSource -Destination $pluginGuideDest -Force
+    Write-Host "Packaged PluginGuide.md for installer." -ForegroundColor Gray
+}
+
+# Ensure VoiceEffects and Plugins directories exist and are packaged into MSI
+$voiceEffectsDir = Join-Path $publishDir "VoiceEffects"
+if (-not (Test-Path $voiceEffectsDir)) {
+    New-Item -ItemType Directory -Path $voiceEffectsDir -Force | Out-Null
+}
+$veReadme = Join-Path $voiceEffectsDir "readme.txt"
+if (-not (Test-Path $veReadme)) {
+    Set-Content -Path $veReadme -Value "Custom voice effects (.dll, .json, .lua) can be placed here or in ~/.scrim/voice_effects/."
+}
+
+$pluginsDir = Join-Path $publishDir "Plugins"
+if (-not (Test-Path $pluginsDir)) {
+    New-Item -ItemType Directory -Path $pluginsDir -Force | Out-Null
+}
+$plReadme = Join-Path $pluginsDir "readme.txt"
+if (-not (Test-Path $plReadme)) {
+    Set-Content -Path $plReadme -Value "Custom Scrim plugins (.dll) can be placed here or in ~/.scrim/plugins/."
+}
+
+# Build and package all built-in plugins from plugins/ directory
+$pluginsSourceDir = Join-Path $scriptRoot "plugins"
+if (Test-Path $pluginsSourceDir) {
+    $pluginProjects = Get-ChildItem -Path $pluginsSourceDir -Filter "*.csproj" -Recurse
+    foreach ($pluginProj in $pluginProjects) {
+        $pName = [System.IO.Path]::GetFileNameWithoutExtension($pluginProj.Name)
+        Write-Host "Compiling plugin: $pName..." -ForegroundColor Gray
+        $pluginOutDir = Join-Path $pluginProj.DirectoryName "bin\$Configuration"
+        & dotnet build $pluginProj.FullName -c $Configuration -r $Runtime --no-self-contained -o $pluginOutDir
+        if ($LASTEXITCODE -eq 0) {
+            $pluginDll = Join-Path $pluginOutDir "$pName.dll"
+            if (Test-Path $pluginDll) {
+                Copy-Item -Path $pluginDll -Destination (Join-Path $pluginsDir "$pName.dll") -Force
+                Write-Host "Packaged $pName.dll into Plugins/." -ForegroundColor Gray
+            }
+            # Copy any json config files alongside the plugin
+            Get-ChildItem -Path $pluginProj.DirectoryName -Filter "*.json" | ForEach-Object {
+                Copy-Item -Path $_.FullName -Destination (Join-Path $pluginsDir $_.Name) -Force
+                Write-Host "Packaged $($_.Name) into Plugins/." -ForegroundColor Gray
+            }
+        }
+    }
+}
+# Remove development staticwebassets manifests and debug symbol files that contain local source paths
+Get-ChildItem -Path $publishDir -Filter "*staticwebassets*.json" -Recurse | Remove-Item -Force
+Get-ChildItem -Path $publishDir -Filter "*.pdb" -Recurse | Remove-Item -Force
+Write-Host "Sanitized publish directory (removed dev staticwebassets and debug PDBs)." -ForegroundColor Gray
 
 Write-Host "`n[3/3] Compiling WiX MSI Installer: $outputMsi..." -ForegroundColor Yellow
 & wix build $wxsFile -arch x64 -d "Version=$Version" -d "PublishDir=$publishDir" -o $outputMsi
