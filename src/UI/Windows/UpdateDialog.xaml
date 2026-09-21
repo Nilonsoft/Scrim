@@ -1,0 +1,144 @@
+<Window x:Class="Scrim.UI.Windows.UpdateDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="Scrim Software Update"
+        Height="470" Width="540"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        Background="#0d1117"
+        Foreground="#e6edf3"
+        FontFamily="Segoe UI, -apple-system, BlinkMacSystemFont, Roboto, sans-serif">
+    <Window.Resources>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="14,8"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#30363d"/>
+            <Setter Property="Background" Value="#21262d"/>
+            <Setter Property="Foreground" Value="#e6edf3"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="border"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="#30363d"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="#161b22"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="border" Property="Opacity" Value="0.4"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,16">
+            <Border Width="44" Height="44" Background="#1f6feb22" BorderBrush="#388bfd" BorderThickness="1" CornerRadius="8" Margin="0,0,14,0">
+                <TextBlock Text="🚀" FontSize="20" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock Text="Software Update Available" FontSize="18" FontWeight="Bold" Foreground="#e6edf3"/>
+                <TextBlock Text="A newer release of Scrim is ready to install." FontSize="12" Foreground="#8b949e" Margin="0,2,0,0"/>
+            </StackPanel>
+        </StackPanel>
+
+        <!-- Version & Details Banner -->
+        <Border Grid.Row="1" Background="#161b22" BorderBrush="#30363d" BorderThickness="1" CornerRadius="8" Padding="14,10" Margin="0,0,0,14">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Background="#21262d" CornerRadius="4" Padding="8,3" Margin="0,0,8,0">
+                        <TextBlock x:Name="TxtCurrentVersion" Text="v1.0.0" FontSize="12" Foreground="#8b949e"/>
+                    </Border>
+                    <TextBlock Text="➔" FontSize="12" Foreground="#58a6ff" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <Border Background="#238636" CornerRadius="4" Padding="8,3">
+                        <TextBlock x:Name="TxtLatestVersion" Text="v1.0.3" FontSize="12" FontWeight="Bold" Foreground="#ffffff"/>
+                    </Border>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock x:Name="TxtReleaseDate" Text="Sep 19, 2026" FontSize="12" Foreground="#8b949e" Margin="0,0,12,0"/>
+                    <TextBlock x:Name="TxtFileSize" Text="62.7 MB" FontSize="12" FontWeight="SemiBold" Foreground="#58a6ff"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Changelog Section -->
+        <Border Grid.Row="2" Background="#161b22" BorderBrush="#30363d" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,16">
+            <DockPanel>
+                <TextBlock DockPanel.Dock="Top" Text="What's New in this Version" FontSize="12" FontWeight="SemiBold" Foreground="#58a6ff" Margin="0,0,0,8"/>
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <ItemsControl x:Name="ItemsChangelog">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,3">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="•" FontSize="14" Foreground="#58a6ff" Margin="0,0,8,0"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding}" FontSize="12" Foreground="#c9d1d9" TextWrapping="Wrap"/>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </DockPanel>
+        </Border>
+
+        <!-- Download / Install Progress -->
+        <StackPanel Grid.Row="3" x:Name="PanelProgress" Visibility="Collapsed" Margin="0,0,0,16">
+            <Grid Margin="0,0,0,6">
+                <TextBlock x:Name="TxtProgressStatus" Text="Downloading update..." FontSize="12" Foreground="#8b949e"/>
+                <TextBlock x:Name="TxtProgressPercent" Text="0%" FontSize="12" FontWeight="Bold" Foreground="#58a6ff" HorizontalAlignment="Right"/>
+            </Grid>
+            <ProgressBar x:Name="ProgressBarDownload" Height="6" Background="#21262d" Foreground="#238636" BorderThickness="0"/>
+        </StackPanel>
+
+        <!-- Actions -->
+        <Grid Grid.Row="4">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <Button x:Name="BtnDownloadBrowser" Content="Open Website" Click="BtnDownloadBrowser_Click"/>
+
+            <StackPanel Grid.Column="2" Orientation="Horizontal">
+                <Button x:Name="BtnLater" Content="Later" Click="BtnLater_Click" Margin="0,0,10,0"/>
+                <Button x:Name="BtnUpdateNow" Content="⚡ Update &amp; Restart" Click="BtnUpdateNow_Click"
+                        Background="#238636" BorderBrush="#2ea043" Foreground="#ffffff"/>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

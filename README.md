@@ -114,6 +114,16 @@ The resulting installer (`bin/ScrimSetup-v1.0.0.msi`) bundles all dependencies, 
 
 ---
 
+## Software Updates & Auto-Update
+
+Scrim includes native integration with the NilonSoft Client Update API (`https://www.nilonsoft.com`):
+
+- **Startup Update Checks**: Every time Scrim is launched, it asynchronously queries the update endpoint in the background without slowing down console startup.
+- **Daily Background Checks**: When Scrim is not running, a Windows Scheduled Task (`Scrim Daily Update Check`) executes `Scrim.exe --check-updates-silent` once per day. If an update is detected, it alerts the user; if up to date, it silently exits immediately.
+- **In-Place Auto-Update**: When an update is accepted, Scrim downloads the latest `.msi` package, spawns a detached updater script that closes running Scrim instances, executes `msiexec /i <installer> /passive /norestart` in the per-user scope (no UAC elevation required), and automatically restarts Scrim.
+
+---
+
 ## License
 
 This project is licensed under the [MIT License](LICENSE).

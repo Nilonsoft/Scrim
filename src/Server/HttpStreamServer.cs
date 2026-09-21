@@ -23,9 +23,14 @@ namespace Scrim.Server {
         private readonly ISongHistoryService _historyService;
 
         public event Action? HistorySettingsChanged;
+        public event Action? BrandingSettingsChanged;
 
         public void BroadcastHistoryUpdate() {
             HistorySettingsChanged?.Invoke();
+        }
+
+        public void BroadcastBrandingUpdate() {
+            BrandingSettingsChanged?.Invoke();
         }
         private HttpListener? _listener;
         private TcpListener? _bridgeListener;
@@ -637,6 +642,10 @@ namespace Scrim.Server {
                 immediateChannel.Writer.TryWrite($"data: {{\"type\":\"history_update\",\"history\":{historyJson}}}\n\n");
             };
 
+            Action onBrandingSettings = () => {
+                immediateChannel.Writer.TryWrite($"data: {BuildBrandingJson()}\n\n");
+            };
+
             string BuildMetadataJson(MediaMetadata meta) {
                 bool hasArt = (meta.AlbumArt != null && meta.AlbumArt.Length > 0) || !string.IsNullOrEmpty(meta.AlbumArtUrl);
                 string artUrl = hasArt ? (string.IsNullOrEmpty(meta.AlbumArtUrl) ? "/api/albumart" : meta.AlbumArtUrl) : "";
@@ -691,6 +700,7 @@ namespace Scrim.Server {
             _metadataService.MetadataChanged += onMetadata;
             _hub.BroadcastingStateChanged += onBroadcastChanged;
             HistorySettingsChanged += onHistorySettings;
+            BrandingSettingsChanged += onBrandingSettings;
 
             try {
                 using var writer = new StreamWriter(response.OutputStream);
@@ -763,6 +773,7 @@ namespace Scrim.Server {
                 _metadataService.MetadataChanged -= onMetadata;
                 _hub.BroadcastingStateChanged -= onBroadcastChanged;
                 HistorySettingsChanged -= onHistorySettings;
+                BrandingSettingsChanged -= onBrandingSettings;
                 writeLock.Dispose();
                 response.Close();
             }
@@ -1045,7 +1056,8 @@ namespace Scrim.Server {
             }
             string? resolved = _profileManager.ResolveAssetPath(val);
             if (!string.IsNullOrWhiteSpace(resolved) && File.Exists(resolved)) {
-                return "/api/banner";
+                long lastModified = File.GetLastWriteTimeUtc(resolved).Ticks;
+                return $"/api/banner?t={lastModified}";
             }
             return val;
         }
@@ -1072,7 +1084,7 @@ namespace Scrim.Server {
             try {
                 var response = context.Response;
                 response.Headers.Add("Access-Control-Allow-Origin", "*");
-                response.Headers.Add("Cache-Control", "public, max-age=60");
+                response.Headers.Add("Cache-Control", "no-cache, no-store, must-revalidate");
 
                 var profile = _profileManager.CurrentProfile;
                 string? resolved = _profileManager.ResolveAssetPath(profile.BannerUrl);

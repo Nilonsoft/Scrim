@@ -98,6 +98,25 @@ namespace Scrim.Tests {
                 Assert.False(string.IsNullOrWhiteSpace(theme.AccentColor));
             }
         }
+
+        [Fact]
+        public void HttpStreamServer_BroadcastBrandingUpdate_FiresBrandingSettingsChangedEvent() {
+            var hub = new BroadcastHub();
+            var metaMock = new Mock<IMetadataService>();
+            metaMock.Setup(m => m.CurrentMetadata).Returns(new MediaMetadata { Title = "Test Song", Artist = "Test Artist" });
+            var profileManagerMock = new Mock<IProfileManager>();
+            profileManagerMock.Setup(p => p.CurrentProfile).Returns(new ScrimProfile { StationName = "ORIGINAL" });
+            var networkMock = new Mock<INetworkDiscoveryService>();
+            var requestController = new SongRequestController();
+            var server = new HttpStreamServer(hub, metaMock.Object, requestController, profileManagerMock.Object, networkMock.Object);
+
+            bool eventFired = false;
+            server.BrandingSettingsChanged += () => eventFired = true;
+
+            server.BroadcastBrandingUpdate();
+
+            Assert.True(eventFired);
+        }
     }
 }
 

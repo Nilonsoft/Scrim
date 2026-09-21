@@ -116,12 +116,6 @@
                 <span>Share Stream</span>
             </button>
         }
-        <button class="listeners-pill" style="background: #14171d; border: 1px solid rgba(139, 92, 246, 0.4); color: #c084fc; cursor: pointer;" @onclick="@(() => ShowPluginsModal = !ShowPluginsModal)" title="Manage Installed Plugins">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
-            </svg>
-            <span>Plugins (@PluginLoader.Plugins.Count(p => p.IsEnabled)/@PluginLoader.Plugins.Count)</span>
-        </button>
         <div class="listeners-pill">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
@@ -1482,21 +1476,18 @@
 
     private void AddNavLink() {
         ProfileManager.CurrentProfile.CustomNavLinks.Add(new WebNavLink { Label = "New Link", Url = "https://" });
-        ProfileManager.CurrentProfile.NavLinks = string.Join(",", ProfileManager.CurrentProfile.CustomNavLinks.Select(l => l.Label));
-        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
-        StateHasChanged();
+        SaveBranding();
     }
 
     private void RemoveNavLink(WebNavLink link) {
         ProfileManager.CurrentProfile.CustomNavLinks.Remove(link);
-        ProfileManager.CurrentProfile.NavLinks = string.Join(",", ProfileManager.CurrentProfile.CustomNavLinks.Select(l => l.Label));
-        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
-        StateHasChanged();
+        SaveBranding();
     }
 
     private void SaveBranding() {
         ProfileManager.CurrentProfile.NavLinks = string.Join(",", ProfileManager.CurrentProfile.CustomNavLinks.Select(l => l.Label));
         ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        StreamServer.BroadcastBrandingUpdate();
         StateHasChanged();
     }
 
@@ -2659,28 +2650,28 @@
 
             <div style="margin-bottom: 12px;">
                 <label class="scrim-label">Station Brand / Header Title</label>
-                <input type="text" class="scrim-input" @bind="ProfileManager.CurrentProfile.StationName" @bind:event="oninput" placeholder="e.g. GLOBAL INDIE RADIO" />
+                <input type="text" class="scrim-input" @bind="ProfileManager.CurrentProfile.StationName" @bind:event="oninput" @bind:after="SaveBranding" placeholder="e.g. GLOBAL INDIE RADIO" />
             </div>
 
             <div style="margin-bottom: 12px;">
                 <label class="scrim-label">Browser Page Title</label>
-                <input type="text" class="scrim-input" @bind="ProfileManager.CurrentProfile.PageTitle" @bind:event="oninput" placeholder="e.g. Global Indie Radio - Live Broadcast" />
+                <input type="text" class="scrim-input" @bind="ProfileManager.CurrentProfile.PageTitle" @bind:event="oninput" @bind:after="SaveBranding" placeholder="e.g. Global Indie Radio - Live Broadcast" />
             </div>
 
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;">
                 <div>
                     <label class="scrim-label">Show / Program Title</label>
-                    <input type="text" class="scrim-input" @bind="ProfileManager.CurrentProfile.ShowTitle" @bind:event="oninput" placeholder="e.g. Late Night Indie Drive" />
+                    <input type="text" class="scrim-input" @bind="ProfileManager.CurrentProfile.ShowTitle" @bind:event="oninput" @bind:after="SaveBranding" placeholder="e.g. Late Night Indie Drive" />
                 </div>
                 <div>
                     <label class="scrim-label">Host / DJ Name</label>
-                    <input type="text" class="scrim-input" @bind="ProfileManager.CurrentProfile.HostName" @bind:event="oninput" placeholder="e.g. Sarah J." />
+                    <input type="text" class="scrim-input" @bind="ProfileManager.CurrentProfile.HostName" @bind:event="oninput" @bind:after="SaveBranding" placeholder="e.g. Sarah J." />
                 </div>
             </div>
 
             <div style="margin-bottom: 12px;">
                 <label class="scrim-label">Station Tagline / Genre</label>
-                <input type="text" class="scrim-input" @bind="ProfileManager.CurrentProfile.GenreTag" @bind:event="oninput" placeholder="e.g. Indie Alternative" />
+                <input type="text" class="scrim-input" @bind="ProfileManager.CurrentProfile.GenreTag" @bind:event="oninput" @bind:after="SaveBranding" placeholder="e.g. Indie Alternative" />
             </div>
 
             <div style="margin-bottom: 12px;">
@@ -2693,7 +2684,7 @@
                         }
                     </div>
                 </div>
-                <input type="text" class="scrim-input" @bind="ProfileManager.CurrentProfile.BannerUrl" @bind:event="oninput" placeholder="URL (https://...) or .\assets\image.jpg (or image name in ~/.scrim/assets)" />
+                <input type="text" class="scrim-input" @bind="ProfileManager.CurrentProfile.BannerUrl" @bind:event="oninput" @bind:after="SaveBranding" placeholder="URL (https://...) or .\assets\image.jpg (or image name in ~/.scrim/assets)" />
                 <span style="font-size: 11px; color: var(--text-muted, #71717a); display: block; margin-top: 4px;">Displays a panoramic image banner across the top of the website. Supports URLs, <code>.\assets\name</code>, or images in <code>~/.scrim/assets/</code>.</span>
                 @if (!string.IsNullOrWhiteSpace(ProfileManager.CurrentProfile.BannerUrl)) {
                     <div style="margin-top: 8px; border-radius: 6px; overflow: hidden; height: 60px; background: #000; border: 1px solid var(--border-color, #252830); display: flex; align-items: center; justify-content: center;">
@@ -2759,8 +2750,8 @@
                 </div>
                 @foreach (var link in ProfileManager.CurrentProfile.CustomNavLinks) {
                     <div style="display: flex; gap: 6px; margin-bottom: 8px; align-items: center;">
-                        <input type="text" class="scrim-input" style="flex: 1; padding: 6px 8px; font-size: 12px;" @bind="link.Label" placeholder="Label (e.g. Discord)" />
-                        <input type="text" class="scrim-input" style="flex: 2; padding: 6px 8px; font-size: 12px;" @bind="link.Url" placeholder="URL (e.g. https://discord.gg/...)" />
+                        <input type="text" class="scrim-input" style="flex: 1; padding: 6px 8px; font-size: 12px;" @bind="link.Label" @bind:event="oninput" @bind:after="SaveBranding" placeholder="Label (e.g. Discord)" />
+                        <input type="text" class="scrim-input" style="flex: 2; padding: 6px 8px; font-size: 12px;" @bind="link.Url" @bind:event="oninput" @bind:after="SaveBranding" placeholder="URL (e.g. https://discord.gg/...)" />
                         <button class="scrim-dots-btn" style="color: #ef4444; font-size: 12px;" @onclick="@(() => RemoveNavLink(link))" title="Delete Link">✕</button>
                     </div>
                 }

@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Threading.Tasks;
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using Scrim.Audio;
@@ -8,6 +9,8 @@ using Scrim.Encoding;
 using Scrim.Metadata;
 using Scrim.Plugins;
 using Scrim.Server;
+using Scrim.UI.Windows;
+using Scrim.Updates;
 
 namespace Scrim {
     public partial class App : Application {
@@ -88,6 +91,9 @@ namespace Scrim {
             services.AddSingleton<ISongReactionService, SongReactionService>();
             services.AddSingleton<ISongHistoryService, SongHistoryService>();
 
+            // Updates
+            services.AddSingleton<IUpdateService, UpdateService>();
+
             // Plugins
             services.AddSingleton<PluginLoader>();
 
@@ -98,6 +104,20 @@ namespace Scrim {
 
         protected override void OnStartup(StartupEventArgs e) {
             base.OnStartup(e);
+
+            // Handle silent background update check if triggered by Windows Task Scheduler
+            bool isSilentCheck = false;
+            for (int i = 0; i < e.Args.Length; i++) {
+                if (string.Equals(e.Args[i], "--check-updates-silent", StringComparison.OrdinalIgnoreCase)) {
+                    isSilentCheck = true;
+                    break;
+                }
+            }
+
+            if (isSilentCheck) {
+                _ = HandleSilentUpdateCheckAsync();
+                return;
+            }
 
             var profileManager = Services.GetRequiredService<IProfileManager>();
             if (e.Args.Length > 0) {
@@ -119,14 +139,50 @@ namespace Scrim {
 
             var mainWindow = new MainWindow();
             mainWindow.Show();
+
+            // Synchronize daily background scheduled task
+            var updateService = Services.GetRequiredService<IUpdateService>();
+            Task.Run(() => updateService.EnsureDailyScheduledTask());
+
+            // Run asynchronous update check on startup without delaying UI launch
+            _ = CheckForUpdatesOnStartupAsync(updateService);
+        }
+
+        private async Task HandleSilentUpdateCheckAsync() {
+            try {
+                var updateService = Services.GetRequiredService<IUpdateService>();
+                var result = await updateService.CheckForUpdatesAsync();
+                if (result.Status == UpdateStatus.UpdateAvailable && result.UpdateInfo != null) {
+                    var dialog = new UpdateDialog(result.UpdateInfo, updateService);
+                    dialog.ShowDialog();
+                }
+            } catch { }
+
+            Shutdown();
+        }
+
+        private async Task CheckForUpdatesOnStartupAsync(IUpdateService updateService) {
+            try {
+                // Brief 2-second delay allowing the main window and Blazor view to render smoothly
+                await Task.Delay(2000);
+
+                var result = await updateService.CheckForUpdatesAsync();
+                if (result.Status == UpdateStatus.UpdateAvailable && result.UpdateInfo != null) {
+                    await Dispatcher.InvokeAsync(() => {
+                        var dialog = new UpdateDialog(result.UpdateInfo, updateService);
+                        dialog.Owner = MainWindow;
+                        dialog.ShowDialog();
+                    });
+                }
+            } catch { }
         }
 
         protected override void OnExit(ExitEventArgs e) {
-            var pluginLoader = Services.GetRequiredService<PluginLoader>();
-            pluginLoader.UnloadPlugins();
+            var pluginLoader = Services.GetService<PluginLoader>();
+            pluginLoader?.UnloadPlugins();
 
-            var streamServer = Services.GetRequiredService<HttpStreamServer>();
-            streamServer.Stop();
+            var streamServer = Services.GetService<HttpStreamServer>();
+            streamServer?.Stop();
 
             var profileManager = Services.GetService<IProfileManager>();
             if (profileManager?.CurrentProfile != null) {

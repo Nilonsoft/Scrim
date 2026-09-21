@@ -10,13 +10,14 @@
     The build configuration (defaults to Release).
 .EXAMPLE
     .\build-installer.ps1
-    .\build-installer.ps1 -Version 1.0.3
+    .\build-installer.ps1 -Version 1.0.4
 #>
 
 param(
-    [string]$Version = "1.0.3",
+    [string]$Version = "1.0.4",
     [string]$Configuration = "Release",
-    [string]$Runtime = "win-x64"
+    [string]$Runtime = "win-x64",
+    [string]$PatchNotesPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -378,9 +379,73 @@ if ($LASTEXITCODE -ne 0) {
 $msiItem = Get-Item $outputMsi
 $sizeMb = [Math]::Round($msiItem.Length / 1MB, 2)
 
+# Generate / copy release patch notes into the same folder as the installer
+$patchNotesFileMd = Join-Path $binDir "PatchNotes-v$Version.md"
+$patchNotesFileTxt = Join-Path $binDir "PatchNotes-v$Version.txt"
+
+$sourcePatchNotes = $null
+if (-not [string]::IsNullOrWhiteSpace($PatchNotesPath) -and (Test-Path $PatchNotesPath)) {
+    $sourcePatchNotes = $PatchNotesPath
+} else {
+    $candidateFiles = @(
+        (Join-Path $scriptRoot "docs\patch-notes-v$Version.md"),
+        (Join-Path $scriptRoot "docs\patchnotes-v$Version.md"),
+        (Join-Path $scriptRoot "docs\patch-notes.md"),
+        (Join-Path $scriptRoot "PATCHNOTES.md")
+    )
+    foreach ($cand in $candidateFiles) {
+        if (Test-Path $cand) {
+            $sourcePatchNotes = $cand
+            break
+        }
+    }
+}
+
+if ($sourcePatchNotes) {
+    $patchNotesContent = Get-Content -Path $sourcePatchNotes -Raw -Encoding utf8
+} else {
+    $releaseDate = (Get-Date).ToString("yyyy-MM-dd")
+    $patchNotesContent = @"
+# Scrim Release v$Version Patch Notes
+**Release Date:** $releaseDate
+**Installer Package:** ScrimSetup-v$Version.msi
+
+## What's New in v$Version
+
+### 🚀 Client Update System & In-Place Auto-Update
+- **Integrated NilonSoft Client Update API**: Real-time update checks against https://www.nilonsoft.com/api/updates/scrim.
+- **Automatic Startup Checks**: Background asynchronous update queries 2 seconds after Scrim console launches.
+- **Daily Background Scheduled Task**: Automatically registers a user-level Windows Scheduled Task (``Scrim Daily Update Check``) that queries updates daily even when Scrim is closed.
+- **1-Click In-Place Auto-Update**: Dark-themed update dialog with release highlights, download progress, and auto-update flow:
+  - Downloads the latest MSI package to temporary storage.
+  - Automatically identifies and cleanly terminates running Scrim instances.
+  - Runs silent/passive in-place upgrade without requiring UAC administrator elevation.
+  - Automatically relaunches the updated Scrim application.
+
+### 🎚️ Broadcast & Audio Engine
+- Hardware-style microphone controls with push-to-talk, push-to-mute, and 25ms local headphone sidetone monitoring.
+- Real-time DSP voice changers (Pitch & Formant shifting) with built-in presets and Lua/JSON/DLL extension support.
+- 1-Click Virtual Audio Device driver installation with automatic loopback stream routing.
+- Real-time multi-codec live transcoding supporting MP3, AAC, Opus, and lossless FLAC.
+- Calibrated stereo dB VU meters with numeric peak readouts and auto-scaling attack/release dynamics.
+
+### 🌐 Web Station & Interactive Player
+- Dark glassmorphism web player with real-time metadata synchronized via Windows System Media Transport Controls (SMTC).
+- Interactive anonymous live chat with host moderation controls.
+- Listener song requests and dedications in real-time queue.
+"@
+}
+
+[System.IO.File]::WriteAllText($patchNotesFileMd, $patchNotesContent, [System.Text.Encoding]::UTF8)
+
+# Also generate plain-text version for quick console/notepad reading
+$plainTextNotes = ($patchNotesContent -replace '#{1,6}\s*', '' -replace '\*\*', '' -replace '\[([^\]]+)\]\([^)]+\)', '$1').Trim()
+[System.IO.File]::WriteAllText($patchNotesFileTxt, $plainTextNotes, [System.Text.Encoding]::UTF8)
+
 Write-Host "`n====================================================" -ForegroundColor Green
-Write-Host " Installer Built Successfully!" -ForegroundColor Green
-Write-Host " File: $($msiItem.FullName)" -ForegroundColor White
-Write-Host " Size: $sizeMb MB" -ForegroundColor White
-Write-Host " Features: Start Menu & Desktop Shortcuts, In-Place Auto-Upgrade" -ForegroundColor Gray
+Write-Host " Installer & Patch Notes Built Successfully!" -ForegroundColor Green
+Write-Host " File:        $($msiItem.FullName)" -ForegroundColor White
+Write-Host " Size:        $sizeMb MB" -ForegroundColor White
+Write-Host " Patch Notes: $patchNotesFileMd" -ForegroundColor White
+Write-Host " Features:    Start Menu & Desktop Shortcuts, In-Place Auto-Upgrade" -ForegroundColor Gray
 Write-Host "====================================================" -ForegroundColor Green
