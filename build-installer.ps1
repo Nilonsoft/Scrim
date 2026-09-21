@@ -14,7 +14,7 @@
 #>
 
 param(
-    [string]$Version = "1.0.4",
+    [string]$Version = "",
     [string]$Configuration = "Release",
     [string]$Runtime = "win-x64",
     [string]$PatchNotesPath = ""
@@ -22,16 +22,31 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "====================================================" -ForegroundColor Cyan
-Write-Host "       Building Scrim Windows Installer v$Version    " -ForegroundColor Cyan
-Write-Host "====================================================" -ForegroundColor Cyan
-
 $scriptRoot = $PSScriptRoot
 $projectFile = Join-Path $scriptRoot "src\Scrim.csproj"
 $publishDir = Join-Path $scriptRoot "publish_build"
 $wxsFile = Join-Path $scriptRoot "installer\Package.wxs"
 $binDir = Join-Path $scriptRoot "bin"
+
+# Automatically extract version from src\Scrim.csproj if not explicitly specified
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    if (Test-Path $projectFile) {
+        [xml]$projXml = Get-Content $projectFile
+        $projVer = $projXml.Project.PropertyGroup.Version | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1
+        if (-not [string]::IsNullOrWhiteSpace($projVer)) {
+            $Version = $projVer.Trim()
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($Version)) {
+        $Version = "1.0.5"
+    }
+}
+
 $outputMsi = Join-Path $binDir "ScrimSetup-v$Version.msi"
+
+Write-Host "====================================================" -ForegroundColor Cyan
+Write-Host "       Building Scrim Windows Installer v$Version    " -ForegroundColor Cyan
+Write-Host "====================================================" -ForegroundColor Cyan
 
 if (-not (Test-Path $binDir)) {
     New-Item -ItemType Directory -Path $binDir -Force | Out-Null
@@ -45,7 +60,7 @@ if (-not $wixCmd) {
 Write-Host "Found WiX: $($wixCmd.Source)" -ForegroundColor Green
 
 Write-Host "`n[2/3] Publishing self-contained win-x64 application..." -ForegroundColor Yellow
-& dotnet publish $projectFile -c $Configuration -r $Runtime --self-contained true -o $publishDir
+& dotnet publish $projectFile -c $Configuration -r $Runtime --self-contained true -p:Version=$Version -p:AssemblyVersion="$Version.0" -p:FileVersion="$Version.0" -o $publishDir
 if ($LASTEXITCODE -ne 0) {
     Write-Error "dotnet publish failed with exit code $LASTEXITCODE"
 }
