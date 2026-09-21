@@ -45,6 +45,11 @@
 
 ### 🎨 Modern Responsive Web Player & Live Chat
 - **Dark Glassmorphism Interface**: Real-time track metadata and album art synchronized via Windows System Media Transport Controls (SMTC).
+- **Dynamic Ambient Backdrop**: Real-time canvas palette extraction dynamically glows the background with album art colors; toggleable in the Scrim console so station owners can prioritize their custom themes.
+- **Party / TV Full-Screen Mode**: Cinema-ready TV viewing experience with massive album artwork, enlarged visualizers, clean typography, and auto-hiding controls on mouse idle.
+- **Live Synced & Plain Lyrics Drawer**: Powered by the open LRCLIB API with automatic line-by-line sync and smooth scrolling tracking current audio playback.
+- **Station Schedule & Broadcaster Bio**: Sleek modal displaying host biography, live broadcast schedule, and Discord, Twitch, and Twitter/X social links.
+- **DJ Live Polls & Track Battles**: Broadcasters can launch live questions or 1-click track battles directly from the console, displaying live percentage bars and collecting instant listener votes.
 - **Anonymous Live Chat**: Real-time discussion between listeners and broadcaster without signups or accounts; verified `[HOST]` badges and broadcaster pause/clear controls.
 - **4 Selectable Visualizers**: Choose between Neon Frequency Spectrum, Dynamic Waveform, Glowing Retro VU Meter, or Pulsing Sound Bars.
 - **Listener Song Requests & Dedications**: Remote listeners can submit song requests with free-form dedications (e.g. for a friend, partner, or crew), visible in the live queue and the DJ's moderation card.

@@ -49,6 +49,38 @@ namespace Scrim.Server {
             _historyService = historyService ?? new SongHistoryService(metadataService);
         }
 
+        private PollState? _currentPoll;
+        public PollState? CurrentPoll => _currentPoll;
+        public event EventHandler<PollState?>? PollChanged;
+
+        public void CreatePoll(string question, System.Collections.Generic.List<string> options) {
+            var poll = new PollState {
+                Question = question,
+                Options = options.Select(o => new PollOption { Text = o, Votes = 0 }).ToList()
+            };
+            _currentPoll = poll;
+            PollChanged?.Invoke(this, poll);
+        }
+
+        public void EndPoll() {
+            _currentPoll = null;
+            PollChanged?.Invoke(this, null);
+        }
+
+        public bool RecordPollVote(string pollId, int optionIndex) {
+            if (_currentPoll == null || _currentPoll.Id != pollId) return false;
+            if (optionIndex < 0 || optionIndex >= _currentPoll.Options.Count) return false;
+            _currentPoll.Options[optionIndex].Votes++;
+            PollChanged?.Invoke(this, _currentPoll);
+            return true;
+        }
+
+        public string BuildPollJson(PollState? poll) {
+            if (poll == null) return "{\"type\":\"poll_ended\"}";
+            var optionsJson = string.Join(",", poll.Options.Select(o => $"{{\"text\":\"{EscapeJson(o.Text)}\",\"votes\":{o.Votes}}}"));
+            return $"{{\"type\":\"poll_update\",\"poll\":{{\"id\":\"{EscapeJson(poll.Id)}\",\"question\":\"{EscapeJson(poll.Question)}\",\"totalVotes\":{poll.TotalVotes},\"options\":[{optionsJson}]}}}}";
+        }
+
         private string GetCustomThemeJson(string themeId) {
             var themeDef = _themeService.GetTheme(themeId);
             if (themeDef != null && themeDef.IsCustom) {
@@ -75,8 +107,11 @@ namespace Scrim.Server {
             }
         }
 
+        public bool IsListening => _listener != null && _listener.IsListening;
+
         public void Start(int port) {
-            if ((_listener != null && _listener.IsListening) || _bridgeListener != null) return;
+            if (_listener != null && _listener.IsListening && (_bridgeListener == null || _bridgeListener.Server.IsBound)) return;
+            Stop();
 
             int targetPort = FindAvailablePort(port);
             var profile = _profileManager.CurrentProfile;
@@ -183,7 +218,11 @@ namespace Scrim.Server {
                 try {
                     client = await _bridgeListener.AcceptTcpClientAsync(token);
                 } catch {
-                    break;
+                    if (token.IsCancellationRequested || _bridgeListener == null) {
+                        break;
+                    }
+                    try { await Task.Delay(50, token); } catch { break; }
+                    continue;
                 }
 
                 string mount = GetNormalizedMountPoint();
@@ -197,6 +236,11 @@ namespace Scrim.Server {
                 using (var server = new TcpClient()) {
                     client.NoDelay = true;
                     server.NoDelay = true;
+                    client.ReceiveTimeout = 30000;
+                    client.SendTimeout = 30000;
+                    server.ReceiveTimeout = 30000;
+                    server.SendTimeout = 30000;
+
                     await server.ConnectAsync(IPAddress.Loopback, internalPort, token);
                     using var clientStream = client.GetStream();
                     using var serverStream = server.GetStream();
@@ -205,8 +249,12 @@ namespace Scrim.Server {
                     int totalRead = 0;
                     int headerEnd = -1;
 
+                    using var headerTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+                    headerTimeoutCts.CancelAfter(TimeSpan.FromSeconds(15));
+                    var headerToken = headerTimeoutCts.Token;
+
                     while (totalRead < buffer.Length) {
-                        int read = await clientStream.ReadAsync(buffer.AsMemory(totalRead, buffer.Length - totalRead), token);
+                        int read = await clientStream.ReadAsync(buffer.AsMemory(totalRead, buffer.Length - totalRead), headerToken);
                         if (read <= 0) break;
                         totalRead += read;
 
@@ -275,137 +323,163 @@ namespace Scrim.Server {
             while (!token.IsCancellationRequested) {
                 HttpListenerContext context;
                 try {
-                    context = await _listener!.GetContextAsync();
-                } catch {
-                    break;
-                }
-
-                // Global CORS preflight OPTIONS handling
-                if (context.Request.HttpMethod == "OPTIONS") {
-                    try {
-                        context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
-                        context.Response.Headers.Add("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-                        context.Response.Headers.Add("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization");
-                        context.Response.StatusCode = 200;
-                        context.Response.Close();
-                    } catch { }
+                    if (_listener == null || !_listener.IsListening) {
+                        break;
+                    }
+                    context = await _listener.GetContextAsync();
+                } catch (Exception) {
+                    if (token.IsCancellationRequested || _listener == null || !_listener.IsListening) {
+                        break;
+                    }
+                    try { await Task.Delay(50, token); } catch { break; }
                     continue;
                 }
 
-                string path = context.Request.Url?.AbsolutePath ?? "/";
-                string userAgent = context.Request.UserAgent ?? "";
-                bool isMediaPlayer = userAgent.Contains("VLC", StringComparison.OrdinalIgnoreCase) ||
-                                     userAgent.Contains("LibVLC", StringComparison.OrdinalIgnoreCase) ||
-                                     userAgent.Contains("foobar2000", StringComparison.OrdinalIgnoreCase) ||
-                                     userAgent.Contains("Winamp", StringComparison.OrdinalIgnoreCase) ||
-                                     userAgent.Contains("Lavf", StringComparison.OrdinalIgnoreCase) ||
-                                     userAgent.Contains("mpv", StringComparison.OrdinalIgnoreCase) ||
-                                     userAgent.Contains("Audacious", StringComparison.OrdinalIgnoreCase) ||
-                                     userAgent.Contains("iTunes", StringComparison.OrdinalIgnoreCase) ||
-                                     userAgent.Contains("QuickTime", StringComparison.OrdinalIgnoreCase) ||
-                                     userAgent.Contains("Wget", StringComparison.OrdinalIgnoreCase) ||
-                                     userAgent.Contains("curl", StringComparison.OrdinalIgnoreCase);
+                // Process each request asynchronously so the accept loop is never blocked
+                // and a failure in one client request can never crash the server!
+                _ = Task.Run(() => {
+                    try {
+                        ProcessContext(context, token);
+                    } catch (Exception) {
+                        try {
+                            context.Response.StatusCode = 500;
+                            context.Response.Close();
+                        } catch { }
+                    }
+                }, token);
+            }
+        }
 
-                bool isStreamRoute = IsStreamPath(path) || (path == "/" && isMediaPlayer);
-                bool isRestricted = _profileManager.CurrentProfile.RestrictToLocalNetwork && !IsLocalNetworkClient(context);
+        private void ProcessContext(HttpListenerContext context, CancellationToken token) {
+            // Global CORS preflight OPTIONS handling
+            if (context.Request.HttpMethod == "OPTIONS") {
+                try {
+                    context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+                    context.Response.Headers.Add("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+                    context.Response.Headers.Add("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization");
+                    context.Response.StatusCode = 200;
+                    context.Response.Close();
+                } catch { }
+                return;
+            }
 
-                if (isStreamRoute) {
-                    if (isRestricted) {
-                        context.Response.StatusCode = 403;
-                        context.Response.ContentType = "application/json";
-                        context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
-                        byte[] errBytes = System.Text.Encoding.UTF8.GetBytes("{\"error\":\"Private Stream\",\"message\":\"This broadcast is restricted to local network listeners.\",\"isPrivate\":true}");
-                        context.Response.ContentLength64 = errBytes.Length;
-                        context.Response.OutputStream.Write(errBytes, 0, errBytes.Length);
-                        context.Response.Close();
-                    } else {
-                        _ = HandleStreamClient(context, token);
-                    }
-                } else if (path == "/listen.m3u" || path == "/playlist.m3u" || path == "/stream.m3u" || string.Equals(path, $"/{GetNormalizedMountPoint()}.m3u", StringComparison.OrdinalIgnoreCase)) {
-                    HandleM3uRequest(context);
-                } else if (path == "/listen.pls" || path == "/playlist.pls" || path == "/stream.pls" || string.Equals(path, $"/{GetNormalizedMountPoint()}.pls", StringComparison.OrdinalIgnoreCase)) {
-                    HandlePlsRequest(context);
-                } else if (path == "/api/events") {
-                    _ = HandleSseClient(context, token);
-                } else if (path == "/api/network") {
-                    HandleNetworkRequest(context);
-                } else if (path == "/api/albumart") {
-                    if (isRestricted) {
-                        context.Response.StatusCode = 403;
-                        context.Response.Close();
-                    } else {
-                        HandleAlbumArtRequest(context);
-                    }
-                } else if (path == "/api/metadata") {
-                    if (isRestricted) {
-                        context.Response.StatusCode = 403;
-                        context.Response.ContentType = "application/json";
-                        context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
-                        byte[] priv = System.Text.Encoding.UTF8.GetBytes("{\"isPrivate\":true,\"title\":\"Private Stream\",\"artist\":\"Restricted to Local Network\"}");
-                        context.Response.OutputStream.Write(priv, 0, priv.Length);
-                        context.Response.Close();
-                    } else {
-                        HandleMetadataRequest(context);
-                    }
-                } else if (path == "/api/branding") {
-                    HandleBrandingRequest(context);
-                } else if (path == "/api/banner") {
-                    HandleBannerRequest(context);
-                } else if (path == "/api/logo") {
-                    HandleLogoRequest(context);
-                } else if (path == "/api/requests" && context.Request.HttpMethod == "POST") {
-                    if (isRestricted) {
-                        context.Response.StatusCode = 403;
-                        context.Response.Close();
-                    } else {
-                        HandleSongRequest(context);
-                    }
-                } else if (path == "/api/chat" && context.Request.HttpMethod == "POST") {
-                    if (isRestricted) {
-                        context.Response.StatusCode = 403;
-                        context.Response.Close();
-                    } else {
-                        HandleChatPostRequest(context);
-                    }
-                } else if (path == "/api/chat" && context.Request.HttpMethod == "GET") {
-                    if (isRestricted) {
-                        context.Response.ContentType = "application/json";
-                        context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
-                        byte[] emptyChat = System.Text.Encoding.UTF8.GetBytes("{\"enabled\":false,\"messages\":[]}");
-                        context.Response.OutputStream.Write(emptyChat, 0, emptyChat.Length);
-                        context.Response.Close();
-                    } else {
-                        HandleChatGetRequest(context);
-                    }
-                } else if (path == "/api/reactions/clear" && context.Request.HttpMethod == "POST") {
-                    HandleReactionClearRequest(context);
-                } else if (path == "/api/reactions" && context.Request.HttpMethod == "POST") {
-                    if (isRestricted) {
-                        context.Response.StatusCode = 403;
-                        context.Response.Close();
-                    } else {
-                        HandleReactionPostRequest(context);
-                    }
-                } else if (path == "/api/reactions" && context.Request.HttpMethod == "GET") {
-                    HandleReactionGetRequest(context);
-                } else if (path == "/api/history/clear" && context.Request.HttpMethod == "POST") {
-                    HandleHistoryClearRequest(context);
-                } else if (path == "/api/history" && context.Request.HttpMethod == "GET") {
-                    if (isRestricted) {
-                        context.Response.ContentType = "application/json";
-                        context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
-                        byte[] emptyHist = System.Text.Encoding.UTF8.GetBytes("[]");
-                        context.Response.OutputStream.Write(emptyHist, 0, emptyHist.Length);
-                        context.Response.Close();
-                    } else {
-                        HandleHistoryGetRequest(context);
-                    }
-                } else if (path == "/api/status") {
-                    HandleStatusRequest(context);
+            string path = context.Request.Url?.AbsolutePath ?? "/";
+            string userAgent = context.Request.UserAgent ?? "";
+            bool isMediaPlayer = userAgent.Contains("VLC", StringComparison.OrdinalIgnoreCase) ||
+                                 userAgent.Contains("LibVLC", StringComparison.OrdinalIgnoreCase) ||
+                                 userAgent.Contains("foobar2000", StringComparison.OrdinalIgnoreCase) ||
+                                 userAgent.Contains("Winamp", StringComparison.OrdinalIgnoreCase) ||
+                                 userAgent.Contains("Lavf", StringComparison.OrdinalIgnoreCase) ||
+                                 userAgent.Contains("mpv", StringComparison.OrdinalIgnoreCase) ||
+                                 userAgent.Contains("Audacious", StringComparison.OrdinalIgnoreCase) ||
+                                 userAgent.Contains("iTunes", StringComparison.OrdinalIgnoreCase) ||
+                                 userAgent.Contains("QuickTime", StringComparison.OrdinalIgnoreCase) ||
+                                 userAgent.Contains("Wget", StringComparison.OrdinalIgnoreCase) ||
+                                 userAgent.Contains("curl", StringComparison.OrdinalIgnoreCase);
+
+            bool isStreamRoute = IsStreamPath(path) || (path == "/" && isMediaPlayer);
+            bool isRestricted = _profileManager.CurrentProfile.RestrictToLocalNetwork && !IsLocalNetworkClient(context);
+
+            if (isStreamRoute) {
+                if (isRestricted) {
+                    context.Response.StatusCode = 403;
+                    context.Response.ContentType = "application/json";
+                    context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+                    byte[] errBytes = System.Text.Encoding.UTF8.GetBytes("{\"error\":\"Private Stream\",\"message\":\"This broadcast is restricted to local network listeners.\",\"isPrivate\":true}");
+                    context.Response.ContentLength64 = errBytes.Length;
+                    context.Response.OutputStream.Write(errBytes, 0, errBytes.Length);
+                    context.Response.Close();
                 } else {
-                    // Serve Web Player assets: /, /index.html, /player.css, /player.js, /assets/*, etc.
-                    Scrim.Web.EmbeddedWebPlayer.ServeAsync(context);
+                    _ = HandleStreamClient(context, token);
                 }
+            } else if (path == "/listen.m3u" || path == "/playlist.m3u" || path == "/stream.m3u" || string.Equals(path, $"/{GetNormalizedMountPoint()}.m3u", StringComparison.OrdinalIgnoreCase)) {
+                HandleM3uRequest(context);
+            } else if (path == "/listen.pls" || path == "/playlist.pls" || path == "/stream.pls" || string.Equals(path, $"/{GetNormalizedMountPoint()}.pls", StringComparison.OrdinalIgnoreCase)) {
+                HandlePlsRequest(context);
+            } else if (path == "/api/events") {
+                _ = HandleSseClient(context, token);
+            } else if (path == "/api/network") {
+                HandleNetworkRequest(context);
+            } else if (path == "/api/albumart") {
+                if (isRestricted) {
+                    context.Response.StatusCode = 403;
+                    context.Response.Close();
+                } else {
+                    HandleAlbumArtRequest(context);
+                }
+            } else if (path == "/api/metadata") {
+                if (isRestricted) {
+                    context.Response.StatusCode = 403;
+                    context.Response.ContentType = "application/json";
+                    context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+                    byte[] priv = System.Text.Encoding.UTF8.GetBytes("{\"isPrivate\":true,\"title\":\"Private Stream\",\"artist\":\"Restricted to Local Network\"}");
+                    context.Response.OutputStream.Write(priv, 0, priv.Length);
+                    context.Response.Close();
+                } else {
+                    HandleMetadataRequest(context);
+                }
+            } else if (path == "/api/branding") {
+                HandleBrandingRequest(context);
+            } else if (path == "/api/banner") {
+                HandleBannerRequest(context);
+            } else if (path == "/api/logo") {
+                HandleLogoRequest(context);
+            } else if (path == "/api/requests" && context.Request.HttpMethod == "POST") {
+                if (isRestricted) {
+                    context.Response.StatusCode = 403;
+                    context.Response.Close();
+                } else {
+                    HandleSongRequest(context);
+                }
+            } else if (path == "/api/chat" && context.Request.HttpMethod == "POST") {
+                if (isRestricted) {
+                    context.Response.StatusCode = 403;
+                    context.Response.Close();
+                } else {
+                    HandleChatPostRequest(context);
+                }
+            } else if (path == "/api/chat" && context.Request.HttpMethod == "GET") {
+                if (isRestricted) {
+                    context.Response.ContentType = "application/json";
+                    context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+                    byte[] emptyChat = System.Text.Encoding.UTF8.GetBytes("{\"enabled\":false,\"messages\":[]}");
+                    context.Response.OutputStream.Write(emptyChat, 0, emptyChat.Length);
+                    context.Response.Close();
+                } else {
+                    HandleChatGetRequest(context);
+                }
+            } else if (path == "/api/reactions/clear" && context.Request.HttpMethod == "POST") {
+                HandleReactionClearRequest(context);
+            } else if (path == "/api/reactions" && context.Request.HttpMethod == "POST") {
+                if (isRestricted) {
+                    context.Response.StatusCode = 403;
+                    context.Response.Close();
+                } else {
+                    HandleReactionPostRequest(context);
+                }
+            } else if (path == "/api/reactions" && context.Request.HttpMethod == "GET") {
+                HandleReactionGetRequest(context);
+            } else if (path == "/api/history/clear" && context.Request.HttpMethod == "POST") {
+                HandleHistoryClearRequest(context);
+            } else if (path == "/api/history" && context.Request.HttpMethod == "GET") {
+                if (isRestricted) {
+                    context.Response.ContentType = "application/json";
+                    context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+                    byte[] emptyHist = System.Text.Encoding.UTF8.GetBytes("[]");
+                    context.Response.OutputStream.Write(emptyHist, 0, emptyHist.Length);
+                    context.Response.Close();
+                } else {
+                    HandleHistoryGetRequest(context);
+                }
+            } else if (path == "/api/poll/vote" && context.Request.HttpMethod == "POST") {
+                HandlePollVote(context);
+            } else if (path == "/api/poll/current" && context.Request.HttpMethod == "GET") {
+                HandleCurrentPoll(context);
+            } else if (path == "/api/status") {
+                HandleStatusRequest(context);
+            } else {
+                // Serve Web Player assets: /, /index.html, /player.css, /player.js, /assets/*, etc.
+                Scrim.Web.EmbeddedWebPlayer.ServeAsync(context);
             }
         }
 
@@ -676,7 +750,7 @@ namespace Scrim.Server {
                 string streamMount = GetNormalizedMountPoint();
                 string bannerUrl = GetEffectiveBannerUrl();
                 string logoUrl = GetEffectiveLogoUrl();
-                return $"{{\"type\":\"branding\",\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(themeStr)}\",\"customThemeVariables\":{customThemeJson},\"logoUrl\":\"{EscapeJson(logoUrl)}\",\"bannerUrl\":\"{EscapeJson(bannerUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}],\"streamUrl\":\"/{streamMount}\",\"isPrivate\":false,\"restrictToLocal\":{(profile.RestrictToLocalNetwork ? "true" : "false")}}}";
+                return $"{{\"type\":\"branding\",\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(themeStr)}\",\"customThemeVariables\":{customThemeJson},\"enableDynamicBackdrop\":{(profile.EnableDynamicBackdrop ? "true" : "false")},\"broadcasterBio\":\"{EscapeJson(profile.BroadcasterBio)}\",\"socialDiscord\":\"{EscapeJson(profile.SocialDiscord)}\",\"socialTwitch\":\"{EscapeJson(profile.SocialTwitch)}\",\"socialTwitter\":\"{EscapeJson(profile.SocialTwitter)}\",\"scheduleDescription\":\"{EscapeJson(profile.ScheduleDescription)}\",\"logoUrl\":\"{EscapeJson(logoUrl)}\",\"bannerUrl\":\"{EscapeJson(bannerUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}],\"streamUrl\":\"/{streamMount}\",\"isPrivate\":false,\"restrictToLocal\":{(profile.RestrictToLocalNetwork ? "true" : "false")}}}";
             }
 
             EventHandler<MediaMetadata> onMetadata = (_, meta) => {
@@ -701,6 +775,11 @@ namespace Scrim.Server {
             _hub.BroadcastingStateChanged += onBroadcastChanged;
             HistorySettingsChanged += onHistorySettings;
             BrandingSettingsChanged += onBrandingSettings;
+
+            EventHandler<PollState?> onPoll = (_, poll) => {
+                immediateChannel.Writer.TryWrite($"data: {BuildPollJson(poll)}\n\n");
+            };
+            PollChanged += onPoll;
 
             try {
                 using var writer = new StreamWriter(response.OutputStream);
@@ -734,6 +813,9 @@ namespace Scrim.Server {
                 await SendEvent($"data: {BuildMetadataJson(_metadataService.CurrentMetadata)}\n\n");
                 await SendEvent($"data: {BuildQueueJson()}\n\n");
                 await SendEvent($"data: {BuildBrandingJson()}\n\n");
+                if (_currentPoll != null) {
+                    await SendEvent($"data: {BuildPollJson(_currentPoll)}\n\n");
+                }
 
                 // Immediate Event Consumer (sub-millisecond latency for chat, reactions, and live status changes)
                 var immediateTask = Task.Run(async () => {
@@ -774,6 +856,7 @@ namespace Scrim.Server {
                 _hub.BroadcastingStateChanged -= onBroadcastChanged;
                 HistorySettingsChanged -= onHistorySettings;
                 BrandingSettingsChanged -= onBrandingSettings;
+                PollChanged -= onPoll;
                 writeLock.Dispose();
                 response.Close();
             }
@@ -1150,7 +1233,7 @@ namespace Scrim.Server {
                 string streamMount = GetNormalizedMountPoint();
                 string bannerUrl = GetEffectiveBannerUrl();
                 string logoUrl = GetEffectiveLogoUrl();
-                string json = $"{{\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(themeStr)}\",\"customThemeVariables\":{customThemeJson},\"logoUrl\":\"{EscapeJson(logoUrl)}\",\"bannerUrl\":\"{EscapeJson(bannerUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}],\"streamUrl\":\"/{streamMount}\",\"isPrivate\":{(isRestricted ? "true" : "false")},\"restrictToLocal\":{(profile.RestrictToLocalNetwork ? "true" : "false")}}}";
+                string json = $"{{\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(themeStr)}\",\"customThemeVariables\":{customThemeJson},\"enableDynamicBackdrop\":{(profile.EnableDynamicBackdrop ? "true" : "false")},\"broadcasterBio\":\"{EscapeJson(profile.BroadcasterBio)}\",\"socialDiscord\":\"{EscapeJson(profile.SocialDiscord)}\",\"socialTwitch\":\"{EscapeJson(profile.SocialTwitch)}\",\"socialTwitter\":\"{EscapeJson(profile.SocialTwitter)}\",\"scheduleDescription\":\"{EscapeJson(profile.ScheduleDescription)}\",\"logoUrl\":\"{EscapeJson(logoUrl)}\",\"bannerUrl\":\"{EscapeJson(bannerUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}],\"streamUrl\":\"/{streamMount}\",\"isPrivate\":{(isRestricted ? "true" : "false")},\"restrictToLocal\":{(profile.RestrictToLocalNetwork ? "true" : "false")}}}";
                 byte[] buffer = System.Text.Encoding.UTF8.GetBytes(json);
                 context.Response.ContentType = "application/json";
                 context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
@@ -1229,7 +1312,8 @@ namespace Scrim.Server {
             try {
                 var response = context.Response;
                 response.Headers.Add("Access-Control-Allow-Origin", "*");
-                response.Headers.Add("Cache-Control", "public, max-age=60");
+                response.Headers.Add("Cache-Control", "no-cache, no-store, must-revalidate");
+                response.Headers.Add("Pragma", "no-cache");
 
                 var meta = _metadataService.CurrentMetadata;
                 if (meta.AlbumArt != null && meta.AlbumArt.Length > 0) {
@@ -1281,6 +1365,39 @@ namespace Scrim.Server {
             }
         }
 
+        private void HandlePollVote(HttpListenerContext context) {
+            try {
+                using var reader = new StreamReader(context.Request.InputStream, System.Text.Encoding.UTF8);
+                string body = reader.ReadToEnd();
+                var pollIdMatch = System.Text.RegularExpressions.Regex.Match(body, "\"pollId\"\\s*:\\s*\"(.*?)\"");
+                var optIdxMatch = System.Text.RegularExpressions.Regex.Match(body, "\"optionIndex\"\\s*:\\s*(\\d+)");
+                if (pollIdMatch.Success && optIdxMatch.Success && int.TryParse(optIdxMatch.Groups[1].Value, out int optIdx)) {
+                    RecordPollVote(pollIdMatch.Groups[1].Value, optIdx);
+                }
+                context.Response.StatusCode = 200;
+                context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+            } catch {
+                context.Response.StatusCode = 500;
+            } finally {
+                context.Response.Close();
+            }
+        }
+
+        private void HandleCurrentPoll(HttpListenerContext context) {
+            try {
+                string json = BuildPollJson(_currentPoll);
+                byte[] buffer = System.Text.Encoding.UTF8.GetBytes(json);
+                context.Response.ContentType = "application/json";
+                context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+                context.Response.ContentLength64 = buffer.Length;
+                context.Response.OutputStream.Write(buffer, 0, buffer.Length);
+            } catch {
+                context.Response.StatusCode = 500;
+            } finally {
+                context.Response.Close();
+            }
+        }
+
         private string EscapeJson(string? value) {
             if (string.IsNullOrEmpty(value)) return "";
             return value.Replace("\\", "\\\\")
@@ -1311,4 +1428,17 @@ namespace Scrim.Server {
             Stop();
         }
     }
+
+    public class PollOption {
+        public string Text { get; set; } = "";
+        public int Votes { get; set; } = 0;
+    }
+
+    public class PollState {
+        public string Id { get; set; } = Guid.NewGuid().ToString();
+        public string Question { get; set; } = "";
+        public System.Collections.Generic.List<PollOption> Options { get; set; } = new();
+        public int TotalVotes => Options.Sum(o => o.Votes);
+    }
 }
+

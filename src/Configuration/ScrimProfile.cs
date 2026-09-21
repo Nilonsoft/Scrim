@@ -44,6 +44,12 @@ namespace Scrim.Configuration {
         public string AccentColor { get; set; } = "#ef4444";
         public string WebTheme { get; set; } = "dark";
         public bool SyncConsoleThemeWithWeb { get; set; } = true;
+        public bool EnableDynamicBackdrop { get; set; } = false;
+        public string BroadcasterBio { get; set; } = "";
+        public string SocialDiscord { get; set; } = "";
+        public string SocialTwitch { get; set; } = "";
+        public string SocialTwitter { get; set; } = "";
+        public string ScheduleDescription { get; set; } = "";
         public string LogoUrl { get; set; } = "";
         public string BannerUrl { get; set; } = "";
         public string NavLinks { get; set; } = "Discover,Schedule,Shows,About";

@@ -17,6 +17,11 @@
     <link rel="stylesheet" href="/assets/player.css">
 </head>
 <body>
+    <!-- Dynamic Ambient Backdrop (Driven by album art dominant colors when enabled by owner) -->
+    <div class="ambient-backdrop" id="ambientBackdrop">
+        <div class="ambient-backdrop-inner"></div>
+    </div>
+
     <!-- Optional Top Station Banner (Displayed only when configured by station owner) -->
     <div class="station-banner-wrap" id="stationBannerWrap" style="display: none;">
         <div class="station-banner-inner">
@@ -49,6 +54,12 @@
         <div class="header-right">
             <nav class="nav-links" id="navLinksContainer"></nav>
             <div class="header-icons">
+                <button class="icon-btn tv-mode-btn" id="tvModeBtn" title="Party / TV Full-Screen Mode" aria-label="Toggle TV Mode">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="2" y="7" width="20" height="15" rx="2" ry="2"></rect>
+                        <polyline points="17 2 12 7 7 2"></polyline>
+                    </svg>
+                </button>
                 <button class="icon-btn pwa-install-btn" id="pwaInstallBtn" title="Install Scrim as Desktop or Mobile App" style="display: none;">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -120,6 +131,13 @@
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                     <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
                                     <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                                </svg>
+                            </button>
+                            <button class="action-icon-btn lyrics-toggle-btn" id="lyricsToggleBtn" title="Song Lyrics" aria-label="View Song Lyrics">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M9 18V5l12-2v13"></path>
+                                    <circle cx="6" cy="18" r="3"></circle>
+                                    <circle cx="18" cy="16" r="3"></circle>
                                 </svg>
                             </button>
                             <button class="action-icon-btn history-toggle-btn" id="historyToggleBtn" title="Recently Played Tracks" aria-label="View Recently Played Tracks">
@@ -244,6 +262,9 @@
 
         <!-- RIGHT: Live Queue, Requests, Chat & History Cards -->
         <aside class="sidebar-cards">
+            <!-- LIVE DJ POLL / TRACK BATTLE -->
+            <div id="livePollContainer" style="display: none;"></div>
+
             <!-- UPCOMING: LIVE QUEUE -->
             <div class="sidebar-card">
                 <h3 class="sidebar-title">UPCOMING: LIVE QUEUE</h3>
@@ -510,6 +531,61 @@
             <h2 class="private-title" id="privateStationTitle">Private Stream</h2>
             <p class="private-desc">This live broadcast is currently restricted to local network listeners only.</p>
             <div class="private-hint">Connect via the local Wi-Fi or LAN network to tune into the live audio and studio features.</div>
+        </div>
+    </div>
+
+    <!-- LIVE SYNCED / PLAIN LYRICS DRAWER -->
+    <div class="lyrics-drawer-overlay" id="lyricsOverlay"></div>
+    <aside class="lyrics-drawer" id="lyricsDrawer" aria-label="Song Lyrics">
+        <div class="lyrics-header">
+            <div class="lyrics-title-group">
+                <h3 class="lyrics-heading">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M9 18V5l12-2v13"></path>
+                        <circle cx="6" cy="18" r="3"></circle>
+                        <circle cx="18" cy="16" r="3"></circle>
+                    </svg>
+                    Live Lyrics
+                </h3>
+                <span class="lyrics-subheading" id="lyricsTrackInfo">Awaiting song...</span>
+            </div>
+            <button class="lyrics-close-btn" id="lyricsCloseBtn" title="Close Lyrics" aria-label="Close Lyrics">✕</button>
+        </div>
+        <div class="lyrics-body" id="lyricsBody">
+            <div class="lyrics-empty" id="lyricsStatus">Play a song to load lyrics...</div>
+        </div>
+        <div class="lyrics-footer">
+            <span>Powered by LRCLIB</span>
+            <div class="lyrics-sync-controls" title="Adjust lyrics delay to match live stream audio buffer">
+                <button type="button" class="lyrics-sync-btn" id="lyricsSyncMinus" title="Delay lyrics highlight (-0.5s)">-</button>
+                <span class="lyrics-sync-label" id="lyricsSyncLabel">Sync: -2.0s</span>
+                <button type="button" class="lyrics-sync-btn" id="lyricsSyncPlus" title="Advance lyrics highlight (+0.5s)">+</button>
+            </div>
+            <span id="lyricsTypeBadge">Synced</span>
+        </div>
+    </aside>
+
+    <!-- STATION SCHEDULE & BROADCASTER BIO MODAL -->
+    <div class="station-modal-overlay" id="stationModalOverlay" style="display: none;">
+        <div class="station-modal-card">
+            <div class="station-modal-header">
+                <h3 class="station-modal-title" id="stationModalTitle">Station & Broadcaster</h3>
+                <button class="lyrics-close-btn" id="stationModalCloseBtn" title="Close" aria-label="Close">✕</button>
+            </div>
+            <div class="station-modal-body">
+                <div id="stationBioSection" style="display: none;">
+                    <div class="station-section-label">About the Host & Station</div>
+                    <p class="station-bio-text" id="stationBioText"></p>
+                </div>
+                <div id="stationScheduleSection" style="display: none;">
+                    <div class="station-section-label">Broadcast Schedule</div>
+                    <div class="station-schedule-box" id="stationScheduleText"></div>
+                </div>
+                <div id="stationSocialsSection" style="display: none;">
+                    <div class="station-section-label">Connect with the DJ</div>
+                    <div class="station-social-row" id="stationSocialRow"></div>
+                </div>
+            </div>
         </div>
     </div>
 

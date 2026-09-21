@@ -571,6 +571,7 @@
         { "card-encoding", "Encoding & Broadcast" },
         { "card-media-player", "Media Player" },
         { "card-soundboard", "Soundboard" },
+        { "card-polls", "DJ Live Polls & Battles" },
         { "card-web-branding", "Website Branding & Links" },
         { "card-plugins", "Plugins & Extensions" },
         { "card-plugin-lyrics", "Synchronized Lyrics Ticker" },
@@ -703,6 +704,7 @@
         HistoryService.HistoryChanged += OnHistoryChanged;
         PluginLoader.PluginsChanged += OnPluginsChanged;
         RequestController.QueueChanged += OnQueueChanged;
+        StreamServer.PollChanged += OnPollChanged;
 
         if (!string.IsNullOrWhiteSpace(MetadataService.CurrentMetadata.Title)) {
             CurrentTrackTitle = MetadataService.CurrentMetadata.Title;
@@ -824,6 +826,12 @@
         // Periodic UI poll for active listener updates, active applications, and track progress
         _refreshTimer = new System.Timers.Timer(1000);
         _refreshTimer.Elapsed += (s, e) => {
+            // 24/7 Watchdog: Ensure HTTP Web Player server remains active continuously
+            if (!StreamServer.IsListening) {
+                try {
+                    StreamServer.Start(ProfileManager.CurrentProfile.Port);
+                } catch { }
+            }
             RefreshWindows();
             if (IsPlayingMedia && CurrentTrackDuration > TimeSpan.Zero) {
                 var now = DateTimeOffset.UtcNow;
@@ -1466,6 +1474,44 @@
         }
     }
 
+    private void ToggleDynamicBackdrop(ChangeEventArgs e) {
+        if (bool.TryParse(e.Value?.ToString(), out bool val)) {
+            ProfileManager.CurrentProfile.EnableDynamicBackdrop = val;
+            SaveBranding();
+            StateHasChanged();
+        }
+    }
+
+    private string NewPollQuestion = "";
+    private string NewPollOption1 = "";
+    private string NewPollOption2 = "";
+
+    private void OnPollChanged(object? sender, PollState? poll) {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void LaunchCustomPoll() {
+        if (string.IsNullOrWhiteSpace(NewPollQuestion) || string.IsNullOrWhiteSpace(NewPollOption1) || string.IsNullOrWhiteSpace(NewPollOption2)) return;
+        StreamServer.CreatePoll(NewPollQuestion.Trim(), new List<string> { NewPollOption1.Trim(), NewPollOption2.Trim() });
+        NewPollQuestion = "";
+        NewPollOption1 = "";
+        NewPollOption2 = "";
+        StateHasChanged();
+    }
+
+    private void QuickTrackBattle() {
+        var current = MetadataService.CurrentMetadata?.Title ?? "Current Track";
+        var history = HistoryService.GetHistory(2);
+        var prev = history.Count > 1 ? history[1].Title : "Previous Track";
+        StreamServer.CreatePoll("Which track did you prefer?", new List<string> { current, prev });
+        StateHasChanged();
+    }
+
+    private void EndActivePoll() {
+        StreamServer.EndPoll();
+        StateHasChanged();
+    }
+
     private void ToggleBroadcastOnOpen(ChangeEventArgs e) {
         if (bool.TryParse(e.Value?.ToString(), out bool val)) {
             ProfileManager.CurrentProfile.BroadcastOnOpen = val;
@@ -1888,6 +1934,7 @@
         HistoryService.HistoryChanged -= OnHistoryChanged;
         PluginLoader.PluginsChanged -= OnPluginsChanged;
         RequestController.QueueChanged -= OnQueueChanged;
+        StreamServer.PollChanged -= OnPollChanged;
         _dotNetRef?.Dispose();
         _refreshTimer?.Dispose();
         _vuTimer?.Dispose();
@@ -1899,6 +1946,60 @@
     }
 
     private RenderFragment RenderCard(string cardId) => cardId switch {
+        "card-polls" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <h3 class="scrim-card-title">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;">
+                        <line x1="18" y1="20" x2="18" y2="10"></line>
+                        <line x1="12" y1="20" x2="12" y2="4"></line>
+                        <line x1="6" y1="20" x2="6" y2="14"></line>
+                    </svg>
+                    DJ Live Polls & Track Battles
+                </h3>
+                <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
+            </div>
+
+            @if (StreamServer.CurrentPoll != null) {
+                <div style="background: rgba(0, 210, 255, 0.08); border: 1px solid rgba(0, 210, 255, 0.25); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-size: 10px; font-weight: 800; color: var(--accent-blue, #00d2ff); background: rgba(0, 210, 255, 0.2); padding: 2px 6px; border-radius: 4px;">ACTIVE POLL</span>
+                        <span style="font-size: 11px; color: var(--text-muted, #94a3b8);">@StreamServer.CurrentPoll.TotalVotes total votes</span>
+                    </div>
+                    <div style="font-size: 13px; font-weight: 700; color: #fff; margin-bottom: 10px;">@StreamServer.CurrentPoll.Question</div>
+                    <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px;">
+                        @foreach (var opt in StreamServer.CurrentPoll.Options) {
+                            var pct = StreamServer.CurrentPoll.TotalVotes > 0 ? (int)Math.Round(((double)opt.Votes / StreamServer.CurrentPoll.TotalVotes) * 100) : 0;
+                            <div style="position: relative; background: #1a1e28; border: 1px solid #282f3e; border-radius: 6px; padding: 6px 10px; display: flex; justify-content: space-between; align-items: center; overflow: hidden;">
+                                <div style="position: absolute; left: 0; top: 0; bottom: 0; width: @(pct)%; background: rgba(0, 210, 255, 0.2); pointer-events: none;"></div>
+                                <span style="position: relative; z-index: 1; font-size: 12px; color: #fff;">@opt.Text</span>
+                                <span style="position: relative; z-index: 1; font-size: 11px; font-weight: 700; color: var(--accent-blue, #00d2ff);">@pct% (@opt.Votes)</span>
+                            </div>
+                        }
+                    </div>
+                    <button class="scrim-btn-secondary" style="width: 100%; color: #ef4444; border-color: rgba(239, 68, 68, 0.3);" @onclick="EndActivePoll">End Poll</button>
+                </div>
+            } else {
+                <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px;">
+                    <label class="scrim-label" style="margin: 0;">Launch a Listener Poll</label>
+                    <input type="text" class="scrim-input" @bind="NewPollQuestion" placeholder="e.g. Which track goes harder?" />
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+                        <input type="text" class="scrim-input" style="font-size: 11px;" @bind="NewPollOption1" placeholder="Option 1" />
+                        <input type="text" class="scrim-input" style="font-size: 11px;" @bind="NewPollOption2" placeholder="Option 2" />
+                    </div>
+
+                    <div style="display: flex; gap: 6px;">
+                        <button class="scrim-btn-primary" style="flex: 1;" @onclick="LaunchCustomPoll" disabled="@(string.IsNullOrWhiteSpace(NewPollQuestion) || string.IsNullOrWhiteSpace(NewPollOption1) || string.IsNullOrWhiteSpace(NewPollOption2))">
+                            ⚡ Launch Poll
+                        </button>
+                        <button class="scrim-btn-secondary" style="padding: 0 10px; font-size: 11px;" @onclick="QuickTrackBattle" title="Quick 1-Click Track Battle between current and previous track">
+                            ⚔️ Track Battle
+                        </button>
+                    </div>
+                </div>
+            }
+        </div>,
+
         "card-audio-routing" => @<div class="scrim-card">
             <div class="scrim-card-header scrim-drag-handle">
                 <h3 class="scrim-card-title">Audio Routing</h3>
@@ -2723,6 +2824,15 @@
                         Sync Scrim Console with Website Theme (desktop console updates colors to match)
                     </label>
                 </div>
+                <div style="display: flex; align-items: center; gap: 8px; margin-top: 8px;">
+                    <input type="checkbox" id="dynamicBackdropCheck"
+                           checked="@ProfileManager.CurrentProfile.EnableDynamicBackdrop"
+                           @onchange="ToggleDynamicBackdrop"
+                           style="accent-color: var(--accent-blue, #00d2ff); width: 15px; height: 15px; cursor: pointer;" />
+                    <label for="dynamicBackdropCheck" style="font-size: 11.5px; color: var(--text-muted, #94a3b8); cursor: pointer; user-select: none; margin: 0;">
+                        Enable Dynamic Ambient Backdrop (extracts colors from album art; uncheck to prioritize your Website Theme)
+                    </label>
+                </div>
             </div>
 
             <div style="margin-bottom: 14px;">
@@ -2789,6 +2899,20 @@
                         }
                     </div>
                 }
+            </div>
+
+            <!-- Broadcaster Bio & Schedule -->
+            <div style="margin-bottom: 14px; background: #12141a; border: 1px solid #232731; border-radius: 8px; padding: 10px 12px;">
+                <label class="scrim-label" style="margin-bottom: 6px;">Station Schedule & Host Bio</label>
+                <div style="display: flex; flex-direction: column; gap: 6px;">
+                    <input type="text" class="scrim-input" @bind="ProfileManager.CurrentProfile.ScheduleDescription" @bind:event="oninput" @bind:after="SaveBranding" placeholder="Schedule (e.g., Live Mon-Fri 8PM - 11PM EST)" />
+                    <textarea class="scrim-input" style="height: 52px; resize: none; font-size: 11px;" @bind="ProfileManager.CurrentProfile.BroadcasterBio" @bind:event="oninput" @bind:after="SaveBranding" placeholder="Broadcaster Bio / About Station..."></textarea>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px;">
+                        <input type="text" class="scrim-input" style="font-size: 10.5px;" @bind="ProfileManager.CurrentProfile.SocialDiscord" @bind:event="oninput" @bind:after="SaveBranding" placeholder="Discord URL / invite" />
+                        <input type="text" class="scrim-input" style="font-size: 10.5px;" @bind="ProfileManager.CurrentProfile.SocialTwitch" @bind:event="oninput" @bind:after="SaveBranding" placeholder="Twitch username/URL" />
+                        <input type="text" class="scrim-input" style="font-size: 10.5px;" @bind="ProfileManager.CurrentProfile.SocialTwitter" @bind:event="oninput" @bind:after="SaveBranding" placeholder="Twitter / X handle" />
+                    </div>
+                </div>
             </div>
 
             <button class="scrim-btn-primary" style="width: 100%;" @onclick="SaveBranding">Save & Apply Branding</button>

@@ -778,9 +778,13 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
+    let currentBranding = null;
+    let lastAlbumArtUrl = null;
+
     // Dynamic Branding Function
     function applyBranding(branding) {
         if (!branding) return;
+        currentBranding = branding;
 
         if (branding.streamUrl) {
             currentStreamEndpoint = branding.streamUrl;
@@ -789,6 +793,33 @@ document.addEventListener('DOMContentLoaded', function () {
         if (branding.isPrivate !== undefined) {
             setPrivateStreamMode(branding.isPrivate);
         }
+
+        // Apply or clear dynamic ambient backdrop based on owner setting
+        if (branding.enableDynamicBackdrop) {
+            let artUrl = lastAlbumArtUrl;
+            if (!artUrl) {
+                const artEl = document.getElementById('albumArt');
+                if (artEl && artEl.style.backgroundImage) {
+                    const match = artEl.style.backgroundImage.match(/url\(['"]?([^'"]+)['"]?\)/);
+                    if (match && match[1] && !match[1].includes('linear-gradient')) {
+                        artUrl = match[1];
+                    }
+                }
+            }
+            if (!artUrl) {
+                artUrl = '/api/albumart?t=' + Date.now();
+            }
+            lastAlbumArtUrl = artUrl;
+            applyDynamicAmbientBackdrop(artUrl);
+        } else {
+            document.body.classList.remove('has-ambient-backdrop');
+            document.body.style.removeProperty('--ambient-c1');
+            document.body.style.removeProperty('--ambient-c2');
+            document.documentElement.style.removeProperty('--ambient-c1');
+            document.documentElement.style.removeProperty('--ambient-c2');
+        }
+
+        updateStationModalContent(branding);
 
         if (branding.theme) {
             document.documentElement.setAttribute('data-theme', branding.theme);
@@ -875,7 +906,14 @@ document.addEventListener('DOMContentLoaded', function () {
                     branding.customNavLinks.forEach(link => {
                         const a = document.createElement('a');
                         a.href = link.url || '#';
-                        if (link.url && (link.url.startsWith('http://') || link.url.startsWith('https://'))) {
+                        const urlLower = (link.url || '').toLowerCase();
+                        const labelLower = (link.label || '').toLowerCase();
+                        if (urlLower === '#schedule' || urlLower === '#about' || labelLower === 'schedule' || labelLower === 'about') {
+                            a.addEventListener('click', function (e) {
+                                e.preventDefault();
+                                toggleStationModal(true);
+                            });
+                        } else if (link.url && (link.url.startsWith('http://') || link.url.startsWith('https://'))) {
                             a.target = '_blank';
                             a.rel = 'noopener noreferrer';
                         }
@@ -889,7 +927,16 @@ document.addEventListener('DOMContentLoaded', function () {
                 const links = branding.navLinks.split(',').map(s => s.trim()).filter(Boolean);
                 links.forEach(link => {
                     const a = document.createElement('a');
-                    a.href = '#' + link.toLowerCase().replace(/\s+/g, '-');
+                    const url = '#' + link.toLowerCase().replace(/\s+/g, '-');
+                    a.href = url;
+                    const urlLower = url.toLowerCase();
+                    const labelLower = link.toLowerCase();
+                    if (urlLower === '#schedule' || urlLower === '#about' || labelLower === 'schedule' || labelLower === 'about') {
+                        a.addEventListener('click', function (e) {
+                            e.preventDefault();
+                            toggleStationModal(true);
+                        });
+                    }
                     a.className = 'nav-link';
                     a.textContent = link;
                     navContainer.appendChild(a);
@@ -1020,6 +1067,7 @@ document.addEventListener('DOMContentLoaded', function () {
             if (totalTimeEl) {
                 totalTimeEl.textContent = formatTime(currentDurationSec);
             }
+            syncLyricsPosition(pos);
         } else {
             scrubFill.style.width = '100%';
             if (currentTimeEl) {
@@ -1077,6 +1125,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         if (trackChanged) {
             refreshReactionsState();
+            fetchLyrics(cleanTitle, cleanArtist, duration);
         }
         const lowerTitle = cleanTitle.toLowerCase();
         const hasRealTrack = cleanTitle !== "" && 
@@ -1100,15 +1149,23 @@ document.addEventListener('DOMContentLoaded', function () {
             if (albumArt) {
                 albumArt.classList.remove('loading');
                 if (hasArt && albumArtUrl) {
+                    const cacheBuster = '?t=' + Date.now();
+                    const fullArtUrl = albumArtUrl.startsWith('/') ? (albumArtUrl + cacheBuster) : albumArtUrl;
                     const isNewTrack = trackChanged || !albumArt.style.backgroundImage || albumArt.style.backgroundImage.includes('linear-gradient');
                     if (isNewTrack) {
-                        const cacheBuster = (trackChanged && albumArtUrl.startsWith('/')) ? '?t=' + Date.now() : '';
-                        albumArt.style.backgroundImage = "url('" + albumArtUrl + cacheBuster + "')";
+                        albumArt.style.backgroundImage = "url('" + fullArtUrl + "')";
                         albumArt.style.backgroundSize = "cover";
                         albumArt.style.backgroundPosition = "center";
+                        lastAlbumArtUrl = fullArtUrl;
+                    }
+                    if (currentBranding && currentBranding.enableDynamicBackdrop) {
+                        applyDynamicAmbientBackdrop(lastAlbumArtUrl || fullArtUrl);
                     }
                 } else if (!hasArt && !albumArt.style.backgroundImage) {
                     albumArt.style.backgroundImage = "linear-gradient(135deg, #1b3d68 0%, #059669 50%, #dc2626 100%)";
+                    if (currentBranding && currentBranding.enableDynamicBackdrop) {
+                        document.body.classList.remove('has-ambient-backdrop');
+                    }
                 }
             }
             if (metaContainer) metaContainer.classList.remove('meta-loading');
@@ -1256,6 +1313,14 @@ document.addEventListener('DOMContentLoaded', function () {
 
                 if (data.type === 'queue' && data.requests) {
                     updateQueue(data.requests);
+                }
+
+                if (data.type === 'poll_update' && data.poll) {
+                    renderLivePoll(data.poll);
+                }
+
+                if (data.type === 'poll_ended') {
+                    removeLivePoll();
                 }
 
                 if (data.type === 'chat_init') {
@@ -2394,4 +2459,489 @@ document.addEventListener('DOMContentLoaded', function () {
             pwaInstallBtn.style.display = 'none';
         }
     });
+
+    // =========================================================================
+    // Dynamic Ambient Backdrop Module (Spotify / Apple Music Style)
+    // =========================================================================
+    function extractDominantColors(imgSrc, callback) {
+        if (!imgSrc) return;
+        const img = new Image();
+        img.crossOrigin = 'Anonymous';
+        img.onload = function () {
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = 32;
+                canvas.height = 32;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, 32, 32);
+                const data = ctx.getImageData(0, 0, 32, 32).data;
+
+                let rTotal = 0, gTotal = 0, bTotal = 0, count = 0;
+                let maxSat = 0;
+                let accent = { r: 0, g: 210, b: 255 };
+
+                for (let i = 0; i < data.length; i += 16) {
+                    const r = data[i];
+                    const g = data[i + 1];
+                    const b = data[i + 2];
+                    const a = data[i + 3];
+                    if (a < 128) continue;
+
+                    rTotal += r;
+                    gTotal += g;
+                    bTotal += b;
+                    count++;
+
+                    const max = Math.max(r, g, b);
+                    const min = Math.min(r, g, b);
+                    const delta = max - min;
+                    if (delta > maxSat && max > 45 && min < 215) {
+                        maxSat = delta;
+                        accent = { r: r, g: g, b: b };
+                    }
+                }
+
+                if (count > 0) {
+                    const avgR = Math.round(rTotal / count);
+                    const avgG = Math.round(gTotal / count);
+                    const avgB = Math.round(bTotal / count);
+                    callback({
+                        c1: `rgba(${avgR}, ${avgG}, ${avgB}, 0.52)`,
+                        c2: `rgba(${accent.r}, ${accent.g}, ${accent.b}, 0.44)`
+                    });
+                }
+            } catch (e) {
+                console.warn('[Ambient] Backdrop color extraction skipped:', e);
+            }
+        };
+        img.onerror = function (err) {
+            console.warn('[Ambient] Could not load image for backdrop extraction:', err);
+        };
+        const sep = imgSrc.includes('?') ? '&' : '?';
+        img.src = imgSrc + (imgSrc.includes('cb=') ? '' : `${sep}cb=${Date.now()}`);
+    }
+
+    function applyDynamicAmbientBackdrop(albumArtUrl) {
+        if (!currentBranding || !currentBranding.enableDynamicBackdrop) {
+            document.body.classList.remove('has-ambient-backdrop');
+            document.body.style.removeProperty('--ambient-c1');
+            document.body.style.removeProperty('--ambient-c2');
+            document.documentElement.style.removeProperty('--ambient-c1');
+            document.documentElement.style.removeProperty('--ambient-c2');
+            return;
+        }
+
+        if (!albumArtUrl) {
+            const artEl = document.getElementById('albumArt');
+            if (artEl && artEl.style.backgroundImage) {
+                const match = artEl.style.backgroundImage.match(/url\(['"]?([^'"]+)['"]?\)/);
+                if (match && match[1] && !match[1].includes('linear-gradient')) {
+                    albumArtUrl = match[1];
+                }
+            }
+        }
+
+        if (!albumArtUrl) return;
+
+        extractDominantColors(albumArtUrl, function (colors) {
+            if (!currentBranding || !currentBranding.enableDynamicBackdrop) return;
+            document.body.style.setProperty('--ambient-c1', colors.c1);
+            document.body.style.setProperty('--ambient-c2', colors.c2);
+            document.documentElement.style.setProperty('--ambient-c1', colors.c1);
+            document.documentElement.style.setProperty('--ambient-c2', colors.c2);
+            document.body.classList.add('has-ambient-backdrop');
+        });
+    }
+
+    // =========================================================================
+    // Party / TV Full-Screen Mode Module
+    // =========================================================================
+    const tvModeBtn = document.getElementById('tvModeBtn');
+    let tvIdleTimer = null;
+
+    function resetTvIdleTimer() {
+        if (!document.body.classList.contains('tv-mode')) return;
+        document.body.classList.remove('tv-idle');
+        clearTimeout(tvIdleTimer);
+        tvIdleTimer = setTimeout(function () {
+            if (document.body.classList.contains('tv-mode')) {
+                document.body.classList.add('tv-idle');
+            }
+        }, 3500);
+    }
+
+    if (tvModeBtn) {
+        tvModeBtn.addEventListener('click', function () {
+            const isTv = document.body.classList.toggle('tv-mode');
+            if (isTv) {
+                if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+                    document.documentElement.requestFullscreen().catch(function () {});
+                }
+                resetTvIdleTimer();
+                window.addEventListener('mousemove', resetTvIdleTimer);
+                window.addEventListener('keydown', resetTvIdleTimer);
+            } else {
+                if (document.fullscreenElement && document.exitFullscreen) {
+                    document.exitFullscreen().catch(function () {});
+                }
+                document.body.classList.remove('tv-idle');
+                clearTimeout(tvIdleTimer);
+                window.removeEventListener('mousemove', resetTvIdleTimer);
+                window.removeEventListener('keydown', resetTvIdleTimer);
+            }
+        });
+    }
+
+    document.addEventListener('fullscreenchange', function () {
+        if (!document.fullscreenElement && document.body.classList.contains('tv-mode')) {
+            document.body.classList.remove('tv-mode', 'tv-idle');
+            clearTimeout(tvIdleTimer);
+        }
+    });
+
+    // =========================================================================
+    // Live Synced & Plain Lyrics Module (LRCLIB Open API)
+    // =========================================================================
+    const lyricsToggleBtn = document.getElementById('lyricsToggleBtn');
+    const lyricsDrawer = document.getElementById('lyricsDrawer');
+    const lyricsOverlay = document.getElementById('lyricsOverlay');
+    const lyricsCloseBtn = document.getElementById('lyricsCloseBtn');
+    const lyricsBody = document.getElementById('lyricsBody');
+    const lyricsTrackInfo = document.getElementById('lyricsTrackInfo');
+    const lyricsTypeBadge = document.getElementById('lyricsTypeBadge');
+
+    let currentLyrics = [];
+    let isSyncedLyrics = false;
+    let lastActiveLyricIdx = -1;
+    let currentLyricsTrackKey = "";
+
+    // Sync Offset Delay (audio stream buffering offset)
+    let lyricsSyncOffset = 2.0;
+    try {
+        const savedOffset = localStorage.getItem('scrim_lyrics_offset');
+        if (savedOffset !== null && !isNaN(parseFloat(savedOffset))) {
+            lyricsSyncOffset = parseFloat(savedOffset);
+        }
+    } catch { }
+
+    const lyricsSyncMinus = document.getElementById('lyricsSyncMinus');
+    const lyricsSyncPlus = document.getElementById('lyricsSyncPlus');
+    const lyricsSyncLabel = document.getElementById('lyricsSyncLabel');
+
+    function updateLyricsSyncLabel() {
+        if (!lyricsSyncLabel) return;
+        const sign = lyricsSyncOffset > 0 ? '-' : (lyricsSyncOffset < 0 ? '+' : '');
+        lyricsSyncLabel.textContent = `Sync: ${sign}${Math.abs(lyricsSyncOffset).toFixed(1)}s`;
+    }
+
+    if (lyricsSyncMinus) {
+        lyricsSyncMinus.addEventListener('click', function (e) {
+            e.stopPropagation();
+            lyricsSyncOffset = Math.min(10.0, Math.round((lyricsSyncOffset + 0.5) * 10) / 10);
+            try { localStorage.setItem('scrim_lyrics_offset', lyricsSyncOffset.toString()); } catch { }
+            updateLyricsSyncLabel();
+            lastActiveLyricIdx = -1;
+        });
+    }
+
+    if (lyricsSyncPlus) {
+        lyricsSyncPlus.addEventListener('click', function (e) {
+            e.stopPropagation();
+            lyricsSyncOffset = Math.max(-5.0, Math.round((lyricsSyncOffset - 0.5) * 10) / 10);
+            try { localStorage.setItem('scrim_lyrics_offset', lyricsSyncOffset.toString()); } catch { }
+            updateLyricsSyncLabel();
+            lastActiveLyricIdx = -1;
+        });
+    }
+
+    updateLyricsSyncLabel();
+
+    function toggleLyricsDrawer(show) {
+        const active = show !== undefined ? show : !(lyricsDrawer && lyricsDrawer.classList.contains('active'));
+        if (lyricsDrawer) lyricsDrawer.classList.toggle('active', active);
+        if (lyricsOverlay) lyricsOverlay.classList.toggle('active', active);
+    }
+
+    if (lyricsToggleBtn) lyricsToggleBtn.addEventListener('click', function () { toggleLyricsDrawer(); });
+    if (lyricsCloseBtn) lyricsCloseBtn.addEventListener('click', function () { toggleLyricsDrawer(false); });
+    if (lyricsOverlay) lyricsOverlay.addEventListener('click', function () { toggleLyricsDrawer(false); });
+
+    function parseLrc(lrcText) {
+        const lines = lrcText.split('\n');
+        const result = [];
+        const timeRegex = /\[(\d{2}):(\d{2})(?:\.(\d{2,3}))?\]/g;
+        lines.forEach(line => {
+            const matches = [...line.matchAll(timeRegex)];
+            const text = line.replace(timeRegex, '').trim();
+            if (!text) return;
+            matches.forEach(m => {
+                const mins = parseInt(m[1], 10);
+                const secs = parseInt(m[2], 10);
+                const ms = m[3] ? (m[3].length === 2 ? parseInt(m[3], 10) * 10 : parseInt(m[3], 10)) : 0;
+                result.push({
+                    time: mins * 60 + secs + (ms / 1000),
+                    text: text
+                });
+            });
+        });
+        result.sort((a, b) => a.time - b.time);
+        return result;
+    }
+
+    function renderNoLyrics(msg) {
+        if (lyricsBody) lyricsBody.innerHTML = `<div class="lyrics-empty">${msg || 'No lyrics found for this track.'}</div>`;
+        if (lyricsTypeBadge) lyricsTypeBadge.textContent = 'Not Found';
+    }
+
+    function renderLyricsLines(lines) {
+        if (!lyricsBody) return;
+        lyricsBody.innerHTML = '';
+        if (lines.length === 0) {
+            renderNoLyrics();
+            return;
+        }
+        lines.forEach((item, idx) => {
+            const p = document.createElement('p');
+            p.className = 'lyric-line';
+            p.id = `lyric-line-${idx}`;
+            p.textContent = item.text;
+            lyricsBody.appendChild(p);
+        });
+    }
+
+    function fetchLyrics(title, artist, duration) {
+        if (!title || title === "Awaiting Track Info...") return;
+        const trackKey = (title + "::" + (artist || "")).toLowerCase();
+        if (trackKey === currentLyricsTrackKey) return;
+        currentLyricsTrackKey = trackKey;
+
+        if (lyricsTrackInfo) lyricsTrackInfo.textContent = `${title} • ${artist || 'Unknown'}`;
+        if (lyricsBody) lyricsBody.innerHTML = '<div class="lyrics-empty">Searching lyrics on LRCLIB...</div>';
+        currentLyrics = [];
+        isSyncedLyrics = false;
+        lastActiveLyricIdx = -1;
+
+        const durParam = (duration && duration > 0) ? `&duration=${Math.round(duration)}` : '';
+        const url = `https://lrclib.net/api/get?artist_name=${encodeURIComponent(artist || '')}&track_name=${encodeURIComponent(title)}${durParam}`;
+
+        fetch(url)
+            .then(res => {
+                if (!res.ok) throw new Error('Lyrics not found');
+                return res.json();
+            })
+            .then(data => {
+                if (data.syncedLyrics) {
+                    currentLyrics = parseLrc(data.syncedLyrics);
+                    isSyncedLyrics = true;
+                    if (lyricsTypeBadge) lyricsTypeBadge.textContent = 'Synced';
+                    renderLyricsLines(currentLyrics);
+                } else if (data.plainLyrics) {
+                    const plainLines = data.plainLyrics.split('\n').filter(l => l.trim().length > 0);
+                    isSyncedLyrics = false;
+                    if (lyricsTypeBadge) lyricsTypeBadge.textContent = 'Plain';
+                    renderLyricsLines(plainLines.map(t => ({ text: t })));
+                } else {
+                    throw new Error('Empty lyrics');
+                }
+            })
+            .catch(() => {
+                // Fallback to broad search if exact lookup missed
+                fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(title + ' ' + (artist || ''))}`)
+                    .then(res => res.json())
+                    .then(list => {
+                        if (Array.isArray(list) && list.length > 0) {
+                            const item = list[0];
+                            if (item.syncedLyrics) {
+                                currentLyrics = parseLrc(item.syncedLyrics);
+                                isSyncedLyrics = true;
+                                if (lyricsTypeBadge) lyricsTypeBadge.textContent = 'Synced';
+                                renderLyricsLines(currentLyrics);
+                                return;
+                            } else if (item.plainLyrics) {
+                                const plainLines = item.plainLyrics.split('\n').filter(l => l.trim().length > 0);
+                                isSyncedLyrics = false;
+                                if (lyricsTypeBadge) lyricsTypeBadge.textContent = 'Plain';
+                                renderLyricsLines(plainLines.map(t => ({ text: t })));
+                                return;
+                            }
+                        }
+                        renderNoLyrics();
+                    })
+                    .catch(() => renderNoLyrics());
+            });
+    }
+
+    function syncLyricsPosition(currentTimeSec) {
+        if (!isSyncedLyrics || currentLyrics.length === 0 || !lyricsDrawer || !lyricsDrawer.classList.contains('active')) return;
+        const effectiveTime = Math.max(0, currentTimeSec - lyricsSyncOffset);
+        let activeIdx = -1;
+        for (let i = 0; i < currentLyrics.length; i++) {
+            if (effectiveTime >= currentLyrics[i].time) {
+                activeIdx = i;
+            } else {
+                break;
+            }
+        }
+        if (activeIdx !== lastActiveLyricIdx && activeIdx >= 0) {
+            if (lastActiveLyricIdx >= 0) {
+                const oldEl = document.getElementById(`lyric-line-${lastActiveLyricIdx}`);
+                if (oldEl) oldEl.classList.remove('active');
+            }
+            const newEl = document.getElementById(`lyric-line-${activeIdx}`);
+            if (newEl) {
+                newEl.classList.add('active');
+                newEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+            lastActiveLyricIdx = activeIdx;
+        }
+    }
+
+    // =========================================================================
+    // Station Schedule & Broadcaster Bio Module
+    // =========================================================================
+    const stationModalOverlay = document.getElementById('stationModalOverlay');
+    const stationModalCloseBtn = document.getElementById('stationModalCloseBtn');
+    const stationBioSection = document.getElementById('stationBioSection');
+    const stationBioText = document.getElementById('stationBioText');
+    const stationScheduleSection = document.getElementById('stationScheduleSection');
+    const stationScheduleText = document.getElementById('stationScheduleText');
+    const stationSocialsSection = document.getElementById('stationSocialsSection');
+    const stationSocialRow = document.getElementById('stationSocialRow');
+
+    function toggleStationModal(show) {
+        const active = show !== undefined ? show : !(stationModalOverlay && stationModalOverlay.classList.contains('active'));
+        if (stationModalOverlay) {
+            stationModalOverlay.style.display = active ? 'flex' : 'none';
+            stationModalOverlay.classList.toggle('active', active);
+        }
+    }
+
+    if (stationModalCloseBtn) stationModalCloseBtn.addEventListener('click', function () { toggleStationModal(false); });
+    if (stationModalOverlay) {
+        stationModalOverlay.addEventListener('click', function (e) {
+            if (e.target === stationModalOverlay) toggleStationModal(false);
+        });
+    }
+
+    function updateStationModalContent(branding) {
+        if (!branding) return;
+
+        // Bio section
+        if (stationBioSection && stationBioText) {
+            if (branding.broadcasterBio && branding.broadcasterBio.trim()) {
+                stationBioText.textContent = branding.broadcasterBio.trim();
+                stationBioSection.style.display = 'block';
+            } else {
+                stationBioSection.style.display = 'none';
+            }
+        }
+
+        // Schedule section
+        if (stationScheduleSection && stationScheduleText) {
+            if (branding.scheduleDescription && branding.scheduleDescription.trim()) {
+                stationScheduleText.textContent = branding.scheduleDescription.trim();
+                stationScheduleSection.style.display = 'block';
+            } else {
+                stationScheduleSection.style.display = 'none';
+            }
+        }
+
+        // Socials section
+        if (stationSocialsSection && stationSocialRow) {
+            stationSocialRow.innerHTML = '';
+            let hasSocials = false;
+
+            if (branding.socialDiscord && branding.socialDiscord.trim()) {
+                hasSocials = true;
+                const dUrl = branding.socialDiscord.startsWith('http') ? branding.socialDiscord : `https://${branding.socialDiscord}`;
+                stationSocialRow.innerHTML += `<a href="${dUrl}" target="_blank" rel="noopener noreferrer" class="station-social-btn">💬 Discord</a>`;
+            }
+            if (branding.socialTwitch && branding.socialTwitch.trim()) {
+                hasSocials = true;
+                const tUrl = branding.socialTwitch.startsWith('http') ? branding.socialTwitch : `https://twitch.tv/${branding.socialTwitch.replace('@', '')}`;
+                stationSocialRow.innerHTML += `<a href="${tUrl}" target="_blank" rel="noopener noreferrer" class="station-social-btn">🟣 Twitch</a>`;
+            }
+            if (branding.socialTwitter && branding.socialTwitter.trim()) {
+                hasSocials = true;
+                const xUrl = branding.socialTwitter.startsWith('http') ? branding.socialTwitter : `https://x.com/${branding.socialTwitter.replace('@', '')}`;
+                stationSocialRow.innerHTML += `<a href="${xUrl}" target="_blank" rel="noopener noreferrer" class="station-social-btn">✖ Twitter / X</a>`;
+            }
+
+            stationSocialsSection.style.display = hasSocials ? 'block' : 'none';
+        }
+    }
+
+    // =========================================================================
+    // DJ Live Polls & Track Battles Module
+    // =========================================================================
+    const livePollContainer = document.getElementById('livePollContainer');
+    let votedPollIds = new Set();
+
+    function escapePollHtml(str) {
+        if (!str) return '';
+        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function renderLivePoll(poll) {
+        if (!livePollContainer) return;
+        if (!poll || !poll.id || !poll.options || poll.options.length === 0) {
+            livePollContainer.style.display = 'none';
+            livePollContainer.innerHTML = '';
+            return;
+        }
+
+        const hasVoted = votedPollIds.has(poll.id);
+        const totalVotes = poll.totalVotes || 0;
+
+        let optionsHtml = '';
+        poll.options.forEach((opt, idx) => {
+            const pct = totalVotes > 0 ? Math.round(((opt.votes || 0) / totalVotes) * 100) : 0;
+            optionsHtml += `
+                <button type="button" class="poll-option-btn" data-poll-id="${poll.id}" data-opt-idx="${idx}" ${hasVoted ? 'disabled' : ''}>
+                    <div class="poll-option-bar" style="width: ${hasVoted ? pct : 0}%"></div>
+                    <span class="poll-option-text">${escapePollHtml(opt.text)}</span>
+                    ${hasVoted ? `<span class="poll-option-pct">${pct}% (${opt.votes || 0})</span>` : ''}
+                </button>
+            `;
+        });
+
+        livePollContainer.innerHTML = `
+            <div class="live-poll-card">
+                <div class="poll-header">
+                    <span class="poll-badge">⚡ LIVE POLL</span>
+                    <span style="font-size: 11px; color: var(--text-dim, #64748b);">${hasVoted ? 'Vote Recorded' : 'Tap to Vote'}</span>
+                </div>
+                <div class="poll-question">${escapePollHtml(poll.question)}</div>
+                <div class="poll-options-list">${optionsHtml}</div>
+                <div class="poll-total-votes">${totalVotes} total ${totalVotes === 1 ? 'vote' : 'votes'}</div>
+            </div>
+        `;
+        livePollContainer.style.display = 'block';
+
+        if (!hasVoted) {
+            livePollContainer.querySelectorAll('.poll-option-btn').forEach(btn => {
+                btn.addEventListener('click', function () {
+                    const pId = this.getAttribute('data-poll-id');
+                    const optIdx = parseInt(this.getAttribute('data-opt-idx'), 10);
+                    submitPollVote(pId, optIdx);
+                });
+            });
+        }
+    }
+
+    function removeLivePoll() {
+        if (livePollContainer) {
+            livePollContainer.style.display = 'none';
+            livePollContainer.innerHTML = '';
+        }
+    }
+
+    function submitPollVote(pollId, optionIndex) {
+        votedPollIds.add(pollId);
+        fetch('/api/poll/vote', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pollId: pollId, optionIndex: optionIndex })
+        }).catch(err => console.warn('Vote submission note:', err));
+    }
 });

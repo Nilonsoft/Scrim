@@ -38,9 +38,12 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
         }
     }
     if ([string]::IsNullOrWhiteSpace($Version)) {
-        $Version = "1.0.5"
+        $Version = "1.0.6.1"
     }
 }
+
+$versionParts = $Version.Split('.')
+$assemblyVersion = if ($versionParts.Count -ge 4) { ($versionParts[0..3] -join '.') } else { "$Version.0" }
 
 $outputMsi = Join-Path $binDir "ScrimSetup-v$Version.msi"
 
@@ -60,7 +63,7 @@ if (-not $wixCmd) {
 Write-Host "Found WiX: $($wixCmd.Source)" -ForegroundColor Green
 
 Write-Host "`n[2/3] Publishing self-contained win-x64 application..." -ForegroundColor Yellow
-& dotnet publish $projectFile -c $Configuration -r $Runtime --self-contained true -p:Version=$Version -p:AssemblyVersion="$Version.0" -p:FileVersion="$Version.0" -o $publishDir
+& dotnet publish $projectFile -c $Configuration -r $Runtime --self-contained true -p:Version=$Version -p:AssemblyVersion=$assemblyVersion -p:FileVersion=$assemblyVersion -o $publishDir
 if ($LASTEXITCODE -ne 0) {
     Write-Error "dotnet publish failed with exit code $LASTEXITCODE"
 }
