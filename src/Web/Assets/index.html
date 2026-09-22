@@ -172,6 +172,21 @@
                     <h2 class="track-artist" id="trackArtist">LIVE BROADCAST</h2>
                     <div class="show-subtitle" id="showSubtitle">Live Studio Transmission</div>
 
+                    <!-- B2B Stage Presence / Now on the Decks Badge -->
+                    <div class="decks-presence-badge" id="decksPresenceBadge" style="display: none;">
+                        <div class="dj-avatar-cluster" id="djAvatarCluster">
+                            <img id="hostDjAvatar" class="stage-avatar host-avatar" src="/assets/icons/favicon.ico" alt="Host DJ" title="Host DJ" />
+                            <img id="guestDjAvatar" class="stage-avatar guest-avatar b2b-active" src="/assets/icons/favicon.ico" alt="Guest DJ" title="Guest DJ" style="display: none;" />
+                        </div>
+                        <div class="stage-info">
+                            <span class="stage-label" id="stageLabel">NOW ON THE DECKS</span>
+                            <span class="active-dj-name" id="activeDjName">DJ Host</span>
+                        </div>
+                        <button type="button" class="guest-bio-btn" id="guestBioBtn" title="View Guest DJ Profile & Socials" style="display: none;">
+                            Profile
+                        </button>
+                    </div>
+
                     <!-- Live Song Reactions (Thumbs Up, Love, Thumbs Down) -->
                     <div class="song-reactions-bar" id="songReactionsBar">
                         <span class="reactions-label">React to Track:</span>
@@ -187,6 +202,10 @@
                             <button class="reaction-btn" id="btnReactionThumbsDown" data-reaction="thumbs_down" title="Thumbs Down this song">
                                 <span class="reaction-emoji">👎</span>
                                 <span class="reaction-count" id="countThumbsDown">0</span>
+                            </button>
+                            <button class="reaction-btn reaction-party" id="btnReactionParty" title="Trigger Party Celebration Pyro!">
+                                <span class="reaction-emoji">🎉</span>
+                                <span class="reaction-count" id="countParty">PARTY</span>
                             </button>
                         </div>
                     </div>
@@ -588,6 +607,45 @@
             </div>
         </div>
     </div>
+
+    <!-- DJ HAND-OFF LIVE TOAST BANNER -->
+    <div class="dj-handoff-toast" id="djHandoffToast" style="display: none;">
+        <span class="toast-icon">⚡</span>
+        <div class="toast-content">
+            <span class="toast-title">DJ HAND-OFF</span>
+            <span class="toast-msg" id="djHandoffMsg">Now on the decks: Guest DJ</span>
+        </div>
+    </div>
+
+    <!-- GUEST DJ PROFILE MODAL -->
+    <div class="station-modal-overlay" id="guestDjModalOverlay" style="display: none;">
+        <div class="station-modal-card guest-dj-card">
+            <div class="station-modal-header">
+                <h3 class="station-modal-title">Guest DJ Profile</h3>
+                <button class="lyrics-close-btn" id="guestDjModalCloseBtn" title="Close" aria-label="Close">✕</button>
+            </div>
+            <div class="station-modal-body">
+                <div class="guest-dj-hero">
+                    <img id="guestDjModalAvatar" class="guest-modal-avatar" src="/assets/icons/favicon.ico" alt="Guest DJ" />
+                    <div class="guest-modal-details">
+                        <h4 id="guestDjModalName" class="guest-modal-name">Guest DJ</h4>
+                        <span class="guest-modal-role">Live Guest Performer</span>
+                    </div>
+                </div>
+                <div id="guestDjBioSection" style="margin-top: 12px;">
+                    <div class="station-section-label">Biography</div>
+                    <p class="station-bio-text" id="guestDjBioText">Special guest session on the decks.</p>
+                </div>
+                <div id="guestDjSocialsSection" style="margin-top: 12px; display: none;">
+                    <div class="station-section-label">Connect with Guest DJ</div>
+                    <div class="station-social-row" id="guestDjSocialRow"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PARTY PARTICLES LAYER -->
+    <div class="party-particles-layer" id="partyParticlesLayer" aria-hidden="true"></div>
 
     <script src="/assets/player.js"></script>
 </body>

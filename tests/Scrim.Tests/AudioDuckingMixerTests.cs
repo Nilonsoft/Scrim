@@ -188,5 +188,52 @@ namespace Scrim.Tests {
 
             cts.Cancel();
         }
+
+        [Fact]
+        public async Task StartMixing_WithTalkbackActive_MutesMicFromMaster() {
+            var mixer = new AudioDuckingMixer {
+                AppVolume = 0.0f,
+                PushToTalkActive = true,
+                TalkbackActive = true
+            };
+            var appChannel = Channel.CreateUnbounded<byte[]>();
+            var micChannel = Channel.CreateUnbounded<byte[]>();
+            var cts = new CancellationTokenSource();
+
+            mixer.StartMixing(appChannel.Reader, micChannel.Reader, cts.Token);
+
+            byte[] micFrame = new byte[3528];
+            for (int i = 0; i < micFrame.Length; i += 2) {
+                var bytes = BitConverter.GetBytes((short)20000);
+                micFrame[i] = bytes[0];
+                micFrame[i + 1] = bytes[1];
+            }
+
+            await micChannel.Writer.WriteAsync(micFrame);
+            byte[] silentApp = new byte[3528];
+            await appChannel.Writer.WriteAsync(silentApp);
+
+            var mixedFrame = await mixer.MixedStream.ReadAsync();
+
+            short sample = BitConverter.ToInt16(mixedFrame, 100);
+            Assert.Equal(0, sample);
+
+            cts.Cancel();
+        }
+
+        [Fact]
+        public async Task StartB2bCrossfade_InterpolatesVolumes() {
+            var mixer = new AudioDuckingMixer {
+                AppVolume = 1.0f,
+                RelayVolume = 0.0f
+            };
+
+            mixer.StartB2bCrossfade(targetRelayVol: 1.0f, targetAppVol: 0.0f, durationMs: 100);
+
+            await Task.Delay(180);
+
+            Assert.InRange(mixer.RelayVolume, 0.95f, 1.0f);
+            Assert.InRange(mixer.AppVolume, 0.0f, 0.05f);
+        }
     }
 }

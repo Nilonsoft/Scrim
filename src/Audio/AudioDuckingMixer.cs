@@ -37,10 +37,14 @@ namespace Scrim.Audio {
         public bool IsToggleMuted { get; set; }
         public MicControlMode ControlMode { get; set; } = MicControlMode.PushToTalk;
         public float AppVolume { get; set; } = 1.0f;
+        public float RelayVolume { get; set; } = 1.0f;
+        public bool TalkbackActive { get; set; } = false;
         public ChannelReader<byte[]>? LocalMusicAudioStream { get; set; }
+        public ChannelReader<byte[]>? RelayAudioStream { get; set; }
 
         public bool IsMicLive {
             get {
+                if (TalkbackActive) return false;
                 if (ControlMode == MicControlMode.PushToMute) {
                     return !IsToggleMuted && !PushToMuteActive;
                 } else {
@@ -54,11 +58,44 @@ namespace Scrim.Audio {
         public ChannelReader<byte[]> MixedStream => _mixedOutput.Reader;
 
         public AudioDuckingMixer() {
-            // Unbounded channel ensures zero dropped frames and no bitstream discontinuities
-            _mixedOutput = Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions {
+            // Bounded channel with DropOldest prevents unbounded memory bloat during offline audio monitoring
+            _mixedOutput = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(100) {
                 SingleReader = false,
-                SingleWriter = false
+                SingleWriter = false,
+                FullMode = BoundedChannelFullMode.DropOldest
             });
+        }
+
+        public void FlushOutput() {
+            while (_mixedOutput.Reader.TryRead(out _)) { }
+        }
+
+        private CancellationTokenSource? _crossfadeCts;
+
+        public void StartB2bCrossfade(float targetRelayVol, float targetAppVol, int durationMs = 8000) {
+            _crossfadeCts?.Cancel();
+            _crossfadeCts?.Dispose();
+            _crossfadeCts = new CancellationTokenSource();
+            var token = _crossfadeCts.Token;
+
+            float startRelay = RelayVolume;
+            float startApp = AppVolume;
+
+            Task.Run(async () => {
+                int steps = Math.Clamp(durationMs / 20, 5, 40);
+                int stepDelay = Math.Max(5, durationMs / steps);
+                for (int i = 1; i <= steps && !token.IsCancellationRequested; i++) {
+                    float t = (float)i / steps;
+                    float smoothT = (1.0f - MathF.Cos(t * MathF.PI)) * 0.5f;
+                    RelayVolume = startRelay + (targetRelayVol - startRelay) * smoothT;
+                    AppVolume = startApp + (targetAppVol - startApp) * smoothT;
+                    await Task.Delay(stepDelay, token);
+                }
+                if (!token.IsCancellationRequested) {
+                    RelayVolume = targetRelayVol;
+                    AppVolume = targetAppVol;
+                }
+            }, token);
         }
 
         public void StopMixing() {
@@ -71,6 +108,7 @@ namespace Scrim.Audio {
                 LeftLevel = 0f;
                 RightLevel = 0f;
                 _activeSfxQueue.Clear();
+                FlushOutput();
             }
         }
 
@@ -81,6 +119,7 @@ namespace Scrim.Audio {
                     _mixingCts.Cancel();
                     _mixingCts.Dispose();
                 }
+                FlushOutput();
                 _mixingCts = CancellationTokenSource.CreateLinkedTokenSource(externalToken);
                 var token = _mixingCts.Token;
 
@@ -90,6 +129,7 @@ namespace Scrim.Audio {
                     byte[] silentFrame = new byte[KeepaliveBytes];
                     var micQueue = new System.Collections.Generic.Queue<byte>();
                     var localMusicQueue = new System.Collections.Generic.Queue<byte>();
+                    var relayQueue = new System.Collections.Generic.Queue<byte>();
                     long lastAppPacketTicks = 0;
                     bool wasSilent = false;
 
@@ -106,6 +146,15 @@ namespace Scrim.Audio {
                                 }
                             }
 
+                            // Buffer incoming stream relay packets if stream is available
+                            if (RelayAudioStream != null) {
+                                while (RelayAudioStream.TryRead(out var rBuf)) {
+                                    for (int b = 0; b < rBuf.Length; b++) {
+                                        relayQueue.Enqueue(rBuf[b]);
+                                    }
+                                }
+                            }
+
                             // Keep local music queue bounded to max 150ms (26460 bytes)
                             const int MaxLocalQueueBytes = 26460;
                             if (localMusicQueue.Count > MaxLocalQueueBytes) {
@@ -113,6 +162,15 @@ namespace Scrim.Audio {
                                 excess -= excess % 4;
                                 for (int b = 0; b < excess; b++) {
                                     localMusicQueue.Dequeue();
+                                }
+                            }
+
+                            // Keep relay queue bounded to max 150ms (26460 bytes)
+                            if (relayQueue.Count > MaxLocalQueueBytes) {
+                                int excess = relayQueue.Count - MaxLocalQueueBytes;
+                                excess -= excess % 4;
+                                for (int b = 0; b < excess; b++) {
+                                    relayQueue.Dequeue();
                                 }
                             }
 
@@ -124,14 +182,14 @@ namespace Scrim.Audio {
                             } else {
                                 // If in active playback mode (or initial startup), wait up to 350ms to accommodate
                                 // NAudio's 50-100ms buffer delivery intervals without injecting silence gaps.
-                                // If idle/silent, pace keepalive silence frames at 20ms (10ms if sfx/mic/local queued)
+                                // If idle/silent, pace keepalive silence frames at 20ms (10ms if sfx/mic/local/relay queued)
                                 // so soundboard effects and VU decay ballistics run smoothly in real time.
                                 bool isRecentPlayback = !wasSilent && (lastAppPacketTicks == 0 || System.Diagnostics.Stopwatch.GetElapsedTime(lastAppPacketTicks).TotalMilliseconds < 350);
                                 int waitTimeoutMs;
                                 if (isRecentPlayback) {
                                     waitTimeoutMs = 350;
                                 } else {
-                                    waitTimeoutMs = (_sfxQueue.Count > 0 || _activeSfxQueue.Count >= 4 || micQueue.Count >= KeepaliveBytes || localMusicQueue.Count >= KeepaliveBytes) ? 10 : 20;
+                                    waitTimeoutMs = (_sfxQueue.Count > 0 || _activeSfxQueue.Count >= 4 || micQueue.Count >= KeepaliveBytes || localMusicQueue.Count >= KeepaliveBytes || relayQueue.Count >= KeepaliveBytes) ? 10 : 20;
                                 }
 
                                 using var timeoutCts = new CancellationTokenSource(waitTimeoutMs);
@@ -147,11 +205,18 @@ namespace Scrim.Audio {
                                 }
                             }
 
-                            // Again drain any new local music packets that arrived during wait
+                            // Again drain any new local music and relay packets that arrived during wait
                             if (LocalMusicAudioStream != null) {
                                 while (LocalMusicAudioStream.TryRead(out var lmBuf)) {
                                     for (int b = 0; b < lmBuf.Length; b++) {
                                         localMusicQueue.Enqueue(lmBuf[b]);
+                                    }
+                                }
+                            }
+                            if (RelayAudioStream != null) {
+                                while (RelayAudioStream.TryRead(out var rBuf)) {
+                                    for (int b = 0; b < rBuf.Length; b++) {
+                                        relayQueue.Enqueue(rBuf[b]);
                                     }
                                 }
                             }
@@ -178,6 +243,42 @@ namespace Scrim.Audio {
                                         short lmSample = (short)(lm0 | (lm1 << 8));
                                         short appSample = BitConverter.ToInt16(appBuffer, b);
                                         short mixed = (short)Math.Clamp(appSample + lmSample, short.MinValue, short.MaxValue);
+                                        byte[] sumBytes = BitConverter.GetBytes(mixed);
+                                        appBuffer[b] = sumBytes[0];
+                                        appBuffer[b + 1] = sumBytes[1];
+                                    }
+                                }
+                            }
+
+                            // Merge or inject stream relay audio into appBuffer
+                            if (relayQueue.Count >= 4 && appBuffer != null) {
+                                int rBytesToRead = Math.Min(relayQueue.Count, appBuffer.Length);
+                                rBytesToRead -= rBytesToRead % 4;
+
+                                if (appBuffer == silentFrame) {
+                                    // Replace silent frame with relay audio frame
+                                    byte[] rBuffer = new byte[appBuffer.Length];
+                                    for (int b = 0; b < rBytesToRead; b += 2) {
+                                        byte r0 = relayQueue.Dequeue();
+                                        byte r1 = relayQueue.Dequeue();
+                                        short rSample = (short)(r0 | (r1 << 8));
+                                        short scaled = (short)Math.Clamp(rSample * RelayVolume, short.MinValue, short.MaxValue);
+                                        byte[] sBytes = BitConverter.GetBytes(scaled);
+                                        rBuffer[b] = sBytes[0];
+                                        rBuffer[b + 1] = sBytes[1];
+                                    }
+                                    appBuffer = rBuffer;
+                                    wasSilent = false;
+                                    lastAppPacketTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+                                } else {
+                                    // Sum external/local music with relay audio
+                                    for (int b = 0; b < rBytesToRead; b += 2) {
+                                        byte r0 = relayQueue.Dequeue();
+                                        byte r1 = relayQueue.Dequeue();
+                                        short rSample = (short)(r0 | (r1 << 8));
+                                        short scaled = (short)(rSample * RelayVolume);
+                                        short appSample = BitConverter.ToInt16(appBuffer, b);
+                                        short mixed = (short)Math.Clamp(appSample + scaled, short.MinValue, short.MaxValue);
                                         byte[] sumBytes = BitConverter.GetBytes(mixed);
                                         appBuffer[b] = sumBytes[0];
                                         appBuffer[b + 1] = sumBytes[1];

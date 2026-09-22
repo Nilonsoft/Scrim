@@ -21,10 +21,15 @@ namespace Scrim.Encoding {
         public int CurrentBitrate => _currentBitrate;
 
         public MultiFormatTranscoder() {
-            _transcodedOutput = Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions {
+            _transcodedOutput = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(100) {
                 SingleReader = false,
-                SingleWriter = true
+                SingleWriter = true,
+                FullMode = BoundedChannelFullMode.DropOldest
             });
+        }
+
+        public void FlushOutput() {
+            while (_transcodedOutput.Reader.TryRead(out _)) { }
         }
 
         public void SetFormat(AudioFormat format, int bitrate) {
@@ -42,6 +47,7 @@ namespace Scrim.Encoding {
         public void StartTranscoding(ChannelReader<byte[]> duckedPcmStream) {
             lock (_lock) {
                 StopTranscoding();
+                FlushOutput();
                 _isTranscoding = true;
                 _inputPcmStream = duckedPcmStream;
                 _mainCts = new CancellationTokenSource();
@@ -80,9 +86,10 @@ namespace Scrim.Encoding {
                 _ => new LameMp3Encoder(_currentBitrate)
             };
 
-            _currentEncoderPcmChannel = Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions {
+            _currentEncoderPcmChannel = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(50) {
                 SingleReader = true,
-                SingleWriter = true
+                SingleWriter = true,
+                FullMode = BoundedChannelFullMode.DropOldest
             });
 
             _currentEncoder.StartEncoding(_currentEncoderPcmChannel.Reader);
@@ -109,6 +116,7 @@ namespace Scrim.Encoding {
                 _currentEncoder = null;
                 _currentEncoderPcmChannel = null;
                 _inputPcmStream = null;
+                FlushOutput();
             }
         }
     }

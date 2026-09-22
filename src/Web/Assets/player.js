@@ -122,15 +122,18 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const canvas = document.getElementById('visualizerCanvas');
     const ctx = canvas ? canvas.getContext('2d') : null;
-    const modeButtons = document.querySelectorAll('.vis-mode-btn');
-    let currentVisMode = localStorage.getItem('scrim_vis_mode') || 'bars';
+    let modeButtons = document.querySelectorAll('.vis-mode-btn');
+    let userSelectedVisMode = localStorage.getItem('scrim_vis_mode');
+    let currentVisMode = userSelectedVisMode || 'bars';
+    let baseModeMap = { 'bars': 'bars', 'wave': 'wave', 'spectrum': 'spectrum', 'pulse': 'pulse' };
 
     function setVisMode(mode) {
         currentVisMode = mode;
         try {
             localStorage.setItem('scrim_vis_mode', mode);
         } catch (e) {}
-        modeButtons.forEach(btn => {
+        const btns = document.querySelectorAll('.vis-mode-btn');
+        btns.forEach(btn => {
             if (btn.dataset.mode === mode) {
                 btn.classList.add('active');
             } else {
@@ -141,10 +144,49 @@ document.addEventListener('DOMContentLoaded', function () {
 
     modeButtons.forEach(btn => {
         btn.addEventListener('click', function () {
+            userSelectedVisMode = this.dataset.mode;
             setVisMode(this.dataset.mode);
         });
     });
     setVisMode(currentVisMode);
+
+    function updateVisualizerReactors(reactors, defaultMode) {
+        const group = document.getElementById('visModeGroup');
+        if (!group || !Array.isArray(reactors) || reactors.length === 0) return;
+
+        const enabled = reactors.filter(r => r.isEnabled !== false);
+        if (enabled.length === 0) return;
+
+        baseModeMap = {};
+        enabled.forEach(r => {
+            baseModeMap[r.id] = r.baseMode || 'bars';
+        });
+
+        // If user hasn't explicitly picked a mode stored in localStorage, use defaultMode if available
+        if (!userSelectedVisMode && defaultMode && enabled.some(r => r.id === defaultMode)) {
+            currentVisMode = defaultMode;
+        } else if (!enabled.some(r => r.id === currentVisMode)) {
+            const def = enabled.find(r => r.id === defaultMode) || enabled[0];
+            currentVisMode = def.id;
+        }
+
+        group.innerHTML = '';
+        enabled.forEach(r => {
+            const btn = document.createElement('button');
+            btn.className = 'vis-mode-btn' + (r.id === currentVisMode ? ' active' : '');
+            btn.dataset.mode = r.id;
+            const emojiStr = r.emoji ? r.emoji + ' ' : '';
+            btn.textContent = `${emojiStr}${r.label || r.id}`;
+            btn.title = `${r.label || r.id} (${r.baseMode || 'visualizer'})`;
+            btn.addEventListener('click', function () {
+                userSelectedVisMode = r.id;
+                setVisMode(r.id);
+            });
+            group.appendChild(btn);
+        });
+
+        setVisMode(currentVisMode);
+    }
 
     function initAudioVisualizer() {
         if (sourceNode || !audio) return;
@@ -534,13 +576,14 @@ document.addEventListener('DOMContentLoaded', function () {
 
         idleAngle += 0.035;
 
-        if (currentVisMode === 'bars') {
+        const baseMode = baseModeMap[currentVisMode] || currentVisMode;
+        if (baseMode === 'bars') {
             renderBarsMode(ctx, w, h, dims.dpr, accent, hasData);
-        } else if (currentVisMode === 'wave') {
+        } else if (baseMode === 'wave') {
             renderWaveMode(ctx, w, h, dims.dpr, accent, hasData);
-        } else if (currentVisMode === 'spectrum') {
+        } else if (baseMode === 'spectrum') {
             renderSpectrumMode(ctx, w, h, dims.dpr, accent, hasData);
-        } else if (currentVisMode === 'pulse') {
+        } else if (baseMode === 'pulse') {
             renderPulseMode(ctx, w, h, dims.dpr, accent, hasData);
         }
     }
@@ -550,6 +593,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // Live Stream Play / Stop Controls (Strictly for Web User)
     let userExplicitlyStopped = false;
     let autoplayUnlocked = false;
+    let pendingLiveAutoStart = false;
 
     function unlockAutoplay() {
         if (autoplayUnlocked) {
@@ -675,6 +719,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     isUserPlaying = false;
                     isPlaying = false;
                     isConnecting = false;
+                    pendingLiveAutoStart = true;
                     updatePlayButtonUI();
                     audio.removeAttribute('src');
                     if (subtitleEl) {
@@ -689,6 +734,7 @@ document.addEventListener('DOMContentLoaded', function () {
         playBtn.addEventListener('click', function () {
             if (isUserPlaying || isPlaying || isConnecting) {
                 userExplicitlyStopped = true;
+                pendingLiveAutoStart = false;
                 stopStream();
                 const subtitleEl = document.getElementById('showSubtitle');
                 if (subtitleEl) {
@@ -820,6 +866,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         updateStationModalContent(branding);
+        updatePartyHubBranding(branding);
 
         if (branding.theme) {
             document.documentElement.setAttribute('data-theme', branding.theme);
@@ -942,6 +989,10 @@ document.addEventListener('DOMContentLoaded', function () {
                     navContainer.appendChild(a);
                 });
             }
+        }
+
+        if (branding.visualizerReactors && Array.isArray(branding.visualizerReactors)) {
+            updateVisualizerReactors(branding.visualizerReactors, branding.defaultVisualizerMode);
         }
     }
 
@@ -1302,8 +1353,13 @@ document.addEventListener('DOMContentLoaded', function () {
                     if (listenerCount) listenerCount.textContent = data.listeners || '1';
                     if (data.isLive !== undefined) {
                         updateLiveIndicator(data.isLive);
-                        if (data.isLive && (!isPlaying || !audio.src)) {
-                            checkAutoplay(true);
+                        if (data.isLive) {
+                            if (pendingLiveAutoStart && !userExplicitlyStopped) {
+                                pendingLiveAutoStart = false;
+                                startStream(false);
+                            } else if (!isPlaying || !audio.src) {
+                                checkAutoplay(true);
+                            }
                         }
                     }
                     if (data.format !== undefined) {
@@ -1321,6 +1377,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
                 if (data.type === 'poll_ended') {
                     removeLivePoll();
+                }
+
+                if (data.type === 'party_celebrate') {
+                    triggerPartyCelebration(data.sender);
                 }
 
                 if (data.type === 'chat_init') {
@@ -2943,5 +3003,221 @@ document.addEventListener('DOMContentLoaded', function () {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ pollId: pollId, optionIndex: optionIndex })
         }).catch(err => console.warn('Vote submission note:', err));
+    }
+
+    // =========================================================================
+    // PARTY HUB, B2B STAGE PRESENCE & CELEBRATION MODULE
+    // =========================================================================
+    let lastActiveDj = null;
+    let toastTimeout = null;
+
+    function updatePartyHubBranding(branding) {
+        if (!branding) return;
+
+        const badge = document.getElementById('decksPresenceBadge');
+        const hostAvatar = document.getElementById('hostDjAvatar');
+        const guestAvatar = document.getElementById('guestDjAvatar');
+        const activeName = document.getElementById('activeDjName');
+        const guestBioBtn = document.getElementById('guestBioBtn');
+        const stageLabel = document.getElementById('stageLabel');
+
+        if (!badge) return;
+
+        if (branding.isPartyHub && branding.guestDj) {
+            badge.style.display = 'inline-flex';
+            if (hostAvatar) {
+                hostAvatar.src = (branding.hostDj && branding.hostDj.avatarUrl) ? branding.hostDj.avatarUrl : '/assets/icons/favicon.ico';
+                hostAvatar.title = (branding.hostDj && branding.hostDj.name) ? branding.hostDj.name : 'Host DJ';
+                hostAvatar.classList.remove('b2b-active');
+            }
+            if (guestAvatar) {
+                guestAvatar.src = branding.guestDj.avatarUrl || '/assets/icons/favicon.ico';
+                guestAvatar.title = branding.guestDj.name || 'Guest DJ';
+                guestAvatar.style.display = 'block';
+                guestAvatar.classList.add('b2b-active');
+            }
+            if (activeName) {
+                activeName.textContent = branding.guestDj.name || 'Guest DJ';
+            }
+            if (stageLabel) {
+                stageLabel.textContent = 'GUEST ON THE DECKS';
+            }
+            if (guestBioBtn) {
+                guestBioBtn.style.display = 'inline-block';
+            }
+
+            // Detect DJ Hand-off
+            if (lastActiveDj !== null && lastActiveDj !== branding.guestDj.name) {
+                showDjHandoffToast(`Guest DJ: ${branding.guestDj.name}`);
+            }
+            lastActiveDj = branding.guestDj.name;
+        } else {
+            // Normal solo broadcast
+            const hostName = branding.hostName || 'Host DJ';
+            if (lastActiveDj !== null && lastActiveDj !== hostName && branding.isPartyHub === false) {
+                showDjHandoffToast(`Decks returned to: ${hostName}`);
+            }
+            lastActiveDj = hostName;
+
+            if (guestAvatar) {
+                guestAvatar.style.display = 'none';
+                guestAvatar.classList.remove('b2b-active');
+            }
+            if (hostAvatar) {
+                hostAvatar.classList.add('b2b-active');
+            }
+            if (guestBioBtn) {
+                guestBioBtn.style.display = 'none';
+            }
+            if (activeName) {
+                activeName.textContent = hostName;
+            }
+            if (stageLabel) {
+                stageLabel.textContent = 'NOW ON THE DECKS';
+            }
+            badge.style.display = 'inline-flex';
+        }
+    }
+
+    function showDjHandoffToast(msg) {
+        const toast = document.getElementById('djHandoffToast');
+        const msgEl = document.getElementById('djHandoffMsg');
+        if (!toast || !msgEl) return;
+
+        msgEl.textContent = msg;
+        toast.style.display = 'flex';
+
+        if (toastTimeout) clearTimeout(toastTimeout);
+        toastTimeout = setTimeout(() => {
+            toast.style.display = 'none';
+        }, 5000);
+    }
+
+    function openGuestDjModal() {
+        if (!currentBranding || !currentBranding.guestDj) return;
+        const modal = document.getElementById('guestDjModalOverlay');
+        const avatar = document.getElementById('guestDjModalAvatar');
+        const name = document.getElementById('guestDjModalName');
+        const bio = document.getElementById('guestDjBioText');
+        const socialsSec = document.getElementById('guestDjSocialsSection');
+        const socialRow = document.getElementById('guestDjSocialRow');
+
+        if (!modal) return;
+
+        const g = currentBranding.guestDj;
+        if (avatar) avatar.src = g.avatarUrl || '/assets/icons/favicon.ico';
+        if (name) name.textContent = g.name || 'Guest DJ';
+        if (bio) bio.textContent = g.bio || 'Special guest session on the decks.';
+
+        if (socialRow && socialsSec) {
+            socialRow.innerHTML = '';
+            let hasSocials = false;
+
+            if (g.discord && g.discord.trim()) {
+                const url = g.discord.startsWith('http') ? g.discord : `https://discord.gg/${g.discord.replace(/^#/, '')}`;
+                const a = document.createElement('a');
+                a.href = url;
+                a.target = '_blank';
+                a.rel = 'noopener noreferrer';
+                a.className = 'station-social-btn discord';
+                a.textContent = 'Discord';
+                socialRow.appendChild(a);
+                hasSocials = true;
+            }
+            if (g.twitch && g.twitch.trim()) {
+                const url = g.twitch.startsWith('http') ? g.twitch : `https://twitch.tv/${g.twitch.replace(/^@/, '')}`;
+                const a = document.createElement('a');
+                a.href = url;
+                a.target = '_blank';
+                a.rel = 'noopener noreferrer';
+                a.className = 'station-social-btn twitch';
+                a.textContent = 'Twitch';
+                socialRow.appendChild(a);
+                hasSocials = true;
+            }
+            if (g.twitter && g.twitter.trim()) {
+                const url = g.twitter.startsWith('http') ? g.twitter : `https://x.com/${g.twitter.replace(/^@/, '')}`;
+                const a = document.createElement('a');
+                a.href = url;
+                a.target = '_blank';
+                a.rel = 'noopener noreferrer';
+                a.className = 'station-social-btn twitter';
+                a.textContent = 'X (Twitter)';
+                socialRow.appendChild(a);
+                hasSocials = true;
+            }
+
+            socialsSec.style.display = hasSocials ? 'block' : 'none';
+        }
+
+        modal.style.display = 'flex';
+    }
+
+    function closeGuestDjModal() {
+        const modal = document.getElementById('guestDjModalOverlay');
+        if (modal) modal.style.display = 'none';
+    }
+
+    const guestBioBtn = document.getElementById('guestBioBtn');
+    if (guestBioBtn) guestBioBtn.addEventListener('click', openGuestDjModal);
+
+    const guestAvatar = document.getElementById('guestDjAvatar');
+    if (guestAvatar) guestAvatar.addEventListener('click', openGuestDjModal);
+
+    const guestCloseBtn = document.getElementById('guestDjModalCloseBtn');
+    if (guestCloseBtn) guestCloseBtn.addEventListener('click', closeGuestDjModal);
+
+    const guestModal = document.getElementById('guestDjModalOverlay');
+    if (guestModal) {
+        guestModal.addEventListener('click', (e) => {
+            if (e.target === guestModal) closeGuestDjModal();
+        });
+    }
+
+    // Party Celebration Pyro & Confetti Burst
+    function triggerPartyCelebration(sender) {
+        const layer = document.getElementById('partyParticlesLayer');
+        if (!layer) return;
+
+        const emojis = ['🎉', '✨', '🔥', '⚡', '💖', '💥', '🎵', '🎧', '🙌', '🌟'];
+        const count = 30;
+
+        for (let i = 0; i < count; i++) {
+            const p = document.createElement('span');
+            p.className = 'party-particle';
+            p.textContent = emojis[Math.floor(Math.random() * emojis.length)];
+
+            const left = Math.random() * 96 + 2; // 2% to 98%
+            const duration = 1.8 + Math.random() * 1.4; // 1.8s - 3.2s
+            const delay = Math.random() * 0.4;
+            const size = 18 + Math.random() * 22; // 18px - 40px
+
+            p.style.left = `${left}%`;
+            p.style.fontSize = `${size}px`;
+            p.style.animationDuration = `${duration}s`;
+            p.style.animationDelay = `${delay}s`;
+
+            layer.appendChild(p);
+
+            setTimeout(() => {
+                if (p.parentNode) p.parentNode.removeChild(p);
+            }, (duration + delay + 0.2) * 1000);
+        }
+    }
+
+    const btnReactionParty = document.getElementById('btnReactionParty');
+    if (btnReactionParty) {
+        btnReactionParty.addEventListener('click', () => {
+            btnReactionParty.classList.add('pop');
+            setTimeout(() => btnReactionParty.classList.remove('pop'), 200);
+
+            triggerPartyCelebration('You');
+
+            fetch('/api/party/celebrate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sender: 'Listener' })
+            }).catch(err => console.warn('Celebration note:', err));
+        });
     }
 });

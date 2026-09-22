@@ -61,6 +61,15 @@ namespace Scrim.Configuration {
             new WebNavLink { Label = "About", Url = "#about" }
         };
 
+        // Audio Visualizer Reaction Modes ("Reactors")
+        public string DefaultVisualizerMode { get; set; } = "bars";
+        public System.Collections.Generic.List<VisualizerReactorConfig> VisualizerReactors { get; set; } = new() {
+            new VisualizerReactorConfig { Id = "bars", Label = "Bars", Emoji = "📊", BaseMode = "bars", IsEnabled = true, IsDefault = true, IsBuiltin = true },
+            new VisualizerReactorConfig { Id = "wave", Label = "Wave", Emoji = "📈", BaseMode = "wave", IsEnabled = true, IsDefault = false, IsBuiltin = true },
+            new VisualizerReactorConfig { Id = "spectrum", Label = "Spectrum", Emoji = "🌈", BaseMode = "spectrum", IsEnabled = true, IsDefault = false, IsBuiltin = true },
+            new VisualizerReactorConfig { Id = "pulse", Label = "Pulse", Emoji = "✨", BaseMode = "pulse", IsEnabled = true, IsDefault = false, IsBuiltin = true }
+        };
+
         // Layout Customization & Column Sizing Proportions
         public string ColumnLayoutMode { get; set; } = "Studio";
         public int CustomLeftWidth { get; set; } = 320;
@@ -68,6 +77,10 @@ namespace Scrim.Configuration {
         public System.Collections.Generic.List<string> LeftColumnCards { get; set; } = new() { "card-audio-routing", "card-dj-eq", "card-web-branding" };
         public System.Collections.Generic.List<string> CenterColumnCards { get; set; } = new() { "card-vu-talk", "card-voice-fx", "card-queue", "card-chat" };
         public System.Collections.Generic.List<string> RightColumnCards { get; set; } = new() { "card-encoding", "card-media-player", "card-soundboard" };
+        public System.Collections.Generic.List<string> CollapsedCards { get; set; } = new();
+
+        // High-DPI UI Scaling Percentage (e.g. 80, 100, 125, 150)
+        public int UiScalePercentage { get; set; } = 100;
 
         // Console Window Bounds & State Persistence
         public double WindowWidth { get; set; } = 1200;
@@ -169,6 +182,16 @@ namespace Scrim.Configuration {
         public bool SoftLimiterEnabled { get; set; } = true;
     }
 
+    public class VisualizerReactorConfig {
+        public string Id { get; set; } = "";
+        public string Label { get; set; } = "";
+        public string Emoji { get; set; } = "";
+        public string BaseMode { get; set; } = "bars"; // bars, wave, spectrum, pulse
+        public bool IsEnabled { get; set; } = true;
+        public bool IsDefault { get; set; } = false;
+        public bool IsBuiltin { get; set; } = true;
+    }
+
     public class CustomSoundItem {
         public string Name { get; set; } = "";
         public string FilePath { get; set; } = "";
@@ -196,6 +219,10 @@ namespace Scrim.Configuration {
         System.Collections.Generic.IEnumerable<string> GetAvailableProfiles();
         void SaveProfile(ScrimProfile profile);
         void LoadProfile(string name);
+        bool ExportProfile(string profileName, string targetFilePath);
+        bool ImportProfile(string sourceFilePath, out string importedName);
+        bool DeleteProfile(string name);
+        bool DuplicateProfile(string sourceName, string newName);
         string? ResolveAssetPath(string? inputPath);
     }
 }

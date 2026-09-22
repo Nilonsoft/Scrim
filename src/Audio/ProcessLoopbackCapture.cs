@@ -28,10 +28,15 @@ namespace Scrim.Audio {
         public ChannelReader<byte[]> AudioStream => _channel.Reader;
 
         public ProcessLoopbackCapture() {
-            _channel = Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions {
+            _channel = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(100) {
                 SingleReader = true,
-                SingleWriter = true
+                SingleWriter = true,
+                FullMode = BoundedChannelFullMode.DropOldest
             });
+        }
+
+        public void FlushChannel() {
+            while (_channel.Reader.TryRead(out _)) { }
         }
 
         private string? _captureDeviceId;
@@ -56,6 +61,7 @@ namespace Scrim.Audio {
                     return;
                 }
                 StopCapture();
+                FlushChannel();
                 _processId = processId;
                 _captureDeviceId = deviceId;
                 _cts = new CancellationTokenSource();
@@ -115,7 +121,19 @@ namespace Scrim.Audio {
                         }
                     }
                 };
-                _wasapiLoopback.RecordingStopped += (s, e) => { };
+                _wasapiLoopback.RecordingStopped += (s, e) => {
+                    if (e.Exception != null) {
+                        Console.WriteLine($"[ProcessLoopbackCapture] Loopback recording stopped with exception: {e.Exception.Message}. Reconnecting in 1s...");
+                        Task.Run(async () => {
+                            await Task.Delay(1000);
+                            lock (_captureLock) {
+                                if (_cts != null && !_cts.IsCancellationRequested) {
+                                    StartWasapiLoopback(_captureDeviceId);
+                                }
+                            }
+                        });
+                    }
+                };
                 _wasapiLoopback.StartRecording();
             } catch (Exception ex) {
                 Console.WriteLine($"[ProcessLoopbackCapture] Failed to start WASAPI loopback: {ex.Message}");
@@ -257,6 +275,7 @@ namespace Scrim.Audio {
             lock (_captureLock) {
                 StopWasapiLoopback();
                 _cts?.Cancel();
+                FlushChannel();
                 try {
                     _captureTask?.Wait(200);
                 } catch { }

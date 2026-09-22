@@ -82,6 +82,15 @@
 - **Interactive Console Player**: Now Playing strip with animated visualizer, interactive seek scrubber, transport controls (Play/Pause, Stop, Prev, Next), shuffle, repeat (Off / All / 1), and local monitor volume.
 - **Playlist Workstation**: Add files, scan folders, filter with real-time search, move tracks up/down, export/import `.m3u` and `.json` playlists, and 1-click cue to Deck A or Deck B. See [User Guide](docs/user-guide.md#14-local-music-playback--playlist-management-console).
 
+### 🎛️ Stream Relaying & Multi-DJ Party Hub
+- **External & Sister-Station Relay Ingest**: Ingest live MP3, AAC, Ogg, and FLAC streams from remote radio stations or co-hosts via background FFmpeg decoders with auto-reconnect.
+- **Scrim-to-Scrim Peer Auto-Detection**: Auto-detects peer Scrim broadcasts, pulling remote DJ names, bios, and avatars into the console and web player.
+- **Pre-Fade Listen (PFL) Headphone Cueing**: Dedicated `🎧 CUE` button to preview and beatmatch remote streams in headphones over secondary WASAPI audio devices before going live.
+- **Automated B2B DJ Crossfader**: 1-click `⚡ Hand-Off to Guest` and `⚡ Take Back Decks` executing smooth 8-second S-curve volume transitions between host decks and guest streams.
+- **Green Room Talkback Intercom**: Dedicated `🎙️ Talkback (Off-Air)` isolates host microphone from the master broadcast for private off-air coordination with guest performers.
+- **Stream Health & Auto-Fallback**: Live buffer depth telemetry (`(1.2s buffer)`) and instant auto-fallback restoring host volume to 100% if a guest stream drops.
+- **Interactive Web Player Stage Presence**: "Now on the Decks" dual-avatar badge with glowing pulse rings, DJ hand-off toast banners, guest DJ profile popover modal, and real-time `🎉 PARTY` celebration pyro/confetti bursts. See [v1.0.11 Feature Guide](docs/v1.0.11-features-guide.md#1-stream-relaying--multi-dj-party-hub).
+
 ### 🔌 Extensible C# & Python Plugin System
 - **Dual Runtime Support**: Dynamically discover and execute compiled .NET class libraries (`.dll`) and pure Python plugins (`.py` or packaged folders with `plugin.json`).
 - **Crash-Resilient Worker Bridge**: Python plugins run in isolated child processes communicating over bidirectional JSON-RPC, protecting live radio broadcasts from script crashes or hangs.
@@ -125,6 +134,7 @@
 
 Comprehensive guides, specifications, and architecture documents are located in the [`docs/`](docs/) directory:
 
+- 🌟 **[Release & Feature Guide (v1.0.11)](docs/v1.0.11-features-guide.md)**: Details on Stream Relaying & Multi-DJ Party Hub, Backstage DJ / Green Room Private Chat, Audio Visualizer Reactor Mode Customization, Dedicated Admin Screen, High-DPI UI Scaling, Collapsible Cards, Venue Profile Import/Export, and Overnight Auto-Recovery.
 - 📋 **[Release Notes (v1.0.9)](docs/patch-notes-v1.0.9.md)**: What's new in v1.0.9 (Local Music Playback & Playlist Management Console).
 - 🚀 **[Post-Installation & User Guide](docs/post-install-guide.md)**: Comprehensive end-user handbook—from running the installer, setting up FFmpeg, 1-click virtual audio routing, and going on air to station chat, custom banners, and sharing links.
 - 📻 **[SAM Broadcaster PRO Modular Suite Guide](docs/sam-pro-features-guide.md)**: Detailed breakdown of the 7 modular cards (Dual Decks, Event Scheduler, Voice Tracking, Multi-Encoder Rack, Listener IP Inspector, Dead-Air Recovery, and Music Rotation Rules).

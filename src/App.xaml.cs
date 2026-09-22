@@ -104,6 +104,7 @@ namespace Scrim {
             services.AddSingleton<EventSchedulerService>();
             services.AddSingleton<DeadAirRecoveryService>();
             services.AddSingleton<LocalMusicPlayerService>();
+            services.AddSingleton<StreamRelayService>();
 
             // Server & Metadata
             services.AddSingleton<INetworkDiscoveryService, NetworkDiscoveryService>();

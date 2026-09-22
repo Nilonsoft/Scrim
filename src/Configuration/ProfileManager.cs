@@ -86,6 +86,93 @@ namespace Scrim.Configuration {
             }
         }
 
+        public bool ExportProfile(string profileName, string targetFilePath) {
+            try {
+                string sourceFile = Path.Combine(_configDir, $"{profileName}.json");
+                if (!File.Exists(sourceFile)) {
+                    if (string.Equals(profileName, CurrentProfile.ProfileName, StringComparison.OrdinalIgnoreCase)) {
+                        SaveProfile(CurrentProfile);
+                    } else {
+                        return false;
+                    }
+                }
+                string json = File.ReadAllText(sourceFile);
+                File.WriteAllText(targetFilePath, json);
+                return true;
+            } catch {
+                return false;
+            }
+        }
+
+        public bool ImportProfile(string sourceFilePath, out string importedName) {
+            importedName = "";
+            try {
+                if (!File.Exists(sourceFilePath)) return false;
+                string json = File.ReadAllText(sourceFilePath);
+                var profile = JsonSerializer.Deserialize<ScrimProfile>(json);
+                if (profile == null) return false;
+
+                string baseName = !string.IsNullOrWhiteSpace(profile.ProfileName) 
+                    ? profile.ProfileName 
+                    : Path.GetFileNameWithoutExtension(sourceFilePath);
+
+                string safeName = string.Join("_", baseName.Split(Path.GetInvalidFileNameChars())).Trim();
+                if (string.IsNullOrEmpty(safeName)) safeName = "ImportedProfile";
+
+                profile.ProfileName = safeName;
+                SaveProfile(profile);
+                importedName = safeName;
+                return true;
+            } catch {
+                return false;
+            }
+        }
+
+        public bool DeleteProfile(string name) {
+            try {
+                if (string.Equals(name, "Default", StringComparison.OrdinalIgnoreCase)) {
+                    return false;
+                }
+                string file = Path.Combine(_configDir, $"{name}.json");
+                if (File.Exists(file)) {
+                    File.Delete(file);
+                    if (string.Equals(CurrentProfile.ProfileName, name, StringComparison.OrdinalIgnoreCase)) {
+                        LoadProfile("Default");
+                    }
+                    return true;
+                }
+                return false;
+            } catch {
+                return false;
+            }
+        }
+
+        public bool DuplicateProfile(string sourceName, string newName) {
+            try {
+                string sourceFile = Path.Combine(_configDir, $"{sourceName}.json");
+                ScrimProfile sourceProfile;
+                if (File.Exists(sourceFile)) {
+                    string json = File.ReadAllText(sourceFile);
+                    sourceProfile = JsonSerializer.Deserialize<ScrimProfile>(json) ?? new ScrimProfile();
+                } else if (string.Equals(sourceName, CurrentProfile.ProfileName, StringComparison.OrdinalIgnoreCase)) {
+                    sourceProfile = CurrentProfile;
+                } else {
+                    return false;
+                }
+
+                string safeNewName = string.Join("_", newName.Split(Path.GetInvalidFileNameChars())).Trim();
+                if (string.IsNullOrEmpty(safeNewName)) return false;
+
+                string clonedJson = JsonSerializer.Serialize(sourceProfile);
+                var cloned = JsonSerializer.Deserialize<ScrimProfile>(clonedJson) ?? new ScrimProfile();
+                cloned.ProfileName = safeNewName;
+                SaveProfile(cloned);
+                return true;
+            } catch {
+                return false;
+            }
+        }
+
         public string? ResolveAssetPath(string? inputPath) {
             if (string.IsNullOrWhiteSpace(inputPath)) return null;
 

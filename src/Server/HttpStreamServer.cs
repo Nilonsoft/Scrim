@@ -21,9 +21,11 @@ namespace Scrim.Server {
         private readonly ILiveChatService _chatService;
         private readonly ISongReactionService _reactionService;
         private readonly ISongHistoryService _historyService;
+        private readonly Scrim.Audio.StreamRelayService? _relayService;
 
         public event Action? HistorySettingsChanged;
         public event Action? BrandingSettingsChanged;
+        public event Action<string>? PartyCelebrationReceived;
 
         public void BroadcastHistoryUpdate() {
             HistorySettingsChanged?.Invoke();
@@ -32,11 +34,15 @@ namespace Scrim.Server {
         public void BroadcastBrandingUpdate() {
             BrandingSettingsChanged?.Invoke();
         }
+
+        public void BroadcastPartyCelebration(string sender) {
+            PartyCelebrationReceived?.Invoke(sender);
+        }
         private HttpListener? _listener;
         private TcpListener? _bridgeListener;
         private CancellationTokenSource? _cts;
 
-        public HttpStreamServer(BroadcastHub hub, IMetadataService metadataService, SongRequestController requestController, IProfileManager profileManager, INetworkDiscoveryService networkDiscovery, IThemeService? themeService = null, ILiveChatService? chatService = null, ISongReactionService? reactionService = null, ISongHistoryService? historyService = null) {
+        public HttpStreamServer(BroadcastHub hub, IMetadataService metadataService, SongRequestController requestController, IProfileManager profileManager, INetworkDiscoveryService networkDiscovery, IThemeService? themeService = null, ILiveChatService? chatService = null, ISongReactionService? reactionService = null, ISongHistoryService? historyService = null, Scrim.Audio.StreamRelayService? relayService = null) {
             _hub = hub;
             _metadataService = metadataService;
             _requestController = requestController;
@@ -47,6 +53,11 @@ namespace Scrim.Server {
             _chatService.SyncBannedUsers(_profileManager.CurrentProfile.BannedUsers);
             _reactionService = reactionService ?? new SongReactionService(metadataService);
             _historyService = historyService ?? new SongHistoryService(metadataService);
+            _relayService = relayService;
+            if (_relayService != null) {
+                _relayService.StreamStatusUpdated += (_) => BroadcastBrandingUpdate();
+                _relayService.StreamsChanged += BroadcastBrandingUpdate;
+            }
         }
 
         private PollState? _currentPoll;
@@ -475,6 +486,12 @@ namespace Scrim.Server {
                 HandlePollVote(context);
             } else if (path == "/api/poll/current" && context.Request.HttpMethod == "GET") {
                 HandleCurrentPoll(context);
+            } else if (path == "/api/party/celebrate" && context.Request.HttpMethod == "POST") {
+                HandlePartyCelebrateRequest(context);
+            } else if (path == "/api/greenroom/chat" && context.Request.HttpMethod == "POST") {
+                HandleGreenRoomPost(context);
+            } else if (path == "/api/greenroom/chat" && context.Request.HttpMethod == "GET") {
+                HandleGreenRoomGet(context);
             } else if (path == "/api/status") {
                 HandleStatusRequest(context);
             } else {
@@ -611,9 +628,18 @@ namespace Scrim.Server {
             response.Headers.Add("Pragma", "no-cache");
             response.Headers.Add("Expires", "0");
             response.Headers.Add("Accept-Ranges", "none");
-            response.Headers.Add("icy-name", _profileManager.CurrentProfile.StationName ?? "Scrim Broadcast Station");
+            response.Headers.Add("X-Powered-By", "Scrim");
+            var currentProfile = _profileManager.CurrentProfile;
+            response.Headers.Add("icy-name", currentProfile.StationName ?? "Scrim Broadcast Station");
             response.Headers.Add("icy-genre", "Live Stream");
-            response.Headers.Add("icy-br", _profileManager.CurrentProfile.Bitrate.ToString());
+            response.Headers.Add("icy-br", currentProfile.Bitrate.ToString());
+            if (!string.IsNullOrWhiteSpace(currentProfile.HostName)) {
+                response.Headers.Add("X-Scrim-Host", currentProfile.HostName);
+            }
+            string effectiveLogo = GetEffectiveLogoUrl();
+            if (!string.IsNullOrWhiteSpace(effectiveLogo)) {
+                response.Headers.Add("X-Scrim-Avatar", effectiveLogo);
+            }
 
             if (!_hub.IsBroadcasting) {
                 response.StatusCode = 503;
@@ -725,12 +751,20 @@ namespace Scrim.Server {
             };
 
             string BuildMetadataJson(MediaMetadata meta) {
+                var activeRelay = _relayService?.ActivePassthroughStream;
+                string title = meta.Title;
+                string artist = meta.Artist;
+                if (activeRelay != null && activeRelay.PassthroughTrackMetadata && !string.IsNullOrWhiteSpace(activeRelay.CurrentTrackTitle)) {
+                    title = activeRelay.CurrentTrackTitle;
+                    artist = !string.IsNullOrWhiteSpace(activeRelay.CurrentTrackArtist) ? activeRelay.CurrentTrackArtist : activeRelay.EffectiveDjName;
+                }
+
                 bool hasArt = (meta.AlbumArt != null && meta.AlbumArt.Length > 0) || !string.IsNullOrEmpty(meta.AlbumArtUrl);
                 string artUrl = hasArt ? (string.IsNullOrEmpty(meta.AlbumArtUrl) ? "/api/albumart" : meta.AlbumArtUrl) : "";
                 double durationSec = meta.Duration.TotalSeconds;
                 double positionSec = meta.Position.TotalSeconds;
                 bool isPlaying = meta.IsPlaying;
-                return $"{{\"type\":\"metadata\",\"title\":\"{EscapeJson(meta.Title)}\",\"artist\":\"{EscapeJson(meta.Artist)}\",\"album\":\"{EscapeJson(meta.Album)}\",\"hasArt\":{(hasArt ? "true" : "false")},\"albumArtUrl\":\"{EscapeJson(artUrl)}\",\"duration\":{durationSec.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)},\"position\":{positionSec.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)},\"isPlaying\":{(isPlaying ? "true" : "false")}}}";
+                return $"{{\"type\":\"metadata\",\"title\":\"{EscapeJson(title)}\",\"artist\":\"{EscapeJson(artist)}\",\"album\":\"{EscapeJson(meta.Album)}\",\"hasArt\":{(hasArt ? "true" : "false")},\"albumArtUrl\":\"{EscapeJson(artUrl)}\",\"duration\":{durationSec.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)},\"position\":{positionSec.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)},\"isPlaying\":{(isPlaying ? "true" : "false")}}}";
             }
 
             string BuildStatsJson(bool isLive) {
@@ -754,7 +788,19 @@ namespace Scrim.Server {
                 string streamMount = GetNormalizedMountPoint();
                 string bannerUrl = GetEffectiveBannerUrl();
                 string logoUrl = GetEffectiveLogoUrl();
-                return $"{{\"type\":\"branding\",\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(themeStr)}\",\"customThemeVariables\":{customThemeJson},\"enableDynamicBackdrop\":{(profile.EnableDynamicBackdrop ? "true" : "false")},\"broadcasterBio\":\"{EscapeJson(profile.BroadcasterBio)}\",\"socialDiscord\":\"{EscapeJson(profile.SocialDiscord)}\",\"socialTwitch\":\"{EscapeJson(profile.SocialTwitch)}\",\"socialTwitter\":\"{EscapeJson(profile.SocialTwitter)}\",\"scheduleDescription\":\"{EscapeJson(profile.ScheduleDescription)}\",\"logoUrl\":\"{EscapeJson(logoUrl)}\",\"bannerUrl\":\"{EscapeJson(bannerUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}],\"streamUrl\":\"/{streamMount}\",\"isPrivate\":false,\"restrictToLocal\":{(profile.RestrictToLocalNetwork ? "true" : "false")}}}";
+
+                var activeRelay = _relayService?.ActivePassthroughStream;
+                string effectiveHost = activeRelay != null && !string.IsNullOrWhiteSpace(activeRelay.EffectiveDjName) ? activeRelay.EffectiveDjName : profile.HostName;
+                string effectiveLogo = activeRelay != null && !string.IsNullOrWhiteSpace(activeRelay.EffectiveAvatarUrl) ? activeRelay.EffectiveAvatarUrl : logoUrl;
+
+                string partyHubJson = activeRelay != null
+                    ? $",\"isPartyHub\":true,\"guestDj\":{{\"name\":\"{EscapeJson(activeRelay.EffectiveDjName)}\",\"avatarUrl\":\"{EscapeJson(activeRelay.EffectiveAvatarUrl)}\",\"bio\":\"{EscapeJson(activeRelay.OriginBio)}\",\"discord\":\"{EscapeJson(activeRelay.OriginDiscord)}\",\"twitch\":\"{EscapeJson(activeRelay.OriginTwitch)}\",\"twitter\":\"{EscapeJson(activeRelay.OriginTwitter)}\"}},\"hostDj\":{{\"name\":\"{EscapeJson(profile.HostName)}\",\"avatarUrl\":\"{EscapeJson(logoUrl)}\"}}"
+                    : ",\"isPartyHub\":false";
+
+                string reactorsJson = BuildVisualizerReactorsJson();
+                string defaultVisMode = !string.IsNullOrWhiteSpace(profile.DefaultVisualizerMode) ? profile.DefaultVisualizerMode : "bars";
+
+                return $"{{\"type\":\"branding\",\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(effectiveHost)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(themeStr)}\",\"customThemeVariables\":{customThemeJson},\"enableDynamicBackdrop\":{(profile.EnableDynamicBackdrop ? "true" : "false")},\"broadcasterBio\":\"{EscapeJson(profile.BroadcasterBio)}\",\"socialDiscord\":\"{EscapeJson(profile.SocialDiscord)}\",\"socialTwitch\":\"{EscapeJson(profile.SocialTwitch)}\",\"socialTwitter\":\"{EscapeJson(profile.SocialTwitter)}\",\"scheduleDescription\":\"{EscapeJson(profile.ScheduleDescription)}\",\"logoUrl\":\"{EscapeJson(effectiveLogo)}\",\"bannerUrl\":\"{EscapeJson(bannerUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}],\"streamUrl\":\"/{streamMount}\",\"isPrivate\":false,\"restrictToLocal\":{(profile.RestrictToLocalNetwork ? "true" : "false")}{partyHubJson},\"visualizerReactors\":{reactorsJson},\"defaultVisualizerMode\":\"{EscapeJson(defaultVisMode)}\"}}";
             }
 
             EventHandler<MediaMetadata> onMetadata = (_, meta) => {
@@ -784,6 +830,17 @@ namespace Scrim.Server {
                 immediateChannel.Writer.TryWrite($"data: {BuildPollJson(poll)}\n\n");
             };
             PollChanged += onPoll;
+
+            Action<string> onCelebration = (sender) => {
+                immediateChannel.Writer.TryWrite($"data: {{\"type\":\"party_celebrate\",\"sender\":\"{EscapeJson(sender)}\"}}\n\n");
+            };
+            PartyCelebrationReceived += onCelebration;
+
+            Action<ChatMessage> onGreenRoom = (msg) => {
+                string grJson = $"{{\"type\":\"greenroom_chat\",\"id\":\"{EscapeJson(msg.Id)}\",\"sender\":\"{EscapeJson(msg.Sender)}\",\"text\":\"{EscapeJson(msg.Text)}\",\"timestamp\":\"{msg.Timestamp:o}\",\"isHost\":{(msg.IsHost ? "true" : "false")},\"color\":\"{EscapeJson(msg.Color)}\"}}";
+                immediateChannel.Writer.TryWrite($"data: {grJson}\n\n");
+            };
+            GreenRoomMessagePosted += onGreenRoom;
 
             try {
                 using var writer = new StreamWriter(response.OutputStream);
@@ -861,6 +918,8 @@ namespace Scrim.Server {
                 HistorySettingsChanged -= onHistorySettings;
                 BrandingSettingsChanged -= onBrandingSettings;
                 PollChanged -= onPoll;
+                PartyCelebrationReceived -= onCelebration;
+                GreenRoomMessagePosted -= onGreenRoom;
                 writeLock.Dispose();
                 response.Close();
             }
@@ -1237,7 +1296,19 @@ namespace Scrim.Server {
                 string streamMount = GetNormalizedMountPoint();
                 string bannerUrl = GetEffectiveBannerUrl();
                 string logoUrl = GetEffectiveLogoUrl();
-                string json = $"{{\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(profile.HostName)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(themeStr)}\",\"customThemeVariables\":{customThemeJson},\"enableDynamicBackdrop\":{(profile.EnableDynamicBackdrop ? "true" : "false")},\"broadcasterBio\":\"{EscapeJson(profile.BroadcasterBio)}\",\"socialDiscord\":\"{EscapeJson(profile.SocialDiscord)}\",\"socialTwitch\":\"{EscapeJson(profile.SocialTwitch)}\",\"socialTwitter\":\"{EscapeJson(profile.SocialTwitter)}\",\"scheduleDescription\":\"{EscapeJson(profile.ScheduleDescription)}\",\"logoUrl\":\"{EscapeJson(logoUrl)}\",\"bannerUrl\":\"{EscapeJson(bannerUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}],\"streamUrl\":\"/{streamMount}\",\"isPrivate\":{(isRestricted ? "true" : "false")},\"restrictToLocal\":{(profile.RestrictToLocalNetwork ? "true" : "false")}}}";
+
+                var activeRelay = _relayService?.ActivePassthroughStream;
+                string effectiveHost = activeRelay != null && !string.IsNullOrWhiteSpace(activeRelay.EffectiveDjName) ? activeRelay.EffectiveDjName : profile.HostName;
+                string effectiveLogo = activeRelay != null && !string.IsNullOrWhiteSpace(activeRelay.EffectiveAvatarUrl) ? activeRelay.EffectiveAvatarUrl : logoUrl;
+
+                string partyHubJson = activeRelay != null
+                    ? $",\"isPartyHub\":true,\"guestDj\":{{\"name\":\"{EscapeJson(activeRelay.EffectiveDjName)}\",\"avatarUrl\":\"{EscapeJson(activeRelay.EffectiveAvatarUrl)}\",\"bio\":\"{EscapeJson(activeRelay.OriginBio)}\",\"discord\":\"{EscapeJson(activeRelay.OriginDiscord)}\",\"twitch\":\"{EscapeJson(activeRelay.OriginTwitch)}\",\"twitter\":\"{EscapeJson(activeRelay.OriginTwitter)}\"}},\"hostDj\":{{\"name\":\"{EscapeJson(profile.HostName)}\",\"avatarUrl\":\"{EscapeJson(logoUrl)}\"}}"
+                    : ",\"isPartyHub\":false";
+
+                string reactorsJson = BuildVisualizerReactorsJson();
+                string defaultVisMode = !string.IsNullOrWhiteSpace(profile.DefaultVisualizerMode) ? profile.DefaultVisualizerMode : "bars";
+
+                string json = $"{{\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(effectiveHost)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(themeStr)}\",\"customThemeVariables\":{customThemeJson},\"enableDynamicBackdrop\":{(profile.EnableDynamicBackdrop ? "true" : "false")},\"broadcasterBio\":\"{EscapeJson(profile.BroadcasterBio)}\",\"socialDiscord\":\"{EscapeJson(profile.SocialDiscord)}\",\"socialTwitch\":\"{EscapeJson(profile.SocialTwitch)}\",\"socialTwitter\":\"{EscapeJson(profile.SocialTwitter)}\",\"scheduleDescription\":\"{EscapeJson(profile.ScheduleDescription)}\",\"logoUrl\":\"{EscapeJson(effectiveLogo)}\",\"bannerUrl\":\"{EscapeJson(bannerUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}],\"streamUrl\":\"/{streamMount}\",\"isPrivate\":{(isRestricted ? "true" : "false")},\"restrictToLocal\":{(profile.RestrictToLocalNetwork ? "true" : "false")}{partyHubJson},\"visualizerReactors\":{reactorsJson},\"defaultVisualizerMode\":\"{EscapeJson(defaultVisMode)}\"}}";
                 byte[] buffer = System.Text.Encoding.UTF8.GetBytes(json);
                 context.Response.ContentType = "application/json";
                 context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
@@ -1248,6 +1319,107 @@ namespace Scrim.Server {
             } finally {
                 context.Response.Close();
             }
+        }
+
+        private void HandlePartyCelebrateRequest(HttpListenerContext context) {
+            try {
+                using var reader = new StreamReader(context.Request.InputStream, System.Text.Encoding.UTF8);
+                string body = reader.ReadToEnd();
+                var senderMatch = System.Text.RegularExpressions.Regex.Match(body, "\"sender\"\\s*:\\s*\"(.*?)\"");
+                string sender = senderMatch.Success ? senderMatch.Groups[1].Value : "Listener";
+                BroadcastPartyCelebration(sender);
+                context.Response.ContentType = "application/json";
+                context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+                context.Response.StatusCode = 200;
+                byte[] ok = System.Text.Encoding.UTF8.GetBytes("{\"success\":true}");
+                context.Response.OutputStream.Write(ok, 0, ok.Length);
+            } catch {
+                context.Response.StatusCode = 400;
+            } finally {
+                context.Response.Close();
+            }
+        }
+
+        private readonly System.Collections.Concurrent.ConcurrentQueue<ChatMessage> _greenRoomMessages = new();
+        public event Action<ChatMessage>? GreenRoomMessagePosted;
+
+        public IReadOnlyList<ChatMessage> GetGreenRoomMessages() {
+            return _greenRoomMessages.ToArray();
+        }
+
+        public void PostGreenRoomMessage(string sender, string text, bool isHost = false, string color = "#00d2ff") {
+            var msg = new ChatMessage {
+                Id = Guid.NewGuid().ToString("N"),
+                Sender = sender,
+                Text = text,
+                Timestamp = DateTime.UtcNow,
+                IsHost = isHost,
+                Color = color
+            };
+            _greenRoomMessages.Enqueue(msg);
+            while (_greenRoomMessages.Count > 50 && _greenRoomMessages.TryDequeue(out _)) { }
+            GreenRoomMessagePosted?.Invoke(msg);
+        }
+
+        private void HandleGreenRoomGet(HttpListenerContext context) {
+            try {
+                var response = context.Response;
+                response.ContentType = "application/json; charset=utf-8";
+                response.Headers.Add("Access-Control-Allow-Origin", "*");
+                var messages = _greenRoomMessages.Select(m =>
+                    $"{{\"id\":\"{EscapeJson(m.Id)}\",\"sender\":\"{EscapeJson(m.Sender)}\",\"text\":\"{EscapeJson(m.Text)}\",\"timestamp\":\"{m.Timestamp:o}\",\"isHost\":{(m.IsHost ? "true" : "false")},\"color\":\"{EscapeJson(m.Color)}\"}}"
+                );
+                string json = $"{{\"messages\":[{string.Join(",", messages)}]}}";
+                byte[] buffer = System.Text.Encoding.UTF8.GetBytes(json);
+                response.ContentLength64 = buffer.Length;
+                response.OutputStream.Write(buffer, 0, buffer.Length);
+            } catch {
+                context.Response.StatusCode = 500;
+            } finally {
+                context.Response.Close();
+            }
+        }
+
+        private void HandleGreenRoomPost(HttpListenerContext context) {
+            try {
+                using var reader = new StreamReader(context.Request.InputStream, System.Text.Encoding.UTF8);
+                string body = reader.ReadToEnd();
+                var senderMatch = System.Text.RegularExpressions.Regex.Match(body, "\"sender\"\\s*:\\s*\"(.*?)\"");
+                var textMatch = System.Text.RegularExpressions.Regex.Match(body, "\"text\"\\s*:\\s*\"(.*?)\"");
+                var isHostMatch = System.Text.RegularExpressions.Regex.Match(body, "\"isHost\"\\s*:\\s*(true|false)");
+                var colorMatch = System.Text.RegularExpressions.Regex.Match(body, "\"color\"\\s*:\\s*\"(.*?)\"");
+
+                string sender = senderMatch.Success ? senderMatch.Groups[1].Value : "DJ Guest";
+                string text = textMatch.Success ? textMatch.Groups[1].Value : "";
+                bool isHost = isHostMatch.Success && isHostMatch.Groups[1].Value == "true";
+                string color = colorMatch.Success && !string.IsNullOrWhiteSpace(colorMatch.Groups[1].Value) ? colorMatch.Groups[1].Value : "#00d2ff";
+
+                if (!string.IsNullOrWhiteSpace(text)) {
+                    PostGreenRoomMessage(sender, text, isHost, color);
+                }
+
+                context.Response.ContentType = "application/json";
+                context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+                context.Response.StatusCode = 200;
+                byte[] ok = System.Text.Encoding.UTF8.GetBytes("{\"success\":true}");
+                context.Response.OutputStream.Write(ok, 0, ok.Length);
+            } catch {
+                context.Response.StatusCode = 400;
+            } finally {
+                context.Response.Close();
+            }
+        }
+
+        private string BuildVisualizerReactorsJson() {
+            var profile = _profileManager.CurrentProfile;
+            var reactors = profile.VisualizerReactors;
+            if (reactors == null || reactors.Count == 0) {
+                return "[{\"id\":\"bars\",\"label\":\"Bars\",\"emoji\":\"📊\",\"baseMode\":\"bars\",\"isDefault\":true},{\"id\":\"wave\",\"label\":\"Wave\",\"emoji\":\"📈\",\"baseMode\":\"wave\",\"isDefault\":false},{\"id\":\"spectrum\",\"label\":\"Spectrum\",\"emoji\":\"🌈\",\"baseMode\":\"spectrum\",\"isDefault\":false},{\"id\":\"pulse\",\"label\":\"Pulse\",\"emoji\":\"✨\",\"baseMode\":\"pulse\",\"isDefault\":false}]";
+            }
+            var enabled = reactors.Where(r => r.IsEnabled).Select(r =>
+                $"{{\"id\":\"{EscapeJson(r.Id)}\",\"label\":\"{EscapeJson(r.Label)}\",\"emoji\":\"{EscapeJson(r.Emoji)}\",\"baseMode\":\"{EscapeJson(r.BaseMode)}\",\"isDefault\":{(r.IsDefault ? "true" : "false")}}}"
+            );
+            return $"[{string.Join(",", enabled)}]";
         }
 
         private void HandleSongRequest(HttpListenerContext context) {

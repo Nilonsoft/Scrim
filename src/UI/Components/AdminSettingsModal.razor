@@ -1,0 +1,299 @@
+@using Scrim.Configuration
+@using Scrim.Updates
+@using Scrim.Audio
+@using System.IO
+@inject IProfileManager ProfileManager
+@inject IUpdateService UpdateService
+@inject VirtualAudioDeviceService VirtualDeviceService
+@inject IJSRuntime JSRuntime
+
+@if (IsOpen) {
+    <div class="scrim-modal-backdrop" @onclick="Close">
+        <div class="scrim-modal" style="max-width: 680px; width: 95%; max-height: 85vh; overflow-y: auto;" @onclick:stopPropagation="true">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #232731; padding-bottom: 12px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 20px;">⚙️</span>
+                    <div>
+                        <h3 style="margin: 0; font-size: 18px; font-weight: 700; color: #fff;">Application Settings</h3>
+                        <p style="margin: 0; font-size: 12px; color: #727988;">Configure system behavior, UI scaling, and check for software updates</p>
+                    </div>
+                </div>
+                <button class="scrim-dots-btn" style="font-size: 20px;" @onclick="Close">✕</button>
+            </div>
+
+            <!-- Tab Navigation -->
+            <div style="display: flex; gap: 8px; margin-bottom: 18px; border-bottom: 1px solid #232731; padding-bottom: 8px;">
+                <button class="scrim-btn-secondary @(ActiveTab == "general" ? "active" : "")" style="@(ActiveTab == "general" ? "background: #272b34; color: #00d2ff; border-color: #00d2ff;" : "")" @onclick="@(() => ActiveTab = "general")">
+                    General &amp; Scaling
+                </button>
+                <button class="scrim-btn-secondary @(ActiveTab == "updates" ? "active" : "")" style="@(ActiveTab == "updates" ? "background: #272b34; color: #00d2ff; border-color: #00d2ff;" : "")" @onclick="@(() => ActiveTab = "updates")">
+                    Updates
+                </button>
+                <button class="scrim-btn-secondary @(ActiveTab == "audio" ? "active" : "")" style="@(ActiveTab == "audio" ? "background: #272b34; color: #00d2ff; border-color: #00d2ff;" : "")" @onclick="@(() => ActiveTab = "audio")">
+                    Audio Driver
+                </button>
+                <button class="scrim-btn-secondary @(ActiveTab == "logs" ? "active" : "")" style="@(ActiveTab == "logs" ? "background: #272b34; color: #00d2ff; border-color: #00d2ff;" : "")" @onclick="@(() => ActiveTab = "logs")">
+                    Logs &amp; Diagnostics
+                </button>
+            </div>
+
+            @if (ActiveTab == "general") {
+                <!-- UI Scaling Section -->
+                <div style="background: #161922; border: 1px solid #282f3e; border-radius: 10px; padding: 16px; margin-bottom: 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <div>
+                            <label class="scrim-label" style="font-size: 13px; font-weight: 700; color: #fff; margin-bottom: 2px;">UI Display Scaling</label>
+                            <p style="margin: 0; font-size: 11px; color: #727988;">Scale console fonts, cards, and meters for high-resolution (2K / 4K) displays</p>
+                        </div>
+                        <span style="font-size: 13px; font-weight: 800; color: #00d2ff;">@(ProfileManager.CurrentProfile.UiScalePercentage)%</span>
+                    </div>
+
+                    <div style="display: flex; align-items: center; gap: 12px; margin-top: 10px;">
+                        <input type="range" class="form-range" min="80" max="200" step="5"
+                               value="@ProfileManager.CurrentProfile.UiScalePercentage"
+                               @oninput="OnUiScaleInput"
+                               style="flex: 1; accent-color: #00d2ff; cursor: pointer;" />
+                        <button class="scrim-btn-secondary" style="padding: 4px 10px; font-size: 11px;" @onclick="@(() => SetUiScale(100))">Reset (100%)</button>
+                    </div>
+
+                    <div style="display: flex; gap: 6px; margin-top: 10px;">
+                        @foreach (var scale in new[] { 80, 100, 110, 125, 150, 175, 200 }) {
+                            <button class="scrim-btn-secondary" style="flex: 1; padding: 4px 0; font-size: 11px; @(ProfileManager.CurrentProfile.UiScalePercentage == scale ? "background: #272b34; color: #00d2ff; border-color: #00d2ff;" : "")" @onclick="@(() => SetUiScale(scale))">
+                                @(scale)%
+                            </button>
+                        }
+                    </div>
+                </div>
+
+                <!-- System Behavior -->
+                <div style="background: #161922; border: 1px solid #282f3e; border-radius: 10px; padding: 16px;">
+                    <h4 style="margin: 0 0 12px 0; font-size: 13px; font-weight: 700; color: #fff;">System &amp; Window Behavior</h4>
+                    
+                    <div style="margin-bottom: 12px;">
+                        <label class="scrim-label">System Tray Behavior on Close</label>
+                        <select class="scrim-select" @bind="ProfileManager.CurrentProfile.CloseMode" @bind:after="SaveSettings">
+                            <option value="@CloseToTrayMode.MinimizeToTray">Minimize to Notification Area (Tray)</option>
+                            <option value="@CloseToTrayMode.Ask">Prompt Every Time</option>
+                            <option value="@CloseToTrayMode.Close">Exit Application Immediately</option>
+                        </select>
+                    </div>
+
+                    <div style="display: flex; align-items: center; justify-content: space-between; padding-top: 8px; border-top: 1px dashed #232731;">
+                        <div>
+                            <label class="scrim-label" style="margin: 0; color: #fff; cursor: pointer;" for="adminBroadcastOpen">Broadcast on Launch</label>
+                            <p style="margin: 0; font-size: 11px; color: #727988;">Automatically go live whenever Scrim starts up</p>
+                        </div>
+                        <input type="checkbox" id="adminBroadcastOpen"
+                               checked="@ProfileManager.CurrentProfile.BroadcastOnOpen"
+                               @onchange="ToggleBroadcastOnOpen"
+                               style="width: 16px; height: 16px; accent-color: #00d2ff; cursor: pointer;" />
+                    </div>
+                </div>
+            } else if (ActiveTab == "updates") {
+                <!-- Application Updates Section -->
+                <div style="background: #161922; border: 1px solid #282f3e; border-radius: 10px; padding: 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
+                        <div>
+                            <span style="font-size: 11px; font-weight: 800; color: #8b92a2; letter-spacing: 0.5px;">INSTALLED VERSION</span>
+                            <h3 style="margin: 4px 0 0 0; font-size: 22px; font-weight: 800; color: #fff;">v@(CurrentVersion)</h3>
+                        </div>
+                        <button class="scrim-btn-primary" style="display: flex; align-items: center; gap: 8px; padding: 8px 16px;" @onclick="CheckForUpdates" disabled="@IsCheckingUpdates">
+                            @if (IsCheckingUpdates) {
+                                <span class="spinner-border spinner-border-sm" role="status"></span>
+                                <span>Checking...</span>
+                            } else {
+                                <span>⚡ Check for Updates</span>
+                            }
+                        </button>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(UpdateCheckMessage)) {
+                        <div style="background: @(UpdateHasAvailable ? "rgba(0, 210, 255, 0.1)" : "rgba(34, 197, 94, 0.1)"); border: 1px solid @(UpdateHasAvailable ? "rgba(0, 210, 255, 0.3)" : "rgba(34, 197, 94, 0.3)"); border-radius: 8px; padding: 12px; margin-bottom: 14px;">
+                            <div style="font-size: 13px; font-weight: 600; color: @(UpdateHasAvailable ? "#00d2ff" : "#44ff44");">
+                                @UpdateCheckMessage
+                            </div>
+                            @if (UpdateHasAvailable && AvailableUpdateInfo != null) {
+                                <div style="margin-top: 8px; font-size: 12px; color: #ccc;">
+                                    Version <strong>v@(AvailableUpdateInfo.LatestVersion)</strong> is available!
+                                    <div style="margin-top: 6px;">
+                                        <a href="@(string.IsNullOrEmpty(AvailableUpdateInfo.DownloadUrl) ? "https://github.com/nilonsoft/scrim/releases" : AvailableUpdateInfo.DownloadUrl)" target="_blank" style="color: #00d2ff; text-decoration: underline;">View Release on GitHub</a>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+
+                    <div style="font-size: 12px; color: #727988; line-height: 1.5;">
+                        Scrim automatically checks for updates daily via Windows background task. You can also run a check at any time by clicking above.
+                    </div>
+                </div>
+            } else if (ActiveTab == "audio") {
+                <!-- Audio Driver Diagnostics -->
+                <div style="background: #161922; border: 1px solid #282f3e; border-radius: 10px; padding: 16px;">
+                    <h4 style="margin: 0 0 12px 0; font-size: 13px; font-weight: 700; color: #fff;">VB-Audio Virtual Cable Setup</h4>
+                    <p style="margin: 0 0 14px 0; font-size: 12px; color: #727988;">
+                        The virtual cable driver allows background PC audio and desktop apps to stream directly into Scrim without manual mixer routing.
+                    </p>
+
+                    <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                        <button class="scrim-btn-primary" style="flex: 1;" @onclick="OneClickSetupAudio">1-Click Driver Setup</button>
+                        <button class="scrim-btn-secondary" @onclick="RestoreSpeakerOutput">Restore Physical Speakers</button>
+                        <button class="scrim-btn-secondary" @onclick="OpenWindowsSoundMixer">Windows Sound Mixer</button>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(AudioStatusMessage)) {
+                        <div style="font-size: 12px; color: #00d2ff; background: rgba(0, 210, 255, 0.08); padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(0, 210, 255, 0.2);">
+                            @AudioStatusMessage
+                        </div>
+                    }
+                </div>
+            } else if (ActiveTab == "logs") {
+                <!-- Crash Logs & Diagnostics -->
+                <div style="background: #161922; border: 1px solid #282f3e; border-radius: 10px; padding: 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <h4 style="margin: 0; font-size: 13px; font-weight: 700; color: #fff;">Application Logs</h4>
+                        <button class="scrim-btn-secondary" style="font-size: 11px; padding: 4px 8px;" @onclick="RefreshLogs">Refresh</button>
+                    </div>
+
+                    <div style="font-family: monospace; font-size: 11px; color: #94a3b8; background: #0c0e14; border: 1px solid #1a1e28; border-radius: 6px; padding: 10px; max-height: 250px; overflow-y: auto; white-space: pre-wrap;">
+                        @LogContent
+                    </div>
+
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+                        <span style="font-size: 11px; color: #727988;">Location: ~/.scrim/crash.log</span>
+                        <button class="scrim-btn-secondary" style="font-size: 11px; padding: 4px 8px; color: #ef4444;" @onclick="ClearLogs">Clear Logs</button>
+                    </div>
+                </div>
+            }
+
+            <div style="display: flex; justify-content: flex-end; margin-top: 20px; border-top: 1px solid #232731; padding-top: 12px;">
+                <button class="scrim-btn-primary" style="padding: 8px 24px;" @onclick="Close">Done</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsOpen { get; set; }
+    [Parameter] public EventCallback<bool> IsOpenChanged { get; set; }
+    [Parameter] public EventCallback<int> OnScaleChanged { get; set; }
+
+    private string ActiveTab = "general";
+    private string CurrentVersion => UpdateService.CurrentVersion;
+
+    private bool IsCheckingUpdates = false;
+    private string UpdateCheckMessage = "";
+    private bool UpdateHasAvailable = false;
+    private Scrim.Updates.UpdateResponse? AvailableUpdateInfo;
+    private string AudioStatusMessage = "";
+    private string LogContent = "No crashes logged. System healthy.";
+
+    protected override void OnInitialized() {
+        RefreshLogs();
+    }
+
+    private async Task Close() {
+        IsOpen = false;
+        await IsOpenChanged.InvokeAsync(false);
+    }
+
+    private async Task OnUiScaleInput(ChangeEventArgs e) {
+        if (int.TryParse(e.Value?.ToString(), out int val)) {
+            await SetUiScale(val);
+        }
+    }
+
+    private async Task SetUiScale(int scale) {
+        scale = Math.Clamp(scale, 80, 200);
+        ProfileManager.CurrentProfile.UiScalePercentage = scale;
+        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        await OnScaleChanged.InvokeAsync(scale);
+    }
+
+    private void ToggleBroadcastOnOpen(ChangeEventArgs e) {
+        if (bool.TryParse(e.Value?.ToString(), out bool val)) {
+            ProfileManager.CurrentProfile.BroadcastOnOpen = val;
+            ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        }
+    }
+
+    private void SaveSettings() {
+        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+    }
+
+    private async Task CheckForUpdates() {
+        IsCheckingUpdates = true;
+        UpdateCheckMessage = "Checking for releases on GitHub...";
+        UpdateHasAvailable = false;
+        AvailableUpdateInfo = null;
+        StateHasChanged();
+
+        try {
+            var result = await UpdateService.CheckForUpdatesAsync();
+            if (result.Status == UpdateStatus.UpdateAvailable && result.UpdateInfo != null) {
+                UpdateHasAvailable = true;
+                AvailableUpdateInfo = result.UpdateInfo;
+                UpdateCheckMessage = $"Update available: v{result.UpdateInfo.LatestVersion}";
+            } else if (result.Status == UpdateStatus.UpToDate) {
+                UpdateCheckMessage = $"Scrim is up to date (v{CurrentVersion}).";
+            } else {
+                UpdateCheckMessage = $"Update check status: {result.ErrorMessage ?? "Up to date"}";
+            }
+        } catch (Exception ex) {
+            UpdateCheckMessage = $"Error checking updates: {ex.Message}";
+        } finally {
+            IsCheckingUpdates = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OneClickSetupAudio() {
+        AudioStatusMessage = "Checking driver status...";
+        StateHasChanged();
+        var result = await VirtualDeviceService.InstallVirtualCableAsync();
+        AudioStatusMessage = result.Message;
+        StateHasChanged();
+    }
+
+    private void RestoreSpeakerOutput() {
+        var defaultId = VirtualDeviceService.GetDefaultPlaybackDeviceId();
+        if (!string.IsNullOrEmpty(defaultId)) {
+            VirtualDeviceService.SetDefaultPlaybackDevice(defaultId);
+            AudioStatusMessage = "Restored Windows default playback output.";
+        } else {
+            AudioStatusMessage = "No playback device found.";
+        }
+    }
+
+    private void OpenWindowsSoundMixer() {
+        VirtualDeviceService.OpenAppVolumeSettings();
+    }
+
+    private void RefreshLogs() {
+        try {
+            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var logFile = Path.Combine(userProfile, ".scrim", "crash.log");
+            if (File.Exists(logFile)) {
+                var text = File.ReadAllText(logFile);
+                LogContent = string.IsNullOrWhiteSpace(text) ? "No crash events logged." : text;
+            } else {
+                LogContent = "No crash log file found. System healthy.";
+            }
+        } catch (Exception ex) {
+            LogContent = $"Error reading log: {ex.Message}";
+        }
+    }
+
+    private void ClearLogs() {
+        try {
+            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var logFile = Path.Combine(userProfile, ".scrim", "crash.log");
+            if (File.Exists(logFile)) {
+                File.Delete(logFile);
+            }
+            LogContent = "Logs cleared.";
+        } catch (Exception ex) {
+            LogContent = $"Error clearing log: {ex.Message}";
+        }
+    }
+}

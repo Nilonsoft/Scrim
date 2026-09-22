@@ -477,5 +477,108 @@ namespace Scrim.Tests {
             Assert.Equal("#0b0d11", gothVars["--card-bg"]);
             Assert.Equal("#e11d48", gothVars["--accent-blue"]);
         }
+
+        [Fact]
+        public void GreenRoomChat_DirectMethods_StoreAndCapMessages() {
+            var hub = new BroadcastHub();
+            var metaMock = new Mock<IMetadataService>();
+            metaMock.Setup(m => m.CurrentMetadata).Returns(new MediaMetadata());
+            var profileManagerMock = new Mock<IProfileManager>();
+            profileManagerMock.Setup(p => p.CurrentProfile).Returns(new ScrimProfile());
+            var networkMock = new Mock<INetworkDiscoveryService>();
+            var requestController = new SongRequestController();
+            var chatService = new LiveChatService();
+            var themeService = new ThemeService();
+
+            var server = new HttpStreamServer(hub, metaMock.Object, requestController, profileManagerMock.Object, networkMock.Object, themeService, chatService);
+
+            ChatMessage? receivedMsg = null;
+            server.GreenRoomMessagePosted += msg => receivedMsg = msg;
+
+            server.PostGreenRoomMessage("Host", "Testing 123", isHost: true, color: "#a855f7");
+
+            Assert.NotNull(receivedMsg);
+            Assert.Equal("Host", receivedMsg.Sender);
+            Assert.Equal("Testing 123", receivedMsg.Text);
+            Assert.True(receivedMsg.IsHost);
+            Assert.Equal("#a855f7", receivedMsg.Color);
+
+            var messages = server.GetGreenRoomMessages();
+            Assert.Single(messages);
+            Assert.Equal("Testing 123", messages[0].Text);
+
+            // Verify cap at 50 messages
+            for (int i = 0; i < 60; i++) {
+                server.PostGreenRoomMessage("DJ Guest", $"Note {i}", isHost: false);
+            }
+
+            var cappedMessages = server.GetGreenRoomMessages();
+            Assert.Equal(50, cappedMessages.Count);
+            Assert.Equal("Note 59", cappedMessages[^1].Text);
+        }
+
+        [Fact]
+        public async Task GreenRoomChat_HttpEndpoints_GetAndPost() {
+            int testPort = 19392;
+            var hub = new BroadcastHub();
+            var metaMock = new Mock<IMetadataService>();
+            metaMock.Setup(m => m.CurrentMetadata).Returns(new MediaMetadata());
+
+            var profileManagerMock = new Mock<IProfileManager>();
+            var profile = new ScrimProfile {
+                Port = testPort,
+                EnableNetworkAccess = false,
+                EnableChat = true,
+                DefaultVisualizerMode = "wave",
+                VisualizerReactors = new System.Collections.Generic.List<VisualizerReactorConfig> {
+                    new VisualizerReactorConfig { Id = "bars", Label = "Bars", Emoji = "📊", BaseMode = "bars", IsEnabled = true, IsDefault = false, IsBuiltin = true },
+                    new VisualizerReactorConfig { Id = "wave", Label = "Wave", Emoji = "📈", BaseMode = "wave", IsEnabled = true, IsDefault = true, IsBuiltin = true },
+                    new VisualizerReactorConfig { Id = "custom_neon", Label = "Neon Glow", Emoji = "🌟", BaseMode = "spectrum", IsEnabled = true, IsDefault = false, IsBuiltin = false }
+                }
+            };
+            profileManagerMock.Setup(p => p.CurrentProfile).Returns(profile);
+
+            var networkMock = new Mock<INetworkDiscoveryService>();
+            var requestController = new SongRequestController();
+            var chatService = new LiveChatService();
+            var themeService = new ThemeService();
+
+            var server = new HttpStreamServer(hub, metaMock.Object, requestController, profileManagerMock.Object, networkMock.Object, themeService, chatService);
+
+            try {
+                server.Start(testPort);
+                using var client = new HttpClient();
+
+                // 1. Check Branding returns visualizer reactors and defaultVisualizerMode
+                var brandingRes = await client.GetAsync($"http://localhost:{testPort}/api/branding");
+                Assert.Equal(HttpStatusCode.OK, brandingRes.StatusCode);
+                string brandingJson = await brandingRes.Content.ReadAsStringAsync();
+                Assert.Contains("\"defaultVisualizerMode\":\"wave\"", brandingJson);
+                Assert.Contains("\"custom_neon\"", brandingJson);
+                Assert.Contains("\"Neon Glow\"", brandingJson);
+
+                // 2. GET /api/greenroom/chat initially empty
+                var getRes = await client.GetAsync($"http://localhost:{testPort}/api/greenroom/chat");
+                Assert.Equal(HttpStatusCode.OK, getRes.StatusCode);
+                string getJson = await getRes.Content.ReadAsStringAsync();
+                Assert.Contains("\"messages\":[]", getJson);
+
+                // 3. POST to /api/greenroom/chat
+                var postContent = new StringContent("{\"sender\":\"DJ Alex\",\"text\":\"Track 2 BPM 128 in A Minor ready\",\"color\":\"#10b981\"}", System.Text.Encoding.UTF8, "application/json");
+                var postRes = await client.PostAsync($"http://localhost:{testPort}/api/greenroom/chat", postContent);
+                Assert.Equal(HttpStatusCode.OK, postRes.StatusCode);
+
+                // 4. GET /api/greenroom/chat contains posted message
+                var getRes2 = await client.GetAsync($"http://localhost:{testPort}/api/greenroom/chat");
+                Assert.Equal(HttpStatusCode.OK, getRes2.StatusCode);
+                string getJson2 = await getRes2.Content.ReadAsStringAsync();
+                Assert.Contains("DJ Alex", getJson2);
+                Assert.Contains("Track 2 BPM 128 in A Minor ready", getJson2);
+                Assert.Contains("#10b981", getJson2);
+            } finally {
+                server.Stop();
+            }
+        }
     }
 }
+

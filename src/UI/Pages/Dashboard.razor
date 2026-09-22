@@ -36,6 +36,13 @@
 @inject EventSchedulerService SchedulerService
 @inject DeadAirRecoveryService DeadAirService
 @inject LocalMusicPlayerService LocalPlayer
+@inject StreamRelayService RelayService
+
+<style>
+    :root {
+        zoom: @((ProfileManager.CurrentProfile.UiScalePercentage > 0 ? ProfileManager.CurrentProfile.UiScalePercentage / 100.0 : 1.0).ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+</style>
 
 @if (ProfileManager.CurrentProfile.SyncConsoleThemeWithWeb) {
     var activeTheme = ThemeService.GetTheme(ProfileManager.CurrentProfile.WebTheme);
@@ -77,6 +84,18 @@
             </svg>
             <span>🔌 Plugins (@PluginLoader.Plugins.Count(p => p.IsEnabled)/@PluginLoader.Plugins.Count)</span>
         </button>
+
+        <div style="display: flex; align-items: center; gap: 6px; background: #161922; border: 1px solid #282f3e; border-radius: 6px; padding: 2px 8px;">
+            <span style="font-size: 11px; color: #8b92a2; font-weight: 600;">Venue Profile:</span>
+            <select class="scrim-select" style="padding: 2px 6px; font-size: 11px; max-width: 130px; height: 24px; border: none; background: transparent; color: #00d2ff; font-weight: 700; cursor: pointer;" value="@ProfileManager.CurrentProfile.ProfileName" @onchange="OnProfileSelectChanged">
+                @foreach (var prof in AvailableProfileNames) {
+                    <option value="@prof" style="background: #161922; color: #fff;">@prof</option>
+                }
+            </select>
+            <button class="scrim-dots-btn" style="padding: 2px 4px; font-size: 12px; color: #00d2ff;" title="Profile Management (Save As, Export, Import)" @onclick="@(() => ShowProfileModal = !ShowProfileModal)">
+                📁
+            </button>
+        </div>
     </div>
 
     <!-- Center ON AIR Glowing Badge & Stream TX Indicator -->
@@ -129,8 +148,83 @@
             </svg>
             <span>Current listeners @ListenerCount</span>
         </div>
+        <button class="scrim-btn-secondary" style="padding: 4px 10px; font-size: 12px; display: flex; align-items: center; gap: 6px; cursor: pointer;" @onclick="@(() => ShowAdminSettingsModal = true)" title="Application Settings, Updates & UI Scaling">
+            <span>⚙️ Settings</span>
+        </button>
     </div>
 </header>
+
+<AdminSettingsModal @bind-IsOpen="ShowAdminSettingsModal" OnScaleChanged="OnUiScaleChanged" />
+
+<!-- Profile Management Modal -->
+@if (ShowProfileModal) {
+    <div class="scrim-modal-backdrop" @onclick="@(() => ShowProfileModal = false)">
+        <div class="scrim-modal" style="max-width: 480px; width: 90%;" @onclick:stopPropagation="true">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h3 style="margin: 0; font-size: 16px; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 8px;">
+                    📁 Stream Profiles &amp; Venues
+                </h3>
+                <button class="scrim-dots-btn" @onclick="@(() => ShowProfileModal = false)">✕</button>
+            </div>
+
+            <p style="font-size: 12px; color: #8b92a2; margin-top: 0; margin-bottom: 16px; line-height: 1.4;">
+                Profiles save all your card layouts, collapsed states, DJ mixer EQ settings, audio routing, and branding for instant switching between different venues or shows.
+            </p>
+
+            @if (!string.IsNullOrEmpty(ProfileModalMessage)) {
+                <div style="font-size: 12px; color: #00d2ff; background: rgba(0, 210, 255, 0.08); padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(0, 210, 255, 0.2); margin-bottom: 14px;">
+                    @ProfileModalMessage
+                </div>
+            }
+
+            <div style="margin-bottom: 14px;">
+                <label class="scrim-label">Active Profile: <strong style="color: #00d2ff;">@ProfileManager.CurrentProfile.ProfileName</strong></label>
+                <div style="display: flex; gap: 8px; margin-top: 6px;">
+                    <button class="scrim-btn-primary" style="flex: 1;" @onclick="QuickSaveCurrentProfile">💾 Save Current State</button>
+                    <button class="scrim-btn-secondary" @onclick="ExportCurrentProfile" title="Export profile to a .json file">↗ Export</button>
+                    <button class="scrim-btn-secondary" @onclick="ImportProfileFromFile" title="Import profile from a .json file">↙ Import</button>
+                </div>
+            </div>
+
+            <div style="border-top: 1px dashed #282f3e; padding-top: 14px; margin-bottom: 14px;">
+                <label class="scrim-label">Save As New Venue / Show Profile</label>
+                <div style="display: flex; gap: 8px; margin-top: 6px;">
+                    <input type="text" class="scrim-input" style="flex: 1;" @bind="NewProfileNameInput" placeholder="e.g. Club Night, Talk Radio" />
+                    <button class="scrim-btn-secondary" @onclick="CreateNewProfileFromCurrent" disabled="@string.IsNullOrWhiteSpace(NewProfileNameInput)">Create</button>
+                </div>
+            </div>
+
+            <div style="border-top: 1px dashed #282f3e; padding-top: 14px;">
+                <label class="scrim-label">Switch or Manage Saved Profiles</label>
+                <div style="display: flex; flex-direction: column; gap: 6px; max-height: 180px; overflow-y: auto; margin-top: 6px;">
+                    @foreach (var name in AvailableProfileNames) {
+                        <div style="display: flex; justify-content: space-between; align-items: center; background: #161922; border: 1px solid #232731; border-radius: 6px; padding: 6px 10px;">
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                @if (string.Equals(name, ProfileManager.CurrentProfile.ProfileName, StringComparison.OrdinalIgnoreCase)) {
+                                    <span style="color: #00d2ff; font-weight: 700; font-size: 12px;">✓ @name (Active)</span>
+                                } else {
+                                    <span style="color: #ccc; font-size: 12px;">@name</span>
+                                }
+                            </div>
+                            <div style="display: flex; gap: 4px;">
+                                @if (!string.Equals(name, ProfileManager.CurrentProfile.ProfileName, StringComparison.OrdinalIgnoreCase)) {
+                                    <button class="scrim-btn-secondary" style="font-size: 11px; padding: 2px 8px;" @onclick="@(() => SwitchToProfile(name))">Switch</button>
+                                }
+                                @if (!string.Equals(name, "Default", StringComparison.OrdinalIgnoreCase)) {
+                                    <button class="scrim-dots-btn" style="color: #ef4444; font-size: 12px; padding: 2px 6px;" title="Delete Profile" @onclick="@(() => DeleteCustomProfile(name))">🗑</button>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; margin-top: 16px; border-top: 1px solid #232731; padding-top: 12px;">
+                <button class="scrim-btn-secondary" @onclick="@(() => ShowProfileModal = false)">Close</button>
+            </div>
+        </div>
+    </div>
+}
 
 <!-- Share Broadcast Modal -->
 @if (ShowShareModal) {
@@ -530,7 +624,7 @@
     <!-- LEFT COLUMN -->
     <div class="scrim-column" id="col-left">
         @foreach (var cardId in LeftColumn) {
-            <div class="scrim-draggable-item" @key="cardId" id="@cardId">
+            <div class="scrim-draggable-item @(IsCardCollapsed(cardId) ? "is-collapsed" : "")" @key="cardId" id="@cardId">
                 @RenderCard(cardId)
             </div>
         }
@@ -540,7 +634,7 @@
     <!-- CENTER COLUMN -->
     <div class="scrim-column" id="col-center">
         @foreach (var cardId in CenterColumn) {
-            <div class="scrim-draggable-item" @key="cardId" id="@cardId">
+            <div class="scrim-draggable-item @(IsCardCollapsed(cardId) ? "is-collapsed" : "")" @key="cardId" id="@cardId">
                 @RenderCard(cardId)
             </div>
         }
@@ -550,7 +644,7 @@
     <!-- RIGHT COLUMN -->
     <div class="scrim-column" id="col-right">
         @foreach (var cardId in RightColumn) {
-            <div class="scrim-draggable-item" @key="cardId" id="@cardId">
+            <div class="scrim-draggable-item @(IsCardCollapsed(cardId) ? "is-collapsed" : "")" @key="cardId" id="@cardId">
                 @RenderCard(cardId)
             </div>
         }
@@ -563,6 +657,18 @@
     private List<string> LeftColumn = new();
     private List<string> CenterColumn = new();
     private List<string> RightColumn = new();
+    private HashSet<string> CollapsedCards = new();
+
+    private bool IsCardCollapsed(string cardId) => CollapsedCards.Contains(cardId);
+
+    private void ToggleCardCollapsed(string cardId) {
+        if (!CollapsedCards.Add(cardId)) {
+            CollapsedCards.Remove(cardId);
+        }
+        ProfileManager.CurrentProfile.CollapsedCards = CollapsedCards.ToList();
+        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        StateHasChanged();
+    }
 
     private readonly Dictionary<string, string> AllAvailableCards = new() {
         { "card-audio-routing", "Audio Routing" },
@@ -595,12 +701,115 @@
         { "card-multi-encoder", "Multi-Encoder & Relay Rack" },
         { "card-listener-inspector", "Live Listener Connections & IP Inspector" },
         { "card-silence-recovery", "Dead-Air Auto-Recovery & Alarm" },
-        { "card-rotation-rules", "Music Rotation Rules & Category Bins" }
+        { "card-rotation-rules", "Music Rotation Rules & Category Bins" },
+        { "card-stream-relay", "Stream Relaying & Multi-DJ Party Hub" }
     };
 
     private bool ShowAddCardMenu = false;
     private bool ShowShareModal = false;
     private bool ShowPluginsModal = false;
+    private bool ShowAdminSettingsModal = false;
+    private void OnUiScaleChanged(int newScale) => StateHasChanged();
+    private bool ShowProfileModal = false;
+    private string ProfileModalMessage = "";
+    private string NewProfileNameInput = "";
+    private List<string> AvailableProfileNames = new();
+
+    private void RefreshProfileList() {
+        AvailableProfileNames = ProfileManager.GetAvailableProfiles().ToList();
+    }
+
+    private void OnProfileSelectChanged(ChangeEventArgs e) {
+        string? name = e.Value?.ToString();
+        if (!string.IsNullOrEmpty(name)) {
+            SwitchToProfile(name);
+        }
+    }
+
+    private void QuickSaveCurrentProfile() {
+        SaveCardLayout();
+        ProfileModalMessage = $"Saved active state to profile '{ProfileManager.CurrentProfile.ProfileName}'!";
+        StateHasChanged();
+    }
+
+    private void CreateNewProfileFromCurrent() {
+        if (string.IsNullOrWhiteSpace(NewProfileNameInput)) return;
+        string name = NewProfileNameInput.Trim();
+        SaveCardLayout();
+        if (ProfileManager.DuplicateProfile(ProfileManager.CurrentProfile.ProfileName, name)) {
+            RefreshProfileList();
+            SwitchToProfile(name);
+            NewProfileNameInput = "";
+            ProfileModalMessage = $"Created and switched to profile '{name}'!";
+        } else {
+            ProfileModalMessage = "Failed to create profile. Name may be invalid.";
+        }
+        StateHasChanged();
+    }
+
+    private void DeleteCustomProfile(string name) {
+        if (ProfileManager.DeleteProfile(name)) {
+            RefreshProfileList();
+            if (string.Equals(ProfileManager.CurrentProfile.ProfileName, name, StringComparison.OrdinalIgnoreCase)) {
+                SwitchToProfile("Default");
+            }
+            ProfileModalMessage = $"Deleted profile '{name}'.";
+        }
+        StateHasChanged();
+    }
+
+    private void ExportCurrentProfile() {
+        try {
+            SaveCardLayout();
+            var sfd = new Microsoft.Win32.SaveFileDialog {
+                FileName = $"{ProfileManager.CurrentProfile.ProfileName}.json",
+                Filter = "Scrim Profile (*.json)|*.json|All files (*.*)|*.*",
+                Title = "Export Stream Profile"
+            };
+            if (sfd.ShowDialog() == true) {
+                ProfileManager.ExportProfile(ProfileManager.CurrentProfile.ProfileName, sfd.FileName);
+                ProfileModalMessage = $"Exported profile to {System.IO.Path.GetFileName(sfd.FileName)}!";
+            }
+        } catch (Exception ex) {
+            ProfileModalMessage = $"Export error: {ex.Message}";
+        }
+        StateHasChanged();
+    }
+
+    private void ImportProfileFromFile() {
+        try {
+            var ofd = new Microsoft.Win32.OpenFileDialog {
+                Filter = "Scrim Profile (*.json)|*.json|All files (*.*)|*.*",
+                Title = "Import Stream Profile"
+            };
+            if (ofd.ShowDialog() == true) {
+                if (ProfileManager.ImportProfile(ofd.FileName, out var importedName)) {
+                    RefreshProfileList();
+                    SwitchToProfile(importedName);
+                    ProfileModalMessage = $"Successfully imported and loaded profile '{importedName}'!";
+                } else {
+                    ProfileModalMessage = "Failed to import profile. Invalid file format.";
+                }
+            }
+        } catch (Exception ex) {
+            ProfileModalMessage = $"Import error: {ex.Message}";
+        }
+        StateHasChanged();
+    }
+
+    private void SwitchToProfile(string profileName) {
+        ProfileManager.LoadProfile(profileName);
+        var p = ProfileManager.CurrentProfile;
+        
+        if (p.LeftColumnCards?.Any() == true) LeftColumn = new List<string>(p.LeftColumnCards);
+        if (p.CenterColumnCards?.Any() == true) CenterColumn = new List<string>(p.CenterColumnCards);
+        if (p.RightColumnCards?.Any() == true) RightColumn = new List<string>(p.RightColumnCards);
+        if (p.CollapsedCards != null) CollapsedCards = new HashSet<string>(p.CollapsedCards);
+
+        SyncDjEqFromProfile();
+        _ = ReinitDragDropAsync();
+        StateHasChanged();
+    }
     private string CopiedUrlTarget = "";
     private bool IsLive = false;
     private int ListenerCount => Hub.ActiveClientCount;
@@ -676,6 +885,7 @@
     private string NewTrackDuration = "03:45";
 
     protected override void OnInitialized() {
+        RefreshProfileList();
         RefreshWindows();
         Devices = MicService.GetDevices();
         RenderDevices = ProcessLoopbackCapture.GetRenderDevices().ToList();
@@ -702,6 +912,10 @@
             RightColumn = new() { "card-encoding", "card-media-player", "card-soundboard" };
         }
 
+        if (p.CollapsedCards != null) {
+            CollapsedCards = new HashSet<string>(p.CollapsedCards);
+        }
+
         // Subscribe to live Windows system media changes
         MetadataService.MetadataChanged += OnMetadataReceived;
 
@@ -725,6 +939,12 @@
         LocalPlayer.PlaybackStateChanged += OnLocalPlaybackStateChanged;
         LocalPlayer.PositionChanged += OnLocalPositionChanged;
         LocalPlayer.PlaylistUpdated += OnLocalPlaylistUpdated;
+        RelayService.StreamsChanged += OnRelayStreamsChanged;
+        RelayService.StreamStatusUpdated += OnRelayStreamStatusUpdated;
+        RelayService.ActiveRelayDisconnected += OnActiveRelayDisconnected;
+        Mixer.RelayAudioStream = RelayService.RelayAudioStream;
+        _greenRoomMessages = StreamServer.GetGreenRoomMessages().ToList();
+        StreamServer.GreenRoomMessagePosted += OnGreenRoomMessagePosted;
 
         if (!string.IsNullOrWhiteSpace(MetadataService.CurrentMetadata.Title)) {
             CurrentTrackTitle = MetadataService.CurrentMetadata.Title;
@@ -938,6 +1158,7 @@
             MicService.StartCapture(SelectedDeviceId);
             MicService.SetVirtualOutputDevice(null);
             Mixer.LocalMusicAudioStream = LocalPlayer.MusicStream;
+            Mixer.RelayAudioStream = RelayService.RelayAudioStream;
             if (!Mixer.IsMixing) {
                 Mixer.StartMixing(Capture.AudioStream, MicService.MicrophoneStream, CancellationToken.None);
             }
@@ -1063,6 +1284,7 @@
         ProfileManager.CurrentProfile.LeftColumnCards = new List<string>(LeftColumn);
         ProfileManager.CurrentProfile.CenterColumnCards = new List<string>(CenterColumn);
         ProfileManager.CurrentProfile.RightColumnCards = new List<string>(RightColumn);
+        ProfileManager.CurrentProfile.CollapsedCards = CollapsedCards.ToList();
         ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
         StateHasChanged();
     }
@@ -1161,6 +1383,7 @@
             MicService.StartCapture(SelectedDeviceId);
             MicService.SetVirtualOutputDevice(null);
             Mixer.LocalMusicAudioStream = LocalPlayer.MusicStream;
+            Mixer.RelayAudioStream = RelayService.RelayAudioStream;
             Mixer.StartMixing(Capture.AudioStream, MicService.MicrophoneStream, token);
 
             var format = Enum.TryParse<AudioFormat>(ProfileManager.CurrentProfile.AudioFormat, true, out var parsed) 
@@ -2101,6 +2324,10 @@
         LocalPlayer.PlaybackStateChanged -= OnLocalPlaybackStateChanged;
         LocalPlayer.PositionChanged -= OnLocalPositionChanged;
         LocalPlayer.PlaylistUpdated -= OnLocalPlaylistUpdated;
+        RelayService.StreamsChanged -= OnRelayStreamsChanged;
+        RelayService.StreamStatusUpdated -= OnRelayStreamStatusUpdated;
+        RelayService.ActiveRelayDisconnected -= OnActiveRelayDisconnected;
+        StreamServer.GreenRoomMessagePosted -= OnGreenRoomMessagePosted;
         _dotNetRef?.Dispose();
         _refreshTimer?.Dispose();
         _vuTimer?.Dispose();
@@ -2122,6 +2349,7 @@
                     </svg>
                     DJ Live Polls & Track Battles
                 </h3>
+                <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                 <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
             </div>
 
@@ -2176,6 +2404,7 @@
                             <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
                         </svg>
                     </button>
+                    <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                     <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
                 </div>
             </div>
@@ -2335,6 +2564,7 @@
                     </span>
                 </div>
                 <div style="display: flex; align-items: center; gap: 6px;">
+                    <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                     <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
                 </div>
             </div>
@@ -2529,6 +2759,7 @@
         "card-vu-talk" => @<div class="scrim-card">
             <div class="scrim-card-header scrim-drag-handle">
                 <h3 class="scrim-card-title">Master Broadcast & VU</h3>
+                <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                 <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
             </div>
 
@@ -2689,6 +2920,7 @@
         "card-voice-fx" => @<div class="scrim-card">
             <div class="scrim-card-header scrim-drag-handle">
                 <h3 class="scrim-card-title">Phone-In Line</h3>
+                <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                 <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
             </div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
@@ -2727,6 +2959,7 @@
                             🗑️ Clear All
                         </button>
                     }
+                    <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                     <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
                 </div>
             </div>
@@ -2782,6 +3015,7 @@
         "card-encoding" => @<div class="scrim-card">
             <div class="scrim-card-header scrim-drag-handle">
                 <h3 class="scrim-card-title">Encoding</h3>
+                <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                 <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
             </div>
 
@@ -2869,6 +3103,7 @@
                     Media Player
                 </h3>
                 <div style="display: flex; align-items: center; gap: 6px;">
+                    <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                     <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
                 </div>
             </div>
@@ -3028,6 +3263,7 @@
                     <h3 class="scrim-card-title">Soundboard</h3>
                     <div style="font-size: 10px; color: #00d2ff; margin-top: 1px; font-weight: 500;">⚡ Broadcasts Live to Stream & DJ Headphones</div>
                 </div>
+                <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                 <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
             </div>
             <div class="soundboard-grid">
@@ -3065,6 +3301,7 @@
                     </svg>
                     Website Branding & Links
                 </h3>
+                <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                 <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
             </div>
 
@@ -3186,6 +3423,56 @@
                 }
             </div>
 
+            <!-- Audio Visualizer Reaction Modes ("Reactors") -->
+            <div style="margin-bottom: 14px; background: #12141a; border: 1px solid #232731; border-radius: 8px; padding: 12px 14px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <div>
+                        <div style="font-size: 12px; font-weight: 600; color: #fff;">Audio Visualizer Reaction Modes ("Reactors")</div>
+                        <div style="font-size: 11px; color: #64748b;">Configure which visualizer modes are visible to web listeners and set default startup mode</div>
+                    </div>
+                </div>
+
+                <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 8px;">
+                    @foreach (var reactor in ProfileManager.CurrentProfile.VisualizerReactors) {
+                        <div style="display: flex; justify-content: space-between; align-items: center; background: #161922; border: 1px solid #282f3e; border-radius: 6px; padding: 6px 10px;">
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <input type="checkbox" checked="@reactor.IsEnabled" @onchange="@(() => ToggleReactorEnabled(reactor))" title="Show or hide this mode from web listeners" style="accent-color: #00d2ff; cursor: pointer;" />
+                                <span style="font-size: 13px;">@reactor.Emoji</span>
+                                <span style="font-size: 12px; font-weight: 600; color: @(reactor.IsEnabled ? "#fff" : "#64748b");">@reactor.Label</span>
+                                <span style="font-size: 10px; color: #64748b; background: #0e1117; padding: 1px 5px; border-radius: 4px;">@reactor.BaseMode</span>
+                                @if (reactor.IsBuiltin) {
+                                    <span style="font-size: 9px; color: #8b5cf6; background: rgba(139, 92, 246, 0.15); padding: 1px 4px; border-radius: 3px;">BUILT-IN</span>
+                                }
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <button class="pill-option @(reactor.IsDefault ? "active" : "")" style="padding: 2px 8px; font-size: 10px; @(reactor.IsDefault ? "background: #00d2ff; color: #000; font-weight: 700;" : "")" @onclick="@(() => SetDefaultReactor(reactor.Id))" title="Set as default startup visualizer mode">
+                                    @(reactor.IsDefault ? "★ Default" : "Set Default")
+                                </button>
+                                @if (!reactor.IsBuiltin) {
+                                    <button class="scrim-dots-btn" style="color: #ef4444; font-size: 12px; padding: 2px 6px;" title="Delete Custom Reactor" @onclick="@(() => DeleteCustomReactor(reactor))">✕</button>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                <!-- Add Custom Reactor -->
+                <div style="margin-top: 10px; border-top: 1px dashed #282f3e; padding-top: 8px;">
+                    <div style="font-size: 11px; font-weight: 600; color: #94a3b8; margin-bottom: 6px;">+ Add Custom Reactor Preset</div>
+                    <div style="display: grid; grid-template-columns: 42px 1fr 1fr auto; gap: 6px; align-items: center;">
+                        <input type="text" class="scrim-input" style="padding: 4px; text-align: center; font-size: 12px;" @bind="_newReactorEmoji" placeholder="Emoji" title="Emoji icon" />
+                        <input type="text" class="scrim-input" style="padding: 4px 8px; font-size: 11px;" @bind="_newReactorLabel" placeholder="Label (e.g. Neon Wave)" />
+                        <select class="scrim-select" style="padding: 4px 6px; font-size: 11px;" @bind="_newReactorBase">
+                            <option value="bars">Bars</option>
+                            <option value="wave">Wave</option>
+                            <option value="spectrum">Spectrum</option>
+                            <option value="pulse">Pulse</option>
+                        </select>
+                        <button class="scrim-btn-secondary" style="padding: 4px 10px; font-size: 11px;" @onclick="AddCustomReactor" disabled="@string.IsNullOrWhiteSpace(_newReactorLabel)">Add</button>
+                    </div>
+                </div>
+            </div>
+
             <!-- Recently Played Song History Configuration -->
             <div style="margin-bottom: 14px; background: #12141a; border: 1px solid #232731; border-radius: 8px; padding: 12px 14px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
@@ -3247,6 +3534,7 @@
                     </svg>
                     Network & Internet Broadcasting
                 </h3>
+                <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                 <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
             </div>
 
@@ -3506,6 +3794,7 @@
                 </h3>
                 <div style="display: flex; align-items: center; gap: 6px;">
                     <button class="pill-option" style="padding: 2px 8px; font-size: 10px; color: #f43f5e;" @onclick="ClearChat" title="Clear all chat history">🗑️ Clear</button>
+                    <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                     <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
                 </div>
             </div>
@@ -3711,6 +4000,7 @@
                             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
                         </svg>
                     </button>
+                    <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                     <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
                 </div>
             </div>
@@ -3770,6 +4060,7 @@
                 <div style="display: flex; align-items: center; gap: 6px;">
                     <button class="scrim-dots-btn" @onclick="CopyLyricsObsPath" title="Copy OBS Text File Path">📋</button>
                     <button class="scrim-dots-btn" @onclick="OpenObsFolder" title="Open OBS Folder">📁</button>
+                    <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                     <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
                 </div>
             </div>
@@ -3801,6 +4092,7 @@
                     <h3 class="scrim-card-title" style="margin: 0;">Twitch Chat Bot</h3>
                     <span style="font-size: 10px; padding: 1px 6px; border-radius: 6px; background: rgba(168, 85, 247, 0.15); color: #c084fc; font-weight: 600;">IRC</span>
                 </div>
+                <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                 <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
             </div>
 
@@ -3843,6 +4135,7 @@
                     <h3 class="scrim-card-title" style="margin: 0;">Discord Notifier</h3>
                     <span style="font-size: 10px; padding: 1px 6px; border-radius: 6px; background: rgba(99, 102, 241, 0.15); color: #818cf8; font-weight: 600;">Webhook</span>
                 </div>
+                <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                 <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
             </div>
 
@@ -3885,6 +4178,7 @@
                     <h3 class="scrim-card-title" style="margin: 0;">Last.fm Scrobbler</h3>
                     <span style="font-size: 10px; padding: 1px 6px; border-radius: 6px; background: rgba(239, 68, 68, 0.15); color: #f87171; font-weight: 600;">Scrobble</span>
                 </div>
+                <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                 <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
             </div>
 
@@ -3919,6 +4213,7 @@
                 </div>
                 <div style="display: flex; align-items: center; gap: 6px;">
                     <button class="scrim-dots-btn" @onclick="CopyObsOverlayUrl" title="Copy Browser Source URL">📋</button>
+                    <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                     <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
                 </div>
             </div>
@@ -3960,6 +4255,7 @@
                     <h3 class="scrim-card-title" style="margin: 0;">Jingles & Sweepers</h3>
                     <span style="font-size: 10px; padding: 1px 6px; border-radius: 6px; background: rgba(245, 158, 11, 0.15); color: #fbbf24; font-weight: 600;">Audio</span>
                 </div>
+                <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                 <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
             </div>
 
@@ -4000,6 +4296,7 @@
                     <h3 class="scrim-card-title" style="margin: 0;">MIDI Controller</h3>
                     <span style="font-size: 10px; padding: 1px 6px; border-radius: 6px; background: rgba(16, 185, 129, 0.15); color: #34d399; font-weight: 600;">USB MIDI</span>
                 </div>
+                <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                 <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
             </div>
 
@@ -4039,6 +4336,7 @@
                     <h3 class="scrim-card-title" style="margin: 0;">Stream Archiver</h3>
                     <span style="font-size: 10px; padding: 1px 6px; border-radius: 6px; background: rgba(59, 130, 246, 0.15); color: #60a5fa; font-weight: 600;">Record</span>
                 </div>
+                <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                 <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
             </div>
 
@@ -4075,6 +4373,7 @@
                 <div style="display: flex; align-items: center; gap: 6px;">
                     <button class="scrim-dots-btn" @onclick="ExportTrackLogCsv" title="Export CSV History">📥</button>
                     <button class="scrim-dots-btn" @onclick="ClearTrackLog" title="Clear History">🗑️</button>
+                    <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                     <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
                 </div>
             </div>
@@ -4109,6 +4408,7 @@
                     <h3 class="scrim-card-title" style="margin: 0;">Stream Deck Companion</h3>
                     <span style="font-size: 10px; padding: 1px 6px; border-radius: 6px; background: rgba(139, 92, 246, 0.15); color: #c084fc; font-weight: 600;">WS :@_streamDeckConfig.Port</span>
                 </div>
+                <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                 <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
             </div>
 
@@ -4139,6 +4439,7 @@
                 <div style="display: flex; align-items: center; gap: 6px;">
                     <button class="pill-option @(Mixer.DjEq.Is10BandMode ? "" : "active")" style="padding: 2px 8px; font-size: 10px;" @onclick="@(() => SetDjEqMode(false))">3-Band</button>
                     <button class="pill-option @(Mixer.DjEq.Is10BandMode ? "active" : "")" style="padding: 2px 8px; font-size: 10px;" @onclick="@(() => SetDjEqMode(true))">10-Band</button>
+                    <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                     <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
                 </div>
             </div>
@@ -4455,6 +4756,7 @@
                     </svg>
                     Dual Decks & Crossfader
                 </h3>
+                <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                 <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
             </div>
 
@@ -4562,6 +4864,7 @@
                     </svg>
                     Automated Show Clock & Scheduler
                 </h3>
+                <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                 <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
             </div>
 
@@ -4638,6 +4941,7 @@
                     </svg>
                     Voice-Tracking Transition Recorder
                 </h3>
+                <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                 <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
             </div>
 
@@ -4705,6 +5009,7 @@
                     </svg>
                     Multi-Encoder & Relay Rack
                 </h3>
+                <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                 <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
             </div>
 
@@ -4794,6 +5099,7 @@
                     </svg>
                     Live Listener Connections & IP Inspector
                 </h3>
+                <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                 <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
             </div>
 
@@ -4862,6 +5168,7 @@
                     </svg>
                     Dead-Air Auto-Recovery & Alarm
                 </h3>
+                <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                 <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
             </div>
 
@@ -4931,6 +5238,7 @@
                     </svg>
                     Music Rotation Rules & Category Bins
                 </h3>
+                <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                 <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
             </div>
 
@@ -4974,6 +5282,219 @@
             </button>
         </div>,
 
+        "card-stream-relay" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <h3 class="scrim-card-title">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;">
+                        <circle cx="12" cy="12" r="2"></circle>
+                        <path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"></path>
+                    </svg>
+                    Stream Relaying & Multi-DJ Party Hub
+                </h3>
+                <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
+                <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
+            </div>
+
+            <div style="font-size: 10px; color: #94a3b8; margin-bottom: 10px;">
+                Relay remote sister stations, party co-hosts, or guest DJs. Scrim broadcasts auto-detect DJ name, bio & avatar.
+            </div>
+
+            @if (!string.IsNullOrEmpty(_relayAlertMessage)) {
+                <div style="background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; border-radius: 6px; padding: 6px 10px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #fca5a5;">
+                    <span>@_relayAlertMessage</span>
+                    <button style="background: none; border: none; color: #fca5a5; cursor: pointer; font-size: 12px; font-weight: bold;" @onclick="@(() => _relayAlertMessage = "")">✕</button>
+                </div>
+            }
+
+            <!-- Party Hub Quick Controls: B2B Crossfade & Green Room Talkback -->
+            <div style="background: #0d121c; border: 1px solid #1a2336; border-radius: 8px; padding: 10px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                    <span style="font-size: 11px; font-weight: 700; color: #00d2ff; display: flex; align-items: center; gap: 6px;">
+                        <span>🎛️ B2B Stage & Intercom</span>
+                    </span>
+                    <button class="pill-option @(Mixer.TalkbackActive ? "active" : "")"
+                            style="padding: 3px 10px; font-size: 10px; font-weight: 700; @(Mixer.TalkbackActive ? "background: #8b5cf6; border-color: #8b5cf6; color: white;" : "color: #a78bfa; border-color: rgba(139, 92, 246, 0.4);")"
+                            title="When active, host microphone is muted from the master broadcast so you can talk to guest DJs privately"
+                            @onclick="@(() => Mixer.TalkbackActive = !Mixer.TalkbackActive)">
+                        🎙️ @(Mixer.TalkbackActive ? "TALKBACK ACTIVE (OFF-AIR)" : "TALKBACK (GREEN ROOM)")
+                    </button>
+                </div>
+                <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+                    <span style="font-size: 10px; color: #94a3b8; font-weight: 600;">Automated Crossfade:</span>
+                    <button class="pill-option" style="padding: 3px 8px; font-size: 10px; background: rgba(0, 210, 255, 0.15); border-color: #00d2ff; color: #00d2ff; font-weight: 700;"
+                            title="Smoothly fade host app volume down and fade guest stream up over 8 seconds"
+                            @onclick="@(() => Mixer.StartB2bCrossfade(1.0f, 0.0f, 8000))">
+                        ⚡ Hand-Off to Guest (8s)
+                    </button>
+                    <button class="pill-option" style="padding: 3px 8px; font-size: 10px; background: rgba(16, 185, 129, 0.15); border-color: #10b981; color: #10b981; font-weight: 700;"
+                            title="Smoothly fade guest stream down and fade host volume back up over 8 seconds"
+                            @onclick="@(() => Mixer.StartB2bCrossfade(0.0f, 1.0f, 8000))">
+                        ⚡ Take Back Decks (8s)
+                    </button>
+                    <span style="font-size: 9px; color: #64748b; margin-left: auto;">
+                        Host: @((int)(Mixer.AppVolume * 100))% | Guest: @((int)(Mixer.RelayVolume * 100))%
+                    </span>
+                </div>
+            </div>
+
+            <!-- Backstage DJ & Green Room Private Chat (Private to Hosts & Guest DJs) -->
+            <div style="background: #0d121c; border: 1px solid #1a2336; border-radius: 8px; padding: 10px; margin-bottom: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <span style="font-size: 11px; font-weight: 700; color: #a855f7; display: flex; align-items: center; gap: 6px;">
+                        <span>💬 Backstage DJ &amp; Green Room Chat</span>
+                    </span>
+                    <span style="font-size: 9px; font-weight: 700; color: #a855f7; background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.3); padding: 1px 6px; border-radius: 4px;">
+                        PRIVATE / DJS ONLY
+                    </span>
+                </div>
+
+                <div style="background: #080a10; border: 1px solid #151a24; border-radius: 6px; height: 120px; overflow-y: auto; padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px;">
+                    @if (_greenRoomMessages.Count == 0) {
+                        <div style="color: #64748b; font-size: 10px; text-align: center; padding-top: 36px; font-style: italic;">
+                            No backstage messages yet. Send private cues, BPM notes, or hand-off timings to co-hosts.
+                        </div>
+                    } else {
+                        @foreach (var msg in _greenRoomMessages) {
+                            <div style="font-size: 11px; line-height: 1.35; display: flex; gap: 6px; align-items: baseline;">
+                                <span style="font-size: 9px; color: #64748b; font-family: monospace;">@msg.Timestamp.ToLocalTime().ToString("HH:mm")</span>
+                                <span style="font-weight: 700; color: @(msg.IsHost ? "#a855f7" : (string.IsNullOrWhiteSpace(msg.Color) ? "#00d2ff" : msg.Color));">@msg.Sender:</span>
+                                <span style="color: #e2e8f0; word-break: break-word;">@msg.Text</span>
+                            </div>
+                        }
+                    }
+                </div>
+
+                <div style="display: flex; gap: 6px;">
+                    <input type="text" class="scrim-input" style="font-size: 11px; flex: 1;" placeholder="Private note to DJs... (Enter to send)"
+                           @bind="_newGreenRoomChatText" @bind:event="oninput" @onkeydown="@(async (KeyboardEventArgs e) => { if (e.Key == "Enter") SendGreenRoomMessage(); })" />
+                    <button class="scrim-btn-primary" style="font-size: 11px; padding: 4px 12px; background: #8b5cf6; border-color: #8b5cf6;"
+                            @onclick="SendGreenRoomMessage" disabled="@string.IsNullOrWhiteSpace(_newGreenRoomChatText)">
+                        Send 💬
+                    </button>
+                </div>
+            </div>
+
+            <!-- Existing Streams List -->
+            <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px;">
+                @if (RelayService.Streams.Count == 0) {
+                    <div style="text-align: center; padding: 14px 8px; background: #0c0f16; border: 1px dashed #202738; border-radius: 8px; font-size: 11px; color: #64748b;">
+                        No remote streams configured. Add a stream below to start relaying.
+                    </div>
+                }
+                @foreach (var stream in RelayService.Streams) {
+                    <div style="background: #10141e; border: 1px solid @(stream.IsConnected ? "rgba(0, 210, 255, 0.4)" : "#1e2638"); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                @if (stream.IsScrimOrigin && !string.IsNullOrWhiteSpace(stream.EffectiveAvatarUrl)) {
+                                    <img src="@stream.EffectiveAvatarUrl" alt="DJ Avatar" style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover; border: 1px solid #00d2ff;" />
+                                } else {
+                                    <div style="width: 24px; height: 24px; border-radius: 50%; background: #1a2234; display: flex; align-items: center; justify-content: center; font-size: 11px;">📻</div>
+                                }
+                                <div>
+                                    <div style="font-size: 12px; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 6px;">
+                                        @stream.EffectiveDjName
+                                        @if (stream.IsScrimOrigin) {
+                                            <span style="font-size: 8px; font-weight: 800; color: #00d2ff; background: rgba(0, 210, 255, 0.15); padding: 1px 5px; border-radius: 3px;">SCRIM PEER</span>
+                                        }
+                                        <span style="font-size: 8px; font-weight: 700; padding: 1px 5px; border-radius: 3px; color: @(stream.HealthStatus == "EXCELLENT" ? "#10b981" : (stream.HealthStatus == "GOOD" ? "#00d2ff" : (stream.HealthStatus == "BUFFERING" ? "#f59e0b" : "#ef4444"))); background: rgba(255,255,255,0.06);">
+                                            @stream.HealthStatus @(stream.IsConnected && stream.BufferLatencySec > 0 ? $"({stream.BufferLatencySec:F1}s buffer)" : "")
+                                        </span>
+                                    </div>
+                                    <div style="font-size: 10px; color: #64748b; font-family: monospace; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                        @stream.StreamUrl
+                                    </div>
+                                </div>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <button class="pill-option @(stream.IsCueActive ? "active" : "")" style="padding: 3px 8px; font-size: 9px; @(stream.IsCueActive ? "background: #f59e0b; border-color: #f59e0b; color: black; font-weight: 700;" : "")"
+                                        title="Pre-Fade Listen headphone cueing"
+                                        @onclick="@(() => RelayService.ToggleCue(stream.Id))">
+                                    🎧 @(stream.IsCueActive ? "CUE ON" : "CUE")
+                                </button>
+                                <span style="font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; color: @(stream.IsConnected ? "#10b981" : (stream.IsEnabled ? "#f59e0b" : "#64748b")); background: @(stream.IsConnected ? "rgba(16, 185, 129, 0.15)" : "#161b26");">
+                                    @(stream.IsConnected ? "LIVE" : (stream.IsEnabled ? "CONNECTING..." : "OFFLINE"))
+                                </span>
+                                <button class="pill-option @(stream.IsEnabled ? "active" : "")" style="padding: 3px 8px; font-size: 9px; @(stream.IsEnabled ? "background: #10b981; border-color: #10b981; color: white;" : "")"
+                                        @onclick="@(() => RelayService.ToggleStream(stream.Id, !stream.IsEnabled))">
+                                    @(stream.IsEnabled ? "DISCONNECT" : "CONNECT")
+                                </button>
+                                <button class="scrim-dots-btn" style="color: #ef4444;" title="Delete Stream" @onclick="@(() => RelayService.RemoveStream(stream.Id))">✕</button>
+                            </div>
+                        </div>
+
+                        <!-- Remote Track Info -->
+                        @if (stream.IsConnected && !string.IsNullOrWhiteSpace(stream.CurrentTrackTitle)) {
+                            <div style="background: rgba(16, 185, 129, 0.07); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 6px; padding: 5px 8px; display: flex; justify-content: space-between; align-items: center; font-size: 10px;">
+                                <span style="color: #cbd5e1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px;">
+                                    🎵 <strong>@stream.CurrentTrackTitle</strong> @(!string.IsNullOrWhiteSpace(stream.CurrentTrackArtist) ? $"by {stream.CurrentTrackArtist}" : "")
+                                </span>
+                                <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; color: #10b981; font-weight: 600; font-size: 9px;">
+                                    <input type="checkbox" checked="@stream.PassthroughTrackMetadata" @onchange="@((ChangeEventArgs e) => RelayService.UpdateStreamSettings(stream.Id, stream.Volume, stream.IsMuted, stream.FadeInSeconds, stream.CustomAvatarUrl, stream.PassthroughDjBranding, (bool)(e.Value ?? true)))" style="accent-color: #10b981;" />
+                                    Track Passthrough
+                                </label>
+                            </div>
+                        }
+
+                        <!-- Scrim Passthrough DJ Info Banner -->
+                        @if (stream.IsScrimOrigin) {
+                            <div style="background: rgba(0, 210, 255, 0.06); border: 1px solid rgba(0, 210, 255, 0.2); border-radius: 6px; padding: 6px 8px; display: flex; justify-content: space-between; align-items: center; font-size: 10px;">
+                                <span style="color: #94a3b8;">Display <strong>@stream.OriginDjName</strong> to listeners</span>
+                                <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; color: #00d2ff; font-weight: 600;">
+                                    <input type="checkbox" checked="@stream.PassthroughDjBranding" @onchange="@((ChangeEventArgs e) => RelayService.UpdateStreamSettings(stream.Id, stream.Volume, stream.IsMuted, stream.FadeInSeconds, stream.CustomAvatarUrl, (bool)(e.Value ?? true), stream.PassthroughTrackMetadata))" style="accent-color: #00d2ff;" />
+                                    Web Passthrough
+                                </label>
+                            </div>
+                        }
+
+                        <!-- Controls: Volume, Fade-In, Mode -->
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 10px;">
+                            <div>
+                                <div style="display: flex; justify-content: space-between; color: #94a3b8; margin-bottom: 2px;">
+                                    <span>Gain / Vol: @((int)(stream.Volume * 100))%</span>
+                                    <button class="pill-option @(stream.IsMuted ? "active" : "")" style="padding: 1px 4px; font-size: 8px; @(stream.IsMuted ? "background: #ef4444; border-color: #ef4444; color: white;" : "")"
+                                            @onclick="@(() => RelayService.UpdateStreamSettings(stream.Id, stream.Volume, !stream.IsMuted, stream.FadeInSeconds, stream.CustomAvatarUrl, stream.PassthroughDjBranding, stream.PassthroughTrackMetadata))">
+                                        @(stream.IsMuted ? "MUTED" : "MUTE")
+                                    </button>
+                                </div>
+                                <input type="range" min="0" max="1.5" step="0.05" value="@stream.Volume" style="width: 100%; accent-color: #00d2ff; height: 4px;"
+                                       @oninput="@((ChangeEventArgs e) => RelayService.UpdateStreamSettings(stream.Id, Convert.ToSingle(e.Value), stream.IsMuted, stream.FadeInSeconds, stream.CustomAvatarUrl, stream.PassthroughDjBranding, stream.PassthroughTrackMetadata))" />
+                            </div>
+                            <div>
+                                <div style="display: flex; justify-content: space-between; color: #94a3b8; margin-bottom: 2px;">
+                                    <span>Fade-In Time:</span>
+                                    <span style="font-weight: 700; color: #fff;">@(stream.FadeInSeconds)s</span>
+                                </div>
+                                <input type="range" min="0" max="10" step="1" value="@stream.FadeInSeconds" style="width: 100%; accent-color: #10b981; height: 4px;"
+                                       @oninput="@((ChangeEventArgs e) => RelayService.UpdateStreamSettings(stream.Id, stream.Volume, stream.IsMuted, Convert.ToInt32(e.Value), stream.CustomAvatarUrl, stream.PassthroughDjBranding, stream.PassthroughTrackMetadata))" />
+                            </div>
+                        </div>
+
+                        @if (!string.IsNullOrEmpty(stream.StatusText) && stream.StatusText != "Standby") {
+                            <div style="font-size: 9px; color: #64748b; font-style: italic;">Status: @stream.StatusText</div>
+                        }
+                    </div>
+                }
+            </div>
+
+            <!-- Add New Stream Form -->
+            <div style="background: #090c13; border: 1px solid #161c28; border-radius: 8px; padding: 10px;">
+                <div style="font-size: 11px; font-weight: 700; color: #cbd5e1; margin-bottom: 8px;">+ Add Remote Stream / Co-Host</div>
+                <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px;">
+                    <input type="text" class="scrim-input" style="font-size: 11px;" placeholder="Stream URL (e.g. http://dj-friend:8000/stream or Icecast)" @bind="_newRelayUrl" />
+                    <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 6px;">
+                        <input type="text" class="scrim-input" style="font-size: 11px;" placeholder="DJ / Station Label (Optional)" @bind="_newRelayName" />
+                        <select class="scrim-select" style="font-size: 11px;" @bind="_newRelayMode">
+                            <option value="@RelayStreamMode.ReencodedMix">Mix Deck</option>
+                            <option value="@RelayStreamMode.RawPassthrough">Passthrough</option>
+                        </select>
+                    </div>
+                </div>
+                <button class="scrim-btn-primary" style="width: 100%; font-size: 11px;" @onclick="AddNewRelayStream" disabled="@string.IsNullOrWhiteSpace(_newRelayUrl)">
+                    Add Stream To Relay Rack
+                </button>
+            </div>
+        </div>,
+
         _ => @<div></div>
     };
 
@@ -4989,6 +5510,112 @@
     private bool _multiEncoderAacActive = true;
     private bool _multiEncoderFlacActive = false;
     private bool _externalRelayEnabled = false;
+
+    // Stream Relaying & Multi-DJ Party Hub State
+    private string _newRelayUrl = "";
+    private string _newRelayName = "";
+    private RelayStreamMode _newRelayMode = RelayStreamMode.ReencodedMix;
+    private int _newRelayFadeIn = 3;
+
+    private void AddNewRelayStream() {
+        if (!string.IsNullOrWhiteSpace(_newRelayUrl)) {
+            var cfg = new RelayStreamConfig {
+                StreamUrl = _newRelayUrl.Trim(),
+                Name = string.IsNullOrWhiteSpace(_newRelayName) ? "Remote Stream" : _newRelayName.Trim(),
+                Mode = _newRelayMode,
+                FadeInSeconds = _newRelayFadeIn,
+                IsEnabled = false
+            };
+            RelayService.AddStream(cfg);
+            _newRelayUrl = "";
+            _newRelayName = "";
+            StateHasChanged();
+        }
+    }
+
+    private void OnRelayStreamsChanged() {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void OnRelayStreamStatusUpdated(RelayStreamConfig _) {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private string _relayAlertMessage = "";
+
+    private void OnActiveRelayDisconnected(RelayStreamConfig stream) {
+        Mixer.AppVolume = 1.0f;
+        Mixer.RelayVolume = 0.0f;
+        _relayAlertMessage = $"⚠️ Remote stream '{stream.EffectiveDjName}' disconnected! Auto-fallback restored host deck audio.";
+        InvokeAsync(StateHasChanged);
+    }
+
+    // Backstage DJ / Green Room Private Chat State & Methods
+    private List<ChatMessage> _greenRoomMessages = new();
+    private string _newGreenRoomChatText = "";
+
+    private void OnGreenRoomMessagePosted(ChatMessage msg) {
+        if (!_greenRoomMessages.Any(m => m.Id == msg.Id)) {
+            _greenRoomMessages.Add(msg);
+            if (_greenRoomMessages.Count > 50) {
+                _greenRoomMessages.RemoveAt(0);
+            }
+        }
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void SendGreenRoomMessage() {
+        if (string.IsNullOrWhiteSpace(_newGreenRoomChatText)) return;
+        var hostName = string.IsNullOrWhiteSpace(ProfileManager.CurrentProfile.HostName) ? "Host (Studio)" : $"{ProfileManager.CurrentProfile.HostName} (Host)";
+        StreamServer.PostGreenRoomMessage(hostName, _newGreenRoomChatText.Trim(), isHost: true, color: "#a855f7");
+        _newGreenRoomChatText = "";
+        StateHasChanged();
+    }
+
+    // Visualizer Reaction Modes ("Reactors") State & Methods
+    private string _newReactorLabel = "";
+    private string _newReactorEmoji = "✨";
+    private string _newReactorBase = "bars";
+
+    private void ToggleReactorEnabled(VisualizerReactorConfig reactor) {
+        reactor.IsEnabled = !reactor.IsEnabled;
+        SaveBranding();
+    }
+
+    private void SetDefaultReactor(string reactorId) {
+        ProfileManager.CurrentProfile.DefaultVisualizerMode = reactorId;
+        foreach (var r in ProfileManager.CurrentProfile.VisualizerReactors) {
+            r.IsDefault = (r.Id == reactorId);
+        }
+        SaveBranding();
+    }
+
+    private void AddCustomReactor() {
+        if (string.IsNullOrWhiteSpace(_newReactorLabel)) return;
+        var id = "custom_" + Guid.NewGuid().ToString("N")[..8];
+        ProfileManager.CurrentProfile.VisualizerReactors.Add(new VisualizerReactorConfig {
+            Id = id,
+            Label = _newReactorLabel.Trim(),
+            Emoji = string.IsNullOrWhiteSpace(_newReactorEmoji) ? "🎵" : _newReactorEmoji.Trim(),
+            BaseMode = _newReactorBase,
+            IsEnabled = true,
+            IsDefault = false,
+            IsBuiltin = false
+        });
+        _newReactorLabel = "";
+        SaveBranding();
+    }
+
+    private void DeleteCustomReactor(VisualizerReactorConfig reactor) {
+        if (reactor.IsBuiltin) return;
+        ProfileManager.CurrentProfile.VisualizerReactors.Remove(reactor);
+        if (ProfileManager.CurrentProfile.DefaultVisualizerMode == reactor.Id) {
+            ProfileManager.CurrentProfile.DefaultVisualizerMode = "bars";
+            var bars = ProfileManager.CurrentProfile.VisualizerReactors.FirstOrDefault(r => r.Id == "bars");
+            if (bars != null) bars.IsDefault = true;
+        }
+        SaveBranding();
+    }
     private string _relayHost = "stream.example.com";
     private int _relayPort = 8000;
     private string _relayMount = "/live";

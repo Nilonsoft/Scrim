@@ -233,6 +233,42 @@ body {
     background: #272b34;
 }
 
+.scrim-collapse-btn {
+    background: transparent;
+    border: none;
+    color: #8b92a2;
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    padding: 2px 7px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s ease, background 0.15s ease;
+}
+
+.scrim-collapse-btn:hover {
+    color: #ffffff;
+    background: #272b34;
+}
+
+.scrim-card.is-collapsed,
+.scrim-draggable-item.is-collapsed .scrim-card {
+    padding: 10px 18px;
+}
+
+.scrim-card.is-collapsed .scrim-card-header,
+.scrim-draggable-item.is-collapsed .scrim-card .scrim-card-header {
+    margin-bottom: 0 !important;
+}
+
+.scrim-card.is-collapsed .scrim-card-body,
+.scrim-draggable-item.is-collapsed .scrim-card > *:not(.scrim-card-header) {
+    display: none !important;
+}
+
 /* SortableJS Ghost & Chosen States */
 .scrim-sortable-ghost {
     opacity: 0.35 !important;
