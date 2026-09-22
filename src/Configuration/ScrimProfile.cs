@@ -129,6 +129,10 @@ namespace Scrim.Configuration {
         public int ArtistSeparationMinutes { get; set; } = 60;
         public int TrackSeparationMinutes { get; set; } = 180;
         public string ClockWheelTemplate { get; set; } = "2 A-List -> 1 Jingle -> 1 Gold -> 1 Request";
+        public string HeavyCategoryTitle { get; set; } = "Heavy (A-List)";
+        public string RecentsCategoryTitle { get; set; } = "Medium (B-List)";
+        public string ClassicGoldCategoryTitle { get; set; } = "Gold & Classics";
+        public string JingleCategoryTitle { get; set; } = "Sweepers & IDs";
         public System.Collections.Generic.List<string> HeavyRotationTracks { get; set; } = new();
         public System.Collections.Generic.List<string> RecentsTracks { get; set; } = new();
         public System.Collections.Generic.List<string> ClassicGoldTracks { get; set; } = new();

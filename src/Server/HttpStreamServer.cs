@@ -1225,7 +1225,8 @@ namespace Scrim.Server {
             }
             string? resolved = _profileManager.ResolveAssetPath(val);
             if (!string.IsNullOrWhiteSpace(resolved) && File.Exists(resolved)) {
-                return "/api/logo";
+                long lastModified = File.GetLastWriteTimeUtc(resolved).Ticks;
+                return $"/api/logo?t={lastModified}";
             }
             return val;
         }
@@ -1264,7 +1265,7 @@ namespace Scrim.Server {
             try {
                 var response = context.Response;
                 response.Headers.Add("Access-Control-Allow-Origin", "*");
-                response.Headers.Add("Cache-Control", "public, max-age=60");
+                response.Headers.Add("Cache-Control", "no-cache, no-store, must-revalidate");
 
                 var profile = _profileManager.CurrentProfile;
                 string? resolved = _profileManager.ResolveAssetPath(profile.LogoUrl);
@@ -1525,6 +1526,8 @@ namespace Scrim.Server {
             color: #f1f5f9;
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             min-height: 100vh;
+            height: 100vh;
+            overflow: hidden;
             display: flex;
             flex-direction: column;
             justify-content: center;
@@ -1533,7 +1536,6 @@ namespace Scrim.Server {
         }
         .gr-card {
             width: 100%;
-            max-width: 480px;
             background: #0f131c;
             border: 1px solid #1e2638;
             border-radius: 14px;
@@ -1541,6 +1543,10 @@ namespace Scrim.Server {
             overflow: hidden;
             display: flex;
             flex-direction: column;
+        }
+        #loginCard {
+            max-width: 480px;
+            margin: auto;
         }
         .gr-header {
             background: #141a27;
@@ -1605,7 +1611,13 @@ namespace Scrim.Server {
             transition: opacity 0.2s, transform 0.1s;
         }
         .gr-btn-primary:active { transform: scale(0.98); opacity: 0.9; }
-        #backstagePanel { display: none; height: calc(100vh - 24px); max-height: 720px; }
+        #backstagePanel {
+            display: none;
+            width: 100%;
+            max-width: min(1200px, calc(100vw - 24px));
+            height: calc(100vh - 24px);
+            margin: auto;
+        }
         .gr-status-strip {
             background: #090c12;
             border-bottom: 1px solid #1a2233;
@@ -1620,7 +1632,9 @@ namespace Scrim.Server {
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-            max-width: 250px;
+            flex: 1;
+            min-width: 0;
+            margin-right: 12px;
             font-weight: 600;
         }
         .gr-audio-btn {
@@ -1631,6 +1645,7 @@ namespace Scrim.Server {
             padding: 3px 8px;
             border-radius: 6px;
             cursor: pointer;
+            flex-shrink: 0;
         }
         .gr-chat-feed {
             flex: 1;
@@ -1693,6 +1708,35 @@ namespace Scrim.Server {
             padding: 0 16px;
             font-size: 12px;
         }
+        @media (min-width: 768px) {
+            body { padding: 16px; }
+            #backstagePanel {
+                height: calc(100vh - 32px);
+                max-width: min(1200px, calc(100vw - 32px));
+                border-radius: 16px;
+            }
+            .gr-chips {
+                flex-wrap: wrap;
+                padding: 10px 16px;
+                gap: 8px;
+            }
+            .gr-chat-feed {
+                padding: 16px 20px;
+                gap: 8px;
+            }
+            .gr-msg {
+                font-size: 13px;
+            }
+            .gr-input-bar {
+                padding: 12px 16px;
+            }
+            .gr-input-bar input {
+                font-size: 13px;
+            }
+            .gr-input-bar button {
+                font-size: 13px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -1754,6 +1798,9 @@ namespace Scrim.Server {
         (function () {
             const urlParams = new URLSearchParams(window.location.search);
             const queryPin = urlParams.get('pin') || urlParams.get('passcode') || '';
+            const queryName = urlParams.get('name') || urlParams.get('dj') || '';
+            const autoLogin = urlParams.get('auto') === '1' || urlParams.get('auto') === 'true' || urlParams.has('autologin');
+            let isHostUser = urlParams.get('host') === '1' || urlParams.get('host') === 'true';
             const passInput = document.getElementById('passcodeInput');
             const nameInput = document.getElementById('djNameInput');
             const authError = document.getElementById('authError');
@@ -1768,7 +1815,11 @@ namespace Scrim.Server {
             const liveAudio = document.getElementById('liveAudio');
 
             if (queryPin) passInput.value = queryPin;
-            nameInput.value = localStorage.getItem('scrim_gr_name') || '';
+            if (queryName) {
+                nameInput.value = queryName;
+            } else {
+                nameInput.value = localStorage.getItem('scrim_gr_name') || '';
+            }
             if (!queryPin && localStorage.getItem('scrim_gr_pin')) {
                 passInput.value = localStorage.getItem('scrim_gr_pin');
             }
@@ -1795,8 +1846,12 @@ namespace Scrim.Server {
                         body: JSON.stringify({ passcode: pass })
                     });
                     if (res.ok) {
+                        const data = await res.json().catch(() => ({}));
                         currentPasscode = pass;
                         currentDjName = name;
+                        if (data && data.hostName && (name.toLowerCase().includes(data.hostName.toLowerCase()) || name.toLowerCase().includes('host'))) {
+                            isHostUser = true;
+                        }
                         localStorage.setItem('scrim_gr_name', name);
                         localStorage.setItem('scrim_gr_pin', pass);
                         enterBackstage();
@@ -1816,7 +1871,7 @@ namespace Scrim.Server {
             function enterBackstage() {
                 loginCard.style.display = 'none';
                 backstagePanel.style.display = 'flex';
-                headerDjName.textContent = currentDjName;
+                headerDjName.textContent = currentDjName + (isHostUser ? ' 👑' : '');
                 liveAudio.src = '/stream';
 
                 loadHistory();
@@ -1914,7 +1969,8 @@ namespace Scrim.Server {
                             sender: currentDjName,
                             text: t,
                             passcode: currentPasscode,
-                            color: '#38bdf8'
+                            isHost: isHostUser,
+                            color: isHostUser ? '#c084fc' : '#38bdf8'
                         })
                     });
                     loadHistory();
