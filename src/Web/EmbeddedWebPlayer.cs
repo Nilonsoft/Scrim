@@ -22,6 +22,9 @@ namespace Scrim.Web {
                 if (relativePath.StartsWith("assets/", StringComparison.OrdinalIgnoreCase)) {
                     relativePath = relativePath.Substring("assets/".Length);
                 }
+                if (relativePath.EndsWith("favicon.ico", StringComparison.OrdinalIgnoreCase)) {
+                    relativePath = "favicon.ico";
+                }
                 if (string.IsNullOrEmpty(relativePath)) {
                     relativePath = "index.html";
                 }

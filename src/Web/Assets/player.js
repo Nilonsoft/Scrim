@@ -3023,18 +3023,23 @@ document.addEventListener('DOMContentLoaded', function () {
 
         if (!badge) return;
 
+        const hostName = (branding.hostDj && branding.hostDj.name) || branding.hostName || 'Host DJ';
+        const hostAvatarUrl = (branding.hostDj && branding.hostDj.avatarUrl) ? branding.hostDj.avatarUrl : (branding.logoUrl || '/icon.svg');
+
         if (branding.isPartyHub && branding.guestDj) {
             badge.style.display = 'inline-flex';
             if (hostAvatar) {
-                hostAvatar.src = (branding.hostDj && branding.hostDj.avatarUrl) ? branding.hostDj.avatarUrl : '/assets/icons/favicon.ico';
-                hostAvatar.title = (branding.hostDj && branding.hostDj.name) ? branding.hostDj.name : 'Host DJ';
+                hostAvatar.src = hostAvatarUrl;
+                hostAvatar.title = hostName;
                 hostAvatar.classList.remove('b2b-active');
+                hostAvatar.onerror = function () { this.onerror = null; this.src = '/icon.svg'; };
             }
             if (guestAvatar) {
-                guestAvatar.src = branding.guestDj.avatarUrl || '/assets/icons/favicon.ico';
+                guestAvatar.src = branding.guestDj.avatarUrl || '/icon.svg';
                 guestAvatar.title = branding.guestDj.name || 'Guest DJ';
                 guestAvatar.style.display = 'block';
                 guestAvatar.classList.add('b2b-active');
+                guestAvatar.onerror = function () { this.onerror = null; this.src = '/icon.svg'; };
             }
             if (activeName) {
                 activeName.textContent = branding.guestDj.name || 'Guest DJ';
@@ -3053,7 +3058,6 @@ document.addEventListener('DOMContentLoaded', function () {
             lastActiveDj = branding.guestDj.name;
         } else {
             // Normal solo broadcast
-            const hostName = branding.hostName || 'Host DJ';
             if (lastActiveDj !== null && lastActiveDj !== hostName && branding.isPartyHub === false) {
                 showDjHandoffToast(`Decks returned to: ${hostName}`);
             }
@@ -3064,7 +3068,10 @@ document.addEventListener('DOMContentLoaded', function () {
                 guestAvatar.classList.remove('b2b-active');
             }
             if (hostAvatar) {
+                hostAvatar.src = hostAvatarUrl;
+                hostAvatar.title = hostName;
                 hostAvatar.classList.add('b2b-active');
+                hostAvatar.onerror = function () { this.onerror = null; this.src = '/icon.svg'; };
             }
             if (guestBioBtn) {
                 guestBioBtn.style.display = 'none';
@@ -3105,7 +3112,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!modal) return;
 
         const g = currentBranding.guestDj;
-        if (avatar) avatar.src = g.avatarUrl || '/assets/icons/favicon.ico';
+        if (avatar) avatar.src = g.avatarUrl || '/icon.svg';
         if (name) name.textContent = g.name || 'Guest DJ';
         if (bio) bio.textContent = g.bio || 'Special guest session on the decks.';
 

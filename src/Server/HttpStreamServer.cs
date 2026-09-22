@@ -799,7 +799,7 @@ namespace Scrim.Server {
 
                 string partyHubJson = activeRelay != null
                     ? $",\"isPartyHub\":true,\"guestDj\":{{\"name\":\"{EscapeJson(activeRelay.EffectiveDjName)}\",\"avatarUrl\":\"{EscapeJson(activeRelay.EffectiveAvatarUrl)}\",\"bio\":\"{EscapeJson(activeRelay.OriginBio)}\",\"discord\":\"{EscapeJson(activeRelay.OriginDiscord)}\",\"twitch\":\"{EscapeJson(activeRelay.OriginTwitch)}\",\"twitter\":\"{EscapeJson(activeRelay.OriginTwitter)}\"}},\"hostDj\":{{\"name\":\"{EscapeJson(profile.HostName)}\",\"avatarUrl\":\"{EscapeJson(logoUrl)}\"}}"
-                    : ",\"isPartyHub\":false";
+                    : $",\"isPartyHub\":false,\"hostDj\":{{\"name\":\"{EscapeJson(profile.HostName)}\",\"avatarUrl\":\"{EscapeJson(logoUrl)}\"}}";
 
                 string reactorsJson = BuildVisualizerReactorsJson();
                 string defaultVisMode = !string.IsNullOrWhiteSpace(profile.DefaultVisualizerMode) ? profile.DefaultVisualizerMode : "bars";
@@ -1308,7 +1308,7 @@ namespace Scrim.Server {
 
                 string partyHubJson = activeRelay != null
                     ? $",\"isPartyHub\":true,\"guestDj\":{{\"name\":\"{EscapeJson(activeRelay.EffectiveDjName)}\",\"avatarUrl\":\"{EscapeJson(activeRelay.EffectiveAvatarUrl)}\",\"bio\":\"{EscapeJson(activeRelay.OriginBio)}\",\"discord\":\"{EscapeJson(activeRelay.OriginDiscord)}\",\"twitch\":\"{EscapeJson(activeRelay.OriginTwitch)}\",\"twitter\":\"{EscapeJson(activeRelay.OriginTwitter)}\"}},\"hostDj\":{{\"name\":\"{EscapeJson(profile.HostName)}\",\"avatarUrl\":\"{EscapeJson(logoUrl)}\"}}"
-                    : ",\"isPartyHub\":false";
+                    : $",\"isPartyHub\":false,\"hostDj\":{{\"name\":\"{EscapeJson(profile.HostName)}\",\"avatarUrl\":\"{EscapeJson(logoUrl)}\"}}";
 
                 string reactorsJson = BuildVisualizerReactorsJson();
                 string defaultVisMode = !string.IsNullOrWhiteSpace(profile.DefaultVisualizerMode) ? profile.DefaultVisualizerMode : "bars";
