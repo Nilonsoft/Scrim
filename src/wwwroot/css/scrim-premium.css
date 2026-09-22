@@ -57,13 +57,15 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 14px 28px;
+    padding: 12px 24px;
     background: var(--topbar-bg, #141519);
     border-bottom: 1px solid var(--topbar-border, #20232a);
     position: sticky;
     top: 0;
     z-index: 100;
-    transition: background-color 0.25s ease, border-color 0.25s ease;
+    gap: 12px;
+    flex-wrap: wrap;
+    transition: background-color 0.25s ease, border-color 0.25s ease, padding 0.2s ease;
 }
 
 .scrim-menu-btn {
@@ -149,7 +151,7 @@ body {
     color: #788091;
 }
 
-/* 3-Column Studio Grid Layout */
+/* Studio Grid Layout & Responsiveness */
 .scrim-console-grid {
     display: grid;
     grid-template-columns: 310px 1fr 340px;
@@ -157,17 +159,150 @@ body {
     padding: 18px 24px 32px 24px;
     max-width: 1700px;
     margin: 0 auto;
+    transition: padding 0.2s ease, gap 0.2s ease;
 }
 
-@media (max-width: 1200px) {
+/* Large / Ultra-Wide Displays (1800px+) */
+@media (min-width: 1800px) {
     .scrim-console-grid {
-        grid-template-columns: 1fr 1fr;
+        max-width: 1920px;
+        gap: 22px;
+        padding: 22px 32px 40px 32px;
     }
 }
 
-@media (max-width: 800px) {
+/* Desktop to Medium Breakpoint (1201px - 1440px) */
+@media (max-width: 1440px) {
+    .scrim-topbar {
+        padding: 10px 18px;
+        gap: 10px;
+    }
+    .scrim-topbar > div {
+        gap: 8px !important;
+    }
+    .on-air-badge {
+        padding: 6px 16px;
+        font-size: 13px;
+        gap: 6px;
+    }
+    .listeners-pill {
+        padding: 6px 14px;
+        font-size: 12px;
+        gap: 6px;
+    }
+    .scrim-topbar .scrim-btn-primary,
+    .scrim-topbar .scrim-btn-secondary {
+        padding: 4px 10px !important;
+        font-size: 11px !important;
+    }
+}
+
+/* Medium / Tablet Breakpoint (801px - 1200px) */
+@media (max-width: 1200px) {
+    .scrim-topbar {
+        padding: 8px 14px;
+        gap: 8px;
+    }
+    .scrim-topbar > div {
+        flex-wrap: wrap;
+        gap: 6px !important;
+    }
     .scrim-console-grid {
-        grid-template-columns: 1fr;
+        grid-template-columns: 1fr 1fr !important;
+        gap: 14px;
+        padding: 14px 16px 28px 16px;
+    }
+    div[style*="top: 61px"] {
+        position: relative !important;
+        top: 0 !important;
+        padding: 12px 16px !important;
+    }
+}
+
+/* Small Screens & Mobile (max-width: 800px) */
+@media (max-width: 800px) {
+    .scrim-topbar {
+        padding: 8px 10px;
+        gap: 8px;
+        justify-content: center;
+    }
+    .scrim-topbar > div {
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 6px !important;
+    }
+    .scrim-topbar > div:first-child > div > span {
+        display: none;
+    }
+    .on-air-badge {
+        padding: 5px 12px;
+        font-size: 12px;
+        letter-spacing: 1px;
+    }
+    .topbar-tx-badge {
+        padding: 3px 8px;
+        gap: 5px;
+    }
+    .topbar-tx-meter {
+        width: 36px;
+    }
+    .listeners-pill {
+        padding: 5px 10px;
+        font-size: 11px;
+        gap: 5px;
+    }
+    .scrim-topbar .scrim-btn-primary,
+    .scrim-topbar .scrim-btn-secondary {
+        padding: 4px 8px !important;
+        font-size: 11px !important;
+    }
+    .scrim-console-grid {
+        grid-template-columns: 1fr !important;
+        gap: 12px;
+        padding: 10px 8px 24px 8px;
+    }
+    .scrim-card {
+        padding: 14px;
+        border-radius: 12px;
+    }
+    .scrim-card-header {
+        margin-bottom: 12px;
+    }
+    .scrim-card-title {
+        font-size: 13px;
+    }
+    .scrim-column {
+        gap: 12px;
+        min-height: auto;
+    }
+}
+
+/* Extra Small Screens (max-width: 520px) */
+@media (max-width: 520px) {
+    .scrim-topbar {
+        padding: 6px 8px;
+    }
+    .scrim-topbar > div:first-child > span {
+        font-size: 12px;
+    }
+    .scrim-menu-btn {
+        width: 32px;
+        height: 32px;
+        font-size: 16px;
+    }
+    .scrim-topbar .scrim-btn-primary,
+    .scrim-topbar .scrim-btn-secondary {
+        padding: 3px 6px !important;
+        font-size: 10px !important;
+    }
+    .listeners-pill span {
+        max-width: 110px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .scrim-card {
+        padding: 12px 10px;
     }
 }
 
@@ -984,3 +1119,67 @@ body {
     color: #f59e0b;
     box-shadow: 0 0 12px rgba(245, 158, 11, 0.25);
 }
+
+/* Modals & Dialog Backdrops */
+.scrim-modal-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.78);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1050;
+    padding: 16px;
+    box-sizing: border-box;
+    animation: modalFadeIn 0.15s ease-out;
+}
+
+.scrim-modal {
+    background: var(--card-bg, #181b22);
+    background: linear-gradient(180deg, #1c2028 0%, #15171e 100%);
+    border: 1px solid #2d3342;
+    border-radius: 14px;
+    padding: 24px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85), 0 0 1px rgba(255, 255, 255, 0.15);
+    color: var(--text-main, #ffffff);
+    position: relative;
+    box-sizing: border-box;
+    max-height: 88vh;
+    overflow-y: auto;
+    animation: modalPopIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes modalFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes modalPopIn {
+    from {
+        opacity: 0;
+        transform: scale(0.96) translateY(6px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+@media (max-width: 768px), (max-height: 700px) {
+    .scrim-modal-backdrop {
+        padding: 8px;
+    }
+    .scrim-modal {
+        padding: 16px;
+        border-radius: 10px;
+        max-height: 94vh;
+    }
+}
+
