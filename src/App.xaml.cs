@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
@@ -14,6 +16,23 @@ using Scrim.Updates;
 
 namespace Scrim {
     public partial class App : Application {
+        private const string MutexName = @"Local\Scrim_SingleInstance_Mutex_9D42D450_5FA3_4D87_B390_E07F81BCB077";
+        private const string EventName = @"Local\Scrim_BringToFront_Event_9D42D450_5FA3_4D87_B390_E07F81BCB077";
+        private const int SW_RESTORE = 9;
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        private static Mutex? _singleInstanceMutex;
+        private static EventWaitHandle? _bringToFrontEvent;
+        private static RegisteredWaitHandle? _waitHandleRegistration;
+        private static bool _isSecondInstance;
+
         public IServiceProvider Services { get; }
 
         public App() {
@@ -108,8 +127,6 @@ namespace Scrim {
         }
 
         protected override void OnStartup(StartupEventArgs e) {
-            base.OnStartup(e);
-
             // Handle silent background update check if triggered by Windows Task Scheduler
             bool isSilentCheck = false;
             for (int i = 0; i < e.Args.Length; i++) {
@@ -118,6 +135,44 @@ namespace Scrim {
                     break;
                 }
             }
+
+            bool createdNew;
+            try {
+                _singleInstanceMutex = new Mutex(true, MutexName, out createdNew);
+                if (!createdNew) {
+                    try {
+                        if (_singleInstanceMutex.WaitOne(0, false)) {
+                            createdNew = true;
+                        }
+                    } catch (AbandonedMutexException) {
+                        createdNew = true;
+                    }
+                }
+            } catch {
+                createdNew = false;
+            }
+
+            if (!createdNew) {
+                _isSecondInstance = true;
+                if (!isSilentCheck) {
+                    try {
+                        if (EventWaitHandle.TryOpenExisting(EventName, out var existingEvent)) {
+                            existingEvent.Set();
+                            existingEvent.Dispose();
+                        }
+                    } catch { }
+                }
+                Shutdown();
+                return;
+            }
+
+            try {
+                _bringToFrontEvent = new EventWaitHandle(false, EventResetMode.AutoReset, EventName);
+                _bringToFrontEvent.Reset();
+                StartBringToFrontListener();
+            } catch { }
+
+            base.OnStartup(e);
 
             if (isSilentCheck) {
                 _ = HandleSilentUpdateCheckAsync();
@@ -183,6 +238,26 @@ namespace Scrim {
         }
 
         protected override void OnExit(ExitEventArgs e) {
+            if (_isSecondInstance) {
+                base.OnExit(e);
+                return;
+            }
+
+            try {
+                _waitHandleRegistration?.Unregister(null);
+            } catch { }
+
+            try {
+                _bringToFrontEvent?.Dispose();
+            } catch { }
+
+            if (_singleInstanceMutex != null) {
+                try {
+                    _singleInstanceMutex.ReleaseMutex();
+                } catch { }
+                _singleInstanceMutex.Dispose();
+            }
+
             var pluginLoader = Services.GetService<PluginLoader>();
             pluginLoader?.UnloadPlugins();
 
@@ -198,6 +273,51 @@ namespace Scrim {
             localAudioRouting?.RestoreAllMuted();
 
             base.OnExit(e);
+        }
+
+        private void StartBringToFrontListener() {
+            if (_bringToFrontEvent == null) {
+                return;
+            }
+
+            _waitHandleRegistration = ThreadPool.RegisterWaitForSingleObject(
+                _bringToFrontEvent,
+                (state, timedOut) => {
+                    if (!timedOut) {
+                        Dispatcher.InvokeAsync(BringExistingInstanceToFront);
+                    }
+                },
+                null,
+                -1,
+                false);
+        }
+
+        private void BringExistingInstanceToFront() {
+            var window = MainWindow;
+            if (window == null) {
+                return;
+            }
+
+            try {
+                if (!window.IsVisible) {
+                    window.Show();
+                }
+
+                if (window.WindowState == WindowState.Minimized) {
+                    window.WindowState = WindowState.Normal;
+                }
+
+                var hwnd = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+                if (hwnd != IntPtr.Zero) {
+                    ShowWindow(hwnd, SW_RESTORE);
+                    SetForegroundWindow(hwnd);
+                }
+
+                window.Activate();
+                window.Topmost = true;
+                window.Topmost = false;
+                window.Focus();
+            } catch { }
         }
 
         private static void LogCrash(Exception ex) {
