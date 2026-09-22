@@ -19,6 +19,7 @@ namespace Scrim.Audio {
         public bool IsMuted { get; set; } = false;
         public bool PassthroughDjBranding { get; set; } = true;
         public bool PassthroughTrackMetadata { get; set; } = true;
+        public string RemoteGreenRoomPasscode { get; set; } = "";
 
         // Pre-Fade Listen (PFL) Headphone Cueing
         [JsonIgnore]

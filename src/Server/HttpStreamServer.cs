@@ -492,6 +492,10 @@ namespace Scrim.Server {
                 HandleGreenRoomPost(context);
             } else if (path == "/api/greenroom/chat" && context.Request.HttpMethod == "GET") {
                 HandleGreenRoomGet(context);
+            } else if (path == "/api/greenroom/auth" && context.Request.HttpMethod == "POST") {
+                HandleGreenRoomAuth(context);
+            } else if (path == "/greenroom" || path == "/greenroom/") {
+                HandleGreenRoomWebPortal(context);
             } else if (path == "/api/status") {
                 HandleStatusRequest(context);
             } else {
@@ -1361,8 +1365,71 @@ namespace Scrim.Server {
             GreenRoomMessagePosted?.Invoke(msg);
         }
 
+        private bool VerifyGreenRoomAccess(HttpListenerContext context, string? bodyPasscode = null) {
+            string expected = _profileManager.CurrentProfile.GreenRoomPasscode?.Trim() ?? "";
+            if (string.IsNullOrEmpty(expected)) {
+                return true; // No passcode configured, open access
+            }
+
+            // 1. Check custom header
+            string? headerPass = context.Request.Headers["X-GreenRoom-Passcode"];
+            if (!string.IsNullOrWhiteSpace(headerPass) && string.Equals(headerPass.Trim(), expected, StringComparison.Ordinal)) {
+                return true;
+            }
+
+            // 2. Check query string (?pin= or ?passcode=)
+            string? queryPin = context.Request.QueryString["pin"] ?? context.Request.QueryString["passcode"];
+            if (!string.IsNullOrWhiteSpace(queryPin) && string.Equals(queryPin.Trim(), expected, StringComparison.Ordinal)) {
+                return true;
+            }
+
+            // 3. Check JSON body passcode
+            if (!string.IsNullOrWhiteSpace(bodyPasscode) && string.Equals(bodyPasscode.Trim(), expected, StringComparison.Ordinal)) {
+                return true;
+            }
+
+            return false;
+        }
+
+        private void HandleGreenRoomAuth(HttpListenerContext context) {
+            try {
+                using var reader = new StreamReader(context.Request.InputStream, System.Text.Encoding.UTF8);
+                string body = reader.ReadToEnd();
+                var passMatch = System.Text.RegularExpressions.Regex.Match(body, "\"passcode\"\\s*:\\s*\"(.*?)\"");
+                string provided = passMatch.Success ? passMatch.Groups[1].Value : "";
+                bool ok = VerifyGreenRoomAccess(context, provided);
+
+                context.Response.ContentType = "application/json";
+                context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+                if (ok) {
+                    context.Response.StatusCode = 200;
+                    byte[] res = System.Text.Encoding.UTF8.GetBytes(
+                        $"{{\"success\":true,\"hostName\":\"{EscapeJson(_profileManager.CurrentProfile.HostName)}\",\"stationName\":\"{EscapeJson(_profileManager.CurrentProfile.StationName)}\"}}"
+                    );
+                    context.Response.OutputStream.Write(res, 0, res.Length);
+                } else {
+                    context.Response.StatusCode = 401;
+                    byte[] res = System.Text.Encoding.UTF8.GetBytes("{\"success\":false,\"error\":\"Invalid passcode\"}");
+                    context.Response.OutputStream.Write(res, 0, res.Length);
+                }
+            } catch {
+                context.Response.StatusCode = 400;
+            } finally {
+                context.Response.Close();
+            }
+        }
+
         private void HandleGreenRoomGet(HttpListenerContext context) {
             try {
+                if (!VerifyGreenRoomAccess(context)) {
+                    context.Response.StatusCode = 401;
+                    context.Response.ContentType = "application/json";
+                    context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+                    byte[] err = System.Text.Encoding.UTF8.GetBytes("{\"error\":\"Unauthorized: Invalid or missing Green Room passcode\"}");
+                    context.Response.OutputStream.Write(err, 0, err.Length);
+                    return;
+                }
+
                 var response = context.Response;
                 response.ContentType = "application/json; charset=utf-8";
                 response.Headers.Add("Access-Control-Allow-Origin", "*");
@@ -1388,6 +1455,17 @@ namespace Scrim.Server {
                 var textMatch = System.Text.RegularExpressions.Regex.Match(body, "\"text\"\\s*:\\s*\"(.*?)\"");
                 var isHostMatch = System.Text.RegularExpressions.Regex.Match(body, "\"isHost\"\\s*:\\s*(true|false)");
                 var colorMatch = System.Text.RegularExpressions.Regex.Match(body, "\"color\"\\s*:\\s*\"(.*?)\"");
+                var passMatch = System.Text.RegularExpressions.Regex.Match(body, "\"passcode\"\\s*:\\s*\"(.*?)\"");
+
+                string? bodyPass = passMatch.Success ? passMatch.Groups[1].Value : null;
+                if (!VerifyGreenRoomAccess(context, bodyPass)) {
+                    context.Response.StatusCode = 401;
+                    context.Response.ContentType = "application/json";
+                    context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+                    byte[] err = System.Text.Encoding.UTF8.GetBytes("{\"error\":\"Unauthorized: Invalid or missing Green Room passcode\"}");
+                    context.Response.OutputStream.Write(err, 0, err.Length);
+                    return;
+                }
 
                 string sender = senderMatch.Success ? senderMatch.Groups[1].Value : "DJ Guest";
                 string text = textMatch.Success ? textMatch.Groups[1].Value : "";
@@ -1408,6 +1486,479 @@ namespace Scrim.Server {
             } finally {
                 context.Response.Close();
             }
+        }
+
+        private void HandleGreenRoomWebPortal(HttpListenerContext context) {
+            try {
+                var response = context.Response;
+                response.ContentType = "text/html; charset=utf-8";
+                response.Headers.Add("Access-Control-Allow-Origin", "*");
+                string html = BuildGreenRoomPortalHtml();
+                byte[] buffer = System.Text.Encoding.UTF8.GetBytes(html);
+                response.ContentLength64 = buffer.Length;
+                response.OutputStream.Write(buffer, 0, buffer.Length);
+            } catch {
+                context.Response.StatusCode = 500;
+            } finally {
+                context.Response.Close();
+            }
+        }
+
+        private string BuildGreenRoomPortalHtml() {
+            var profile = _profileManager.CurrentProfile;
+            string stationName = EscapeHtml(profile.StationName);
+            string hostName = EscapeHtml(profile.HostName);
+            return $$"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>{{stationName}} — Backstage DJ Green Room</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: #07090e;
+            color: #f1f5f9;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 12px;
+        }
+        .gr-card {
+            width: 100%;
+            max-width: 480px;
+            background: #0f131c;
+            border: 1px solid #1e2638;
+            border-radius: 14px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        .gr-header {
+            background: #141a27;
+            border-bottom: 1px solid #202a3d;
+            padding: 14px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .gr-title {
+            font-size: 13px;
+            font-weight: 800;
+            color: #c084fc;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            letter-spacing: 0.5px;
+        }
+        .gr-pill {
+            font-size: 9px;
+            font-weight: 800;
+            background: rgba(192, 132, 252, 0.15);
+            border: 1px solid rgba(192, 132, 252, 0.35);
+            color: #c084fc;
+            padding: 2px 7px;
+            border-radius: 999px;
+            letter-spacing: 0.5px;
+        }
+        .gr-body { padding: 16px; }
+        .gr-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: #94a3b8;
+            margin-bottom: 6px;
+            display: block;
+        }
+        .gr-input {
+            width: 100%;
+            background: #090c13;
+            border: 1px solid #202738;
+            border-radius: 8px;
+            color: #fff;
+            padding: 10px 12px;
+            font-size: 13px;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.2s;
+            margin-bottom: 12px;
+        }
+        .gr-input:focus { border-color: #a855f7; }
+        .gr-btn-primary {
+            width: 100%;
+            background: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%);
+            border: none;
+            color: #fff;
+            font-weight: 700;
+            font-size: 13px;
+            padding: 11px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            box-shadow: 0 4px 14px rgba(168, 85, 247, 0.35);
+            transition: opacity 0.2s, transform 0.1s;
+        }
+        .gr-btn-primary:active { transform: scale(0.98); opacity: 0.9; }
+        #backstagePanel { display: none; height: calc(100vh - 24px); max-height: 720px; }
+        .gr-status-strip {
+            background: #090c12;
+            border-bottom: 1px solid #1a2233;
+            padding: 8px 14px;
+            font-size: 11px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .gr-now-playing {
+            color: #38bdf8;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 250px;
+            font-weight: 600;
+        }
+        .gr-audio-btn {
+            background: #1c2436;
+            border: 1px solid #2b374f;
+            color: #38bdf8;
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .gr-chat-feed {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            background: #080a10;
+        }
+        .gr-msg {
+            font-size: 12px;
+            line-height: 1.4;
+            display: flex;
+            gap: 6px;
+            align-items: baseline;
+        }
+        .gr-msg-time {
+            font-size: 9.5px;
+            color: #64748b;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .gr-msg-sender { font-weight: 700; }
+        .gr-msg-text { color: #e2e8f0; word-break: break-word; }
+        .gr-chips {
+            padding: 8px 12px;
+            display: flex;
+            gap: 6px;
+            overflow-x: auto;
+            background: #0c1017;
+            border-top: 1px solid #1a2336;
+        }
+        .gr-chip {
+            background: #151c2a;
+            border: 1px solid #243048;
+            color: #cbd5e1;
+            font-size: 10.5px;
+            padding: 4px 9px;
+            border-radius: 999px;
+            white-space: nowrap;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.15s;
+        }
+        .gr-chip:hover { background: #222d42; color: #fff; }
+        .gr-input-bar {
+            padding: 10px 12px;
+            background: #0f141f;
+            border-top: 1px solid #1e2638;
+            display: flex;
+            gap: 8px;
+        }
+        .gr-input-bar input {
+            margin-bottom: 0;
+            font-size: 12px;
+            padding: 9px 12px;
+        }
+        .gr-input-bar button {
+            width: auto;
+            padding: 0 16px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="gr-card" id="loginCard">
+        <div class="gr-header">
+            <div class="gr-title">🎙️ SCRIM BACKSTAGE</div>
+            <div class="gr-pill">OFF-AIR GREEN ROOM</div>
+        </div>
+        <div class="gr-body">
+            <div style="font-size: 12px; color: #94a3b8; margin-bottom: 14px; line-height: 1.4;">
+                Welcome to <strong>{{stationName}}</strong> (Host: {{hostName}}). Enter your DJ moniker and the station's Green Room passcode to join the backstage performer intercom.
+            </div>
+            <label class="gr-label">Your DJ / Performer Name</label>
+            <input type="text" class="gr-input" id="djNameInput" placeholder="e.g. DJ Shadow, MC Nova" autofocus />
+
+            <label class="gr-label">Green Room Passcode</label>
+            <input type="password" class="gr-input" id="passcodeInput" placeholder="Enter Backstage PIN" />
+
+            <div id="authError" style="color: #f87171; font-size: 11px; margin-bottom: 10px; display: none;"></div>
+
+            <button class="gr-btn-primary" id="enterBtn">Enter Green Room ⚡</button>
+        </div>
+    </div>
+
+    <div class="gr-card" id="backstagePanel">
+        <div class="gr-header">
+            <div class="gr-title">
+                <span>🎙️</span>
+                <span id="headerStation">{{stationName}}</span>
+                <span class="gr-pill" id="headerDjName">DJ</span>
+            </div>
+            <button class="gr-chip" id="leaveBtn" style="padding: 2px 8px; font-size: 10px;">Leave</button>
+        </div>
+        <div class="gr-status-strip">
+            <div class="gr-now-playing" id="nowPlaying">🎵 Live Broadcast</div>
+            <button class="gr-audio-btn" id="audioToggleBtn">▶ Monitor Stream</button>
+            <audio id="liveAudio" preload="none"></audio>
+        </div>
+        <div class="gr-chat-feed" id="chatFeed">
+            <div style="color: #64748b; font-size: 11px; text-align: center; margin: auto; font-style: italic;">
+                Connected to Green Room. Coordinate track keys, BPMs, cues &amp; hand-offs with the host.
+            </div>
+        </div>
+        <div class="gr-chips">
+            <div class="gr-chip" data-cue="⚡ Ready to drop in 30s">⚡ Ready in 30s</div>
+            <div class="gr-chip" data-cue="🎛️ Beatmatching next track">🎛️ Beatmatching</div>
+            <div class="gr-chip" data-cue="🎹 Key: Am | BPM: 128">🎹 Key &amp; BPM</div>
+            <div class="gr-chip" data-cue="🎧 Fade me in!">🎧 Fade me in!</div>
+            <div class="gr-chip" data-cue="🔄 Taking back decks">🔄 Taking decks</div>
+            <div class="gr-chip" data-cue="🙌 Awesome set!">🙌 Great set!</div>
+        </div>
+        <div class="gr-input-bar">
+            <input type="text" class="gr-input" id="msgInput" placeholder="Private note to DJs... (Enter to send)" autocomplete="off" />
+            <button class="gr-btn-primary" id="sendBtn">Send 💬</button>
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            const urlParams = new URLSearchParams(window.location.search);
+            const queryPin = urlParams.get('pin') || urlParams.get('passcode') || '';
+            const passInput = document.getElementById('passcodeInput');
+            const nameInput = document.getElementById('djNameInput');
+            const authError = document.getElementById('authError');
+            const loginCard = document.getElementById('loginCard');
+            const backstagePanel = document.getElementById('backstagePanel');
+            const chatFeed = document.getElementById('chatFeed');
+            const msgInput = document.getElementById('msgInput');
+            const sendBtn = document.getElementById('sendBtn');
+            const headerDjName = document.getElementById('headerDjName');
+            const nowPlaying = document.getElementById('nowPlaying');
+            const audioToggleBtn = document.getElementById('audioToggleBtn');
+            const liveAudio = document.getElementById('liveAudio');
+
+            if (queryPin) passInput.value = queryPin;
+            nameInput.value = localStorage.getItem('scrim_gr_name') || '';
+            if (!queryPin && localStorage.getItem('scrim_gr_pin')) {
+                passInput.value = localStorage.getItem('scrim_gr_pin');
+            }
+
+            let currentPasscode = '';
+            let currentDjName = '';
+            let sseSource = null;
+            let pollTimer = null;
+            const seenMessageIds = new Set();
+
+            async function attemptLogin() {
+                const name = nameInput.value.trim();
+                const pass = passInput.value.trim();
+                if (!name) {
+                    showError('Please enter your DJ / Performer name.');
+                    return;
+                }
+                authError.style.display = 'none';
+
+                try {
+                    const res = await fetch('/api/greenroom/auth', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ passcode: pass })
+                    });
+                    if (res.ok) {
+                        currentPasscode = pass;
+                        currentDjName = name;
+                        localStorage.setItem('scrim_gr_name', name);
+                        localStorage.setItem('scrim_gr_pin', pass);
+                        enterBackstage();
+                    } else {
+                        showError('Invalid Green Room Passcode. Check with the host.');
+                    }
+                } catch (e) {
+                    showError('Network error connecting to station.');
+                }
+            }
+
+            function showError(msg) {
+                authError.textContent = msg;
+                authError.style.display = 'block';
+            }
+
+            function enterBackstage() {
+                loginCard.style.display = 'none';
+                backstagePanel.style.display = 'flex';
+                headerDjName.textContent = currentDjName;
+                liveAudio.src = '/stream';
+
+                loadHistory();
+                connectSse();
+                pollTimer = setInterval(loadHistory, 3500);
+                pollMetadata();
+                setInterval(pollMetadata, 4000);
+                msgInput.focus();
+            }
+
+            function leaveBackstage() {
+                if (sseSource) sseSource.close();
+                if (pollTimer) clearInterval(pollTimer);
+                liveAudio.pause();
+                liveAudio.src = '';
+                backstagePanel.style.display = 'none';
+                loginCard.style.display = 'flex';
+            }
+
+            async function loadHistory() {
+                try {
+                    const res = await fetch('/api/greenroom/chat', {
+                        headers: { 'X-GreenRoom-Passcode': currentPasscode }
+                    });
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (data && Array.isArray(data.messages)) {
+                            data.messages.forEach(appendMessage);
+                        }
+                    }
+                } catch (e) {}
+            }
+
+            async function pollMetadata() {
+                try {
+                    const res = await fetch('/api/metadata');
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (data && data.title) {
+                            nowPlaying.textContent = '🎵 ' + data.title + (data.artist ? ' — ' + data.artist : '');
+                        }
+                    }
+                } catch (e) {}
+            }
+
+            function connectSse() {
+                try {
+                    sseSource = new EventSource('/events');
+                    sseSource.onmessage = function (ev) {
+                        try {
+                            const data = JSON.parse(ev.data);
+                            if (data && data.type === 'greenroom_chat') {
+                                appendMessage(data);
+                            }
+                        } catch (e) {}
+                    };
+                } catch (e) {}
+            }
+
+            function appendMessage(msg) {
+                if (!msg || !msg.id || seenMessageIds.has(msg.id)) return;
+                seenMessageIds.add(msg.id);
+
+                const div = document.createElement('div');
+                div.className = 'gr-msg';
+                const time = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+                const senderColor = msg.isHost ? '#c084fc' : (msg.color || '#38bdf8');
+                const hostBadge = msg.isHost ? ' <span style="font-size: 8px; background: rgba(192,132,252,0.2); padding: 1px 4px; border-radius: 3px;">HOST</span>' : '';
+
+                div.innerHTML = '<span class="gr-msg-time">' + time + '</span> ' +
+                    '<span class="gr-msg-sender" style="color: ' + senderColor + ';">' + escapeHtml(msg.sender) + hostBadge + ':</span> ' +
+                    '<span class="gr-msg-text">' + escapeHtml(msg.text) + '</span>';
+                chatFeed.appendChild(div);
+                chatFeed.scrollTop = chatFeed.scrollHeight;
+            }
+
+            function escapeHtml(str) {
+                if (!str) return '';
+                return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            }
+
+            async function sendMessage(text) {
+                const t = (text || msgInput.value).trim();
+                if (!t) return;
+                msgInput.value = '';
+
+                try {
+                    await fetch('/api/greenroom/chat', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-GreenRoom-Passcode': currentPasscode
+                        },
+                        body: JSON.stringify({
+                            sender: currentDjName,
+                            text: t,
+                            passcode: currentPasscode,
+                            color: '#38bdf8'
+                        })
+                    });
+                    loadHistory();
+                } catch (e) {}
+            }
+
+            document.getElementById('enterBtn').addEventListener('click', attemptLogin);
+            passInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') attemptLogin(); });
+            nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') passInput.focus(); });
+            document.getElementById('leaveBtn').addEventListener('click', leaveBackstage);
+
+            sendBtn.addEventListener('click', () => sendMessage());
+            msgInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendMessage(); });
+
+            document.querySelectorAll('.gr-chip[data-cue]').forEach(chip => {
+                chip.addEventListener('click', function () {
+                    sendMessage(this.dataset.cue);
+                });
+            });
+
+            audioToggleBtn.addEventListener('click', function () {
+                if (liveAudio.paused) {
+                    liveAudio.play().then(() => {
+                        audioToggleBtn.textContent = '⏸ Pause Monitor';
+                    }).catch(() => {});
+                } else {
+                    liveAudio.pause();
+                    audioToggleBtn.textContent = '▶ Monitor Stream';
+                }
+            });
+
+            if (nameInput.value && passInput.value) {
+                attemptLogin();
+            }
+        })();
+    </script>
+</body>
+</html>
+""";
+        }
+
+        private static string EscapeHtml(string? input) {
+            if (string.IsNullOrEmpty(input)) return "";
+            return System.Net.WebUtility.HtmlEncode(input);
         }
 
         private string BuildVisualizerReactorsJson() {

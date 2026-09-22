@@ -942,6 +942,7 @@
         RelayService.StreamsChanged += OnRelayStreamsChanged;
         RelayService.StreamStatusUpdated += OnRelayStreamStatusUpdated;
         RelayService.ActiveRelayDisconnected += OnActiveRelayDisconnected;
+        RelayService.RemoteGreenRoomMessageReceived += OnRemoteGreenRoomMessageReceived;
         Mixer.RelayAudioStream = RelayService.RelayAudioStream;
         _greenRoomMessages = StreamServer.GetGreenRoomMessages().ToList();
         StreamServer.GreenRoomMessagePosted += OnGreenRoomMessagePosted;
@@ -2327,6 +2328,7 @@
         RelayService.StreamsChanged -= OnRelayStreamsChanged;
         RelayService.StreamStatusUpdated -= OnRelayStreamStatusUpdated;
         RelayService.ActiveRelayDisconnected -= OnActiveRelayDisconnected;
+        RelayService.RemoteGreenRoomMessageReceived -= OnRemoteGreenRoomMessageReceived;
         StreamServer.GreenRoomMessagePosted -= OnGreenRoomMessagePosted;
         _dotNetRef?.Dispose();
         _refreshTimer?.Dispose();
@@ -5348,6 +5350,30 @@
                     </span>
                 </div>
 
+                <!-- Green Room Passcode & Invite Link Bar -->
+                <div style="background: #080a10; border: 1px solid #1e1b4b; border-radius: 6px; padding: 6px 8px; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <span style="font-size: 10px; color: #c084fc; font-weight: 600;">🔑 Green Room PIN:</span>
+                        <input type="text" class="scrim-input" style="font-size: 11px; width: 95px; padding: 2px 6px; font-weight: 700; color: #e9d5ff; background: #131127; border-color: #581c87;"
+                               value="@ProfileManager.CurrentProfile.GreenRoomPasscode"
+                               @onchange="OnGreenRoomPasscodeChanged"
+                               placeholder="Passcode"
+                               title="Set custom passcode required for guest DJs to enter the Green Room" />
+                        <button class="pill-option" style="padding: 2px 6px; font-size: 9px; background: rgba(168, 85, 247, 0.15); border-color: #a855f7; color: #c084fc;"
+                                title="Generate a random passcode"
+                                @onclick="GenerateRandomGreenRoomPasscode">
+                            🎲
+                        </button>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <button class="pill-option" style="padding: 3px 8px; font-size: 9px; background: rgba(168, 85, 247, 0.2); border-color: #a855f7; color: #e9d5ff; font-weight: 600;"
+                                title="Copy mobile-friendly Backstage Portal URL with PIN to clipboard"
+                                @onclick="CopyGreenRoomInviteUrl">
+                            @(CopiedUrlTarget == "greenroom" ? "✓ Copied Invite!" : "📋 Copy DJ Invite Link")
+                        </button>
+                    </div>
+                </div>
+
                 <div style="background: #080a10; border: 1px solid #151a24; border-radius: 6px; height: 120px; overflow-y: auto; padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px;">
                     @if (_greenRoomMessages.Count == 0) {
                         <div style="color: #64748b; font-size: 10px; text-align: center; padding-top: 36px; font-style: italic;">
@@ -5395,6 +5421,9 @@
                                         @stream.EffectiveDjName
                                         @if (stream.IsScrimOrigin) {
                                             <span style="font-size: 8px; font-weight: 800; color: #00d2ff; background: rgba(0, 210, 255, 0.15); padding: 1px 5px; border-radius: 3px;">SCRIM PEER</span>
+                                        }
+                                        @if (!string.IsNullOrWhiteSpace(stream.RemoteGreenRoomPasscode)) {
+                                            <span style="font-size: 8px; font-weight: 800; color: #a855f7; background: rgba(168, 85, 247, 0.15); padding: 1px 5px; border-radius: 3px;" title="Connected to remote Green Room chat">💬 GREEN ROOM</span>
                                         }
                                         <span style="font-size: 8px; font-weight: 700; padding: 1px 5px; border-radius: 3px; color: @(stream.HealthStatus == "EXCELLENT" ? "#10b981" : (stream.HealthStatus == "GOOD" ? "#00d2ff" : (stream.HealthStatus == "BUFFERING" ? "#f59e0b" : "#ef4444"))); background: rgba(255,255,255,0.06);">
                                             @stream.HealthStatus @(stream.IsConnected && stream.BufferLatencySec > 0 ? $"({stream.BufferLatencySec:F1}s buffer)" : "")
@@ -5488,6 +5517,7 @@
                             <option value="@RelayStreamMode.RawPassthrough">Passthrough</option>
                         </select>
                     </div>
+                    <input type="text" class="scrim-input" style="font-size: 11px;" placeholder="Remote Scrim Green Room PIN (Optional - for cross-station chat)" @bind="_newRelayPasscode" />
                 </div>
                 <button class="scrim-btn-primary" style="width: 100%; font-size: 11px;" @onclick="AddNewRelayStream" disabled="@string.IsNullOrWhiteSpace(_newRelayUrl)">
                     Add Stream To Relay Rack
@@ -5516,6 +5546,7 @@
     private string _newRelayName = "";
     private RelayStreamMode _newRelayMode = RelayStreamMode.ReencodedMix;
     private int _newRelayFadeIn = 3;
+    private string _newRelayPasscode = "";
 
     private void AddNewRelayStream() {
         if (!string.IsNullOrWhiteSpace(_newRelayUrl)) {
@@ -5524,11 +5555,13 @@
                 Name = string.IsNullOrWhiteSpace(_newRelayName) ? "Remote Stream" : _newRelayName.Trim(),
                 Mode = _newRelayMode,
                 FadeInSeconds = _newRelayFadeIn,
+                RemoteGreenRoomPasscode = _newRelayPasscode.Trim(),
                 IsEnabled = false
             };
             RelayService.AddStream(cfg);
             _newRelayUrl = "";
             _newRelayName = "";
+            _newRelayPasscode = "";
             StateHasChanged();
         }
     }
@@ -5564,12 +5597,54 @@
         InvokeAsync(StateHasChanged);
     }
 
+    private void OnRemoteGreenRoomMessageReceived(string streamId, ChatMessage msg) {
+        if (!_greenRoomMessages.Any(m => m.Id == msg.Id)) {
+            _greenRoomMessages.Add(msg);
+            if (_greenRoomMessages.Count > 50) {
+                _greenRoomMessages.RemoveAt(0);
+            }
+            InvokeAsync(StateHasChanged);
+        }
+    }
+
     private void SendGreenRoomMessage() {
         if (string.IsNullOrWhiteSpace(_newGreenRoomChatText)) return;
-        var hostName = string.IsNullOrWhiteSpace(ProfileManager.CurrentProfile.HostName) ? "Host (Studio)" : $"{ProfileManager.CurrentProfile.HostName} (Host)";
-        StreamServer.PostGreenRoomMessage(hostName, _newGreenRoomChatText.Trim(), isHost: true, color: "#a855f7");
+        var text = _newGreenRoomChatText.Trim();
         _newGreenRoomChatText = "";
+        var hostName = string.IsNullOrWhiteSpace(ProfileManager.CurrentProfile.HostName) ? "Host (Studio)" : $"{ProfileManager.CurrentProfile.HostName} (Host)";
+        StreamServer.PostGreenRoomMessage(hostName, text, isHost: true, color: "#a855f7");
+        foreach (var stream in RelayService.Streams) {
+            if (!string.IsNullOrWhiteSpace(stream.RemoteGreenRoomPasscode)) {
+                _ = RelayService.SendRemoteGreenRoomMessageAsync(stream.Id, hostName, text, "#a855f7");
+            }
+        }
         StateHasChanged();
+    }
+
+    private void OnGreenRoomPasscodeChanged(ChangeEventArgs e) {
+        var code = e.Value?.ToString()?.Trim() ?? "";
+        ProfileManager.CurrentProfile.GreenRoomPasscode = string.IsNullOrWhiteSpace(code) ? "party4242" : code;
+        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        StateHasChanged();
+    }
+
+    private void GenerateRandomGreenRoomPasscode() {
+        ProfileManager.CurrentProfile.GreenRoomPasscode = "dj" + Random.Shared.Next(1000, 9999).ToString();
+        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        StateHasChanged();
+    }
+
+    private string GetGreenRoomInviteUrl() {
+        var baseNetworkUrl = GetOutsideNetworkUrl();
+        if (string.IsNullOrWhiteSpace(baseNetworkUrl)) {
+            baseNetworkUrl = GetLocalNetworkUrl();
+        }
+        var pin = ProfileManager.CurrentProfile.GreenRoomPasscode;
+        return $"{baseNetworkUrl.TrimEnd('/')}/greenroom?pin={Uri.EscapeDataString(pin)}";
+    }
+
+    private void CopyGreenRoomInviteUrl() {
+        CopyUrl(GetGreenRoomInviteUrl(), "greenroom");
     }
 
     // Visualizer Reaction Modes ("Reactors") State & Methods

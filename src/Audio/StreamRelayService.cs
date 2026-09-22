@@ -51,6 +51,7 @@ namespace Scrim.Audio {
         public event Action? StreamsChanged;
         public event Action<RelayStreamConfig>? StreamStatusUpdated;
         public event Action<RelayStreamConfig>? ActiveRelayDisconnected;
+        public event Action<string, Scrim.Metadata.ChatMessage>? RemoteGreenRoomMessageReceived;
 
         public StreamRelayService(IFFmpegService ffmpegService) {
             _ffmpegService = ffmpegService;
@@ -332,6 +333,38 @@ namespace Scrim.Audio {
                                     }
                                 }
                             } catch { }
+
+                            // Green room chat sync for Scrim origin or configured passcode
+                            if (!string.IsNullOrWhiteSpace(config.RemoteGreenRoomPasscode) || config.IsScrimOrigin) {
+                                try {
+                                    string grChatUrl = $"{uri.Scheme}://{uri.Host}:{uri.Port}/api/greenroom/chat";
+                                    using var grReq = new HttpRequestMessage(HttpMethod.Get, grChatUrl);
+                                    if (!string.IsNullOrWhiteSpace(config.RemoteGreenRoomPasscode)) {
+                                        grReq.Headers.Add("X-GreenRoom-Passcode", config.RemoteGreenRoomPasscode);
+                                    }
+                                    var grResp = await _httpClient.SendAsync(grReq, metaCts.Token);
+                                    if (grResp.IsSuccessStatusCode) {
+                                        string grJson = await grResp.Content.ReadAsStringAsync(metaCts.Token);
+                                        using var grDoc = JsonDocument.Parse(grJson);
+                                        if (grDoc.RootElement.TryGetProperty("messages", out var msgsElem) && msgsElem.ValueKind == JsonValueKind.Array) {
+                                            foreach (var item in msgsElem.EnumerateArray()) {
+                                                string id = item.TryGetProperty("id", out var idElem) ? idElem.GetString() ?? "" : "";
+                                                if (!string.IsNullOrEmpty(id)) {
+                                                    var msg = new Scrim.Metadata.ChatMessage {
+                                                        Id = id,
+                                                        Sender = item.TryGetProperty("sender", out var sElem) ? sElem.GetString() ?? "" : "Remote DJ",
+                                                        Text = item.TryGetProperty("text", out var tElem) ? tElem.GetString() ?? "" : "",
+                                                        IsHost = item.TryGetProperty("isHost", out var hElem) && hElem.GetBoolean(),
+                                                        Color = item.TryGetProperty("color", out var cElem) ? cElem.GetString() ?? "#00d2ff" : "#00d2ff",
+                                                        Timestamp = item.TryGetProperty("timestamp", out var tsElem) && tsElem.TryGetDateTime(out var dt) ? dt : DateTime.UtcNow
+                                                    };
+                                                    RemoteGreenRoomMessageReceived?.Invoke(config.Id, msg);
+                                                }
+                                            }
+                                        }
+                                    }
+                                } catch { }
+                            }
                         }
                     } catch { }
                 }, metaCts.Token);
@@ -418,6 +451,33 @@ namespace Scrim.Audio {
                     }
                 } catch { }
             }
+        }
+
+        public async Task<bool> SendRemoteGreenRoomMessageAsync(string streamId, string sender, string text, string? color = null) {
+            RelayStreamConfig? config;
+            lock (_lock) {
+                config = _streams.FirstOrDefault(s => s.Id == streamId && s.IsEnabled && s.IsConnected);
+            }
+            if (config == null || string.IsNullOrWhiteSpace(config.StreamUrl)) return false;
+
+            try {
+                var uri = new Uri(config.StreamUrl);
+                string postUrl = $"{uri.Scheme}://{uri.Host}:{uri.Port}/api/greenroom/chat";
+                string json = $"{{\"sender\":\"{EscapeJson(sender)}\",\"text\":\"{EscapeJson(text)}\",\"passcode\":\"{EscapeJson(config.RemoteGreenRoomPasscode)}\",\"color\":\"{EscapeJson(color ?? "#00d2ff")}\"}}";
+                using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+                if (!string.IsNullOrWhiteSpace(config.RemoteGreenRoomPasscode)) {
+                    content.Headers.Add("X-GreenRoom-Passcode", config.RemoteGreenRoomPasscode);
+                }
+                var resp = await _httpClient.PostAsync(postUrl, content);
+                return resp.IsSuccessStatusCode;
+            } catch {
+                return false;
+            }
+        }
+
+        private static string EscapeJson(string? s) {
+            if (string.IsNullOrEmpty(s)) return "";
+            return s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r");
         }
 
         public void Dispose() {

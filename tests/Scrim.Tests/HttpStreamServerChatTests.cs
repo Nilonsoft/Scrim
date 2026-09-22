@@ -557,19 +557,44 @@ namespace Scrim.Tests {
                 Assert.Contains("\"custom_neon\"", brandingJson);
                 Assert.Contains("\"Neon Glow\"", brandingJson);
 
-                // 2. GET /api/greenroom/chat initially empty
-                var getRes = await client.GetAsync($"http://localhost:{testPort}/api/greenroom/chat");
+                // 2. GET /greenroom serves HTML portal
+                var portalRes = await client.GetAsync($"http://localhost:{testPort}/greenroom");
+                Assert.Equal(HttpStatusCode.OK, portalRes.StatusCode);
+                string portalHtml = await portalRes.Content.ReadAsStringAsync();
+                Assert.Contains("SCRIM BACKSTAGE", portalHtml);
+                Assert.Contains("Green Room Passcode", portalHtml);
+
+                // 3. GET /api/greenroom/chat without passcode returns 401 Unauthorized
+                var unauthGetRes = await client.GetAsync($"http://localhost:{testPort}/api/greenroom/chat");
+                Assert.Equal(HttpStatusCode.Unauthorized, unauthGetRes.StatusCode);
+
+                // 4. POST /api/greenroom/auth with invalid passcode returns 401
+                var badAuthReq = new StringContent("{\"passcode\":\"wrongpin\"}", System.Text.Encoding.UTF8, "application/json");
+                var badAuthRes = await client.PostAsync($"http://localhost:{testPort}/api/greenroom/auth", badAuthReq);
+                Assert.Equal(HttpStatusCode.Unauthorized, badAuthRes.StatusCode);
+
+                // 5. POST /api/greenroom/auth with valid passcode returns 200 OK
+                var goodAuthReq = new StringContent("{\"passcode\":\"party4242\"}", System.Text.Encoding.UTF8, "application/json");
+                var goodAuthRes = await client.PostAsync($"http://localhost:{testPort}/api/greenroom/auth", goodAuthReq);
+                Assert.Equal(HttpStatusCode.OK, goodAuthRes.StatusCode);
+                string authJson = await goodAuthRes.Content.ReadAsStringAsync();
+                Assert.Contains("\"success\":true", authJson);
+
+                // 6. GET /api/greenroom/chat with header X-GreenRoom-Passcode succeeds and initially empty
+                var getReqWithHeader = new HttpRequestMessage(HttpMethod.Get, $"http://localhost:{testPort}/api/greenroom/chat");
+                getReqWithHeader.Headers.Add("X-GreenRoom-Passcode", "party4242");
+                var getRes = await client.SendAsync(getReqWithHeader);
                 Assert.Equal(HttpStatusCode.OK, getRes.StatusCode);
                 string getJson = await getRes.Content.ReadAsStringAsync();
                 Assert.Contains("\"messages\":[]", getJson);
 
-                // 3. POST to /api/greenroom/chat
-                var postContent = new StringContent("{\"sender\":\"DJ Alex\",\"text\":\"Track 2 BPM 128 in A Minor ready\",\"color\":\"#10b981\"}", System.Text.Encoding.UTF8, "application/json");
+                // 7. POST to /api/greenroom/chat with body passcode
+                var postContent = new StringContent("{\"sender\":\"DJ Alex\",\"text\":\"Track 2 BPM 128 in A Minor ready\",\"color\":\"#10b981\",\"passcode\":\"party4242\"}", System.Text.Encoding.UTF8, "application/json");
                 var postRes = await client.PostAsync($"http://localhost:{testPort}/api/greenroom/chat", postContent);
                 Assert.Equal(HttpStatusCode.OK, postRes.StatusCode);
 
-                // 4. GET /api/greenroom/chat contains posted message
-                var getRes2 = await client.GetAsync($"http://localhost:{testPort}/api/greenroom/chat");
+                // 8. GET /api/greenroom/chat with ?pin= query parameter contains posted message
+                var getRes2 = await client.GetAsync($"http://localhost:{testPort}/api/greenroom/chat?pin=party4242");
                 Assert.Equal(HttpStatusCode.OK, getRes2.StatusCode);
                 string getJson2 = await getRes2.Content.ReadAsStringAsync();
                 Assert.Contains("DJ Alex", getJson2);

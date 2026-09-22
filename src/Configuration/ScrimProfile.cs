@@ -27,6 +27,7 @@ namespace Scrim.Configuration {
         public string StreamMountPoint { get; set; } = "stream";
         public bool RestrictToLocalNetwork { get; set; } = false;
         public bool EnableChat { get; set; } = true;
+        public string GreenRoomPasscode { get; set; } = "party4242";
         public System.Collections.Generic.List<string> NicknameBlacklist { get; set; } = new();
         public System.Collections.Generic.List<BannedChatUser> BannedUsers { get; set; } = new();
 

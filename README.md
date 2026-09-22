@@ -87,7 +87,7 @@
 - **Scrim-to-Scrim Peer Auto-Detection**: Auto-detects peer Scrim broadcasts, pulling remote DJ names, bios, and avatars into the console and web player.
 - **Pre-Fade Listen (PFL) Headphone Cueing**: Dedicated `🎧 CUE` button to preview and beatmatch remote streams in headphones over secondary WASAPI audio devices before going live.
 - **Automated B2B DJ Crossfader**: 1-click `⚡ Hand-Off to Guest` and `⚡ Take Back Decks` executing smooth 8-second S-curve volume transitions between host decks and guest streams.
-- **Green Room Talkback Intercom**: Dedicated `🎙️ Talkback (Off-Air)` isolates host microphone from the master broadcast for private off-air coordination with guest performers.
+- **Green Room Talkback Intercom & Web Portal**: Dedicated `🎙️ Talkback (Off-Air)`, in-console private chat, mobile-friendly backstage web portal (`/greenroom`) with custom owner passcode security, and Scrim-to-Scrim WAN interconnect.
 - **Stream Health & Auto-Fallback**: Live buffer depth telemetry (`(1.2s buffer)`) and instant auto-fallback restoring host volume to 100% if a guest stream drops.
 - **Interactive Web Player Stage Presence**: "Now on the Decks" dual-avatar badge with glowing pulse rings, DJ hand-off toast banners, guest DJ profile popover modal, and real-time `🎉 PARTY` celebration pyro/confetti bursts. See [v1.0.11 Feature Guide](docs/v1.0.11-features-guide.md#1-stream-relaying--multi-dj-party-hub).
 
