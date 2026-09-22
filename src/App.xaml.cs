@@ -36,7 +36,8 @@ namespace Scrim {
                     Path.Combine(scrimDir, "assets"),
                     Path.Combine(scrimDir, "themes"),
                     Path.Combine(scrimDir, "voice_effects"),
-                    Path.Combine(scrimDir, "plugins")
+                    Path.Combine(scrimDir, "plugins"),
+                    Path.Combine(scrimDir, "playlists")
                 };
                 foreach (var dir in dirs) {
                     if (!Directory.Exists(dir)) {
@@ -80,6 +81,10 @@ namespace Scrim {
             services.AddTransient<MicrophoneCaptureService>();
             services.AddSingleton<LocalAudioRoutingService>();
             services.AddSingleton<VirtualAudioDeviceService>();
+            services.AddSingleton<DualDeckMixerService>();
+            services.AddSingleton<EventSchedulerService>();
+            services.AddSingleton<DeadAirRecoveryService>();
+            services.AddSingleton<LocalMusicPlayerService>();
 
             // Server & Metadata
             services.AddSingleton<INetworkDiscoveryService, NetworkDiscoveryService>();

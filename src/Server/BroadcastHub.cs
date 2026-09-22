@@ -30,14 +30,21 @@ namespace Scrim.Server {
                     AudioFrameAvailable?.Invoke(this, frame);
 
                     foreach (var client in _clients.Values) {
+                        client.BytesTransferred += frame.Length;
                         client.AudioChannel.Writer.TryWrite(frame);
                     }
                 }
             }, token);
         }
 
-        public ClientConnectionWorker RegisterClient() {
-            var worker = new ClientConnectionWorker();
+        public ClientConnectionWorker RegisterClient(string ip = "127.0.0.1", string userAgent = "Web Player", string mount = "stream", CancellationTokenSource? cts = null) {
+            var worker = new ClientConnectionWorker {
+                IpAddress = ip,
+                UserAgent = userAgent,
+                MountPoint = mount,
+                Cts = cts,
+                ConnectedAt = DateTime.UtcNow
+            };
             
             foreach (var frame in _preRollBuffer.GetBurst()) {
                 worker.AudioChannel.Writer.TryWrite(frame);
@@ -45,6 +52,18 @@ namespace Scrim.Server {
 
             _clients.TryAdd(worker.ClientId, worker);
             return worker;
+        }
+
+        public System.Collections.Generic.IReadOnlyCollection<ClientConnectionWorker> GetActiveClients() {
+            return System.Linq.Enumerable.ToArray(_clients.Values);
+        }
+
+        public bool DisconnectClient(string clientId) {
+            if (_clients.TryRemove(clientId, out var worker)) {
+                worker.Dispose();
+                return true;
+            }
+            return false;
         }
 
         public void UnregisterClient(string clientId) {

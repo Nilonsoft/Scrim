@@ -38,7 +38,7 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
         }
     }
     if ([string]::IsNullOrWhiteSpace($Version)) {
-        $Version = "1.0.7"
+        $Version = "1.0.9"
     }
 }
 
@@ -430,33 +430,26 @@ if ($sourcePatchNotes) {
 
 ## What's New in v$Version
 
-### 🎤 Live Synced & Plain Lyrics Drawer
-* **LRCLIB Integration**: Real-time line-by-line synchronized lyrics querying the free, open LRCLIB database without requiring any API keys.
-* **Audio Buffer Sync Calibration**: Added stream buffer compensation (default 2.0s delay offset) with interactive `-` / `+` micro-adjustment controls in the lyrics footer (`Sync: -2.0s`), automatically saved to ``localStorage``.
-* **Plain Lyrics Fallback**: Automatically renders formatted plain lyrics when synchronized timestamps are unavailable.
+### 🎛️ Pro DJ Stereo Mixer & Discrete Channels
+* **Hardware-Class Channel Architecture**: Separate discrete channels for Stereo Music Deck, Microphone Talkover, and Master Bus inspired by club-standard DJ consoles (Pioneer DJM, Traktor Pro, Serato DJ).
+* **Constant-Power Stereo Panning**: Smooth Left/Right balance control with quick center detent reset (`C`).
+* **Mid-Side Stereo Width Expander**: Variable stereo field processing from `0.0x (True Mono sum)` for mono compatibility checks to `1.0x (Standard Stereo)` and `2.0x (Super-Wide Stereo)` for immersive spatial imaging in headphones and stereo monitors.
+* **Music Trim & Microphone Gain**: Fine-grained `-12.0 dB` to `+12.0 dB` pre-gain leveling, channel mutes, and solo switches.
+* **80Hz Rumble Cut (High-Pass Filter)**: Dedicated broadcast-grade high-pass filter tuned to 80Hz to eliminate desk thumps, vibrations, and vocal plosives.
 
-### 🎨 Dynamic Ambient Backdrop
-* **Real-time Color Extraction**: Ambient glassmorphic backdrop dynamically extracts vibrant palette colors from the current song's album art in real-time.
-* **Owner Theme Precedence Toggle**: Added an option in Website Branding allowing station owners to prioritize their chosen theme over dynamic color extraction.
-* **Reactive Palette Updates**: Palette transitions reactively on track change or when toggling settings without requiring a page refresh.
+### 🎚️ 3-Band DJ Isolator & Instant Kill Switches
+* **3-Band Frequency Isolator**: Dedicated HIGH (2.5k-20kHz), MID (300-2.5kHz), and LOW (20-300Hz) bands with `-26 dB` to `+6 dB` throw.
+* **Instant Kill Buttons**: Illuminated **LOW KILL**, **MID KILL**, and **HIGH KILL** buttons with `-inf dB` full cutoff for drop transitions, vocal isolation, and beatmatching without clashing basslines.
+* **DJ Sound Color Sweep Filter**: Bi-polar filter sweeping from a resonant Low-Pass Filter (sweeps down to 160Hz) to neutral bypass to a resonant High-Pass Filter (sweeps up to 3.5kHz).
 
-### 📺 Party / TV Full-Screen Mode
-* **Cinema Display Layout**: 1-click full-screen TV mode with enlarged glowing album art, expanded audio visualizer, and large clock.
-* **Auto-Idle Inactivity Hiding**: Automatically fades out navigation controls, header, and mouse cursor after 3.5 seconds of inactivity.
+### 📊 10-Band ISO Graphic Equalizer
+* **10 ISO Frequency Bands**: Surgical acoustic tuning across 31Hz, 63Hz, 125Hz, 250Hz, 500Hz, 1kHz, 2kHz, 4kHz, 8kHz, and 16kHz with +/- 12 dB precision vertical faders.
+* **Pro DJ Presets**: 1-click loading for *Flat / Bypass*, *Club / EDM Bass*, *Radio DJ Voice*, *Rock & Live*, *Warm Vinyl & Acoustic*, *Hip-Hop Thump*, *Lofi Lounge*, and *Treble Sparkle*.
 
-### 📅 Station Schedule & Broadcaster Bio Modal
-* **Broadcaster Profile Fields**: Station owners can configure their broadcast schedule, bio, and social links (Discord, Twitch, Twitter / X).
-* **Interactive Web Modal**: Web listeners can view station schedule and host information by clicking "Schedule" or "About" in the top navigation.
-
-### ⚔️ DJ Live Polls & Track Battles
-* **Studio Console Poll Launcher**: DJ can launch custom 2-option listener polls or 1-click "Track Battles" comparing the current track with the previous track.
-* **Real-Time Web Voting**: Real-time listener voting with animated percentage bars and live vote counters pushed via Server-Sent Events.
-
-### 🛡️ 24/7 Continuous Streaming & Server Resiliency
-* **Fault-Tolerant Accept Loops**: Hardened HTTP and TCP bridge accept loops against transient network glitches, DHCP lease renewals, and socket resets.
-* **Asynchronous Request Isolation**: Every web asset and API request is dispatched in an isolated task so client disconnects can never crash or block the server.
-* **Self-Healing Watchdog**: Added a background watchdog in the console that continuously verifies HTTP server health and automatically re-binds if interrupted.
-* **Connection Timeouts**: Enforced 15-second read timeouts on bridge headers to eliminate zombie sockets from stalled clients.
+### 📈 Real-Time Vector Response Curve & Soft Limiter
+* **Live SVG Response Curve**: Real-time vector curve displaying aggregate frequency response across 20Hz - 20kHz with illuminated cyan/purple gradient fill.
+* **Analog Soft-Clip Limiter**: Hyperbolic tangent (`tanh`) saturation preventing harsh digital clipping while delivering punchy club-level loudness.
+* **Modular Studio Card**: Added `"card-dj-eq"` ("Pro DJ Mixer & 10-Band EQ") to the console layout with full persistence across restarts.
 "@
 }
 

@@ -318,3 +318,51 @@ You can reference your image in the **Station Banner Image** input field using a
 - **Direct File Path**: `C:\Banners\mybanner.png`
 - **Remote Web URL**: `https://example.com/banner.png`
 
+---
+
+## 14. Local Music Playback & Playlist Management Console
+
+Broadcasters can play local music files directly from Scrim's console without needing external music software like Spotify, VLC, or foobar2000. The **Playlist & Console Player** card provides a full-featured Pro DJ local player and playlist workstation.
+
+### Integrated Console Player & Transport
+- **Now Playing Strip**: Displays active track title, artist, album, and format. An animated audio visualizer pulses during playback.
+- **Interactive Seek Bar**: Jump to any point in the track with real-time elapsed time and total duration readouts (`mm:ss` or `h:mm:ss`).
+- **Transport Controls**: Previous (⏮), Play/Pause (▶ / ⏸), Stop (⏹), and Next (⏭).
+- **Playback Modes**:
+  - **Shuffle (🔀)**: Randomizes track selection across the entire playlist without repeating until exhausted.
+  - **Repeat (🔁)**: Cycle through **Repeat Off**, **Repeat All** (continuous station loop), or **Repeat 1 (🔂)** (loop single track).
+  - **Auto-Advance**: When a song finishes, Scrim automatically transitions to the next track in the queue with zero silence gaps.
+- **Local Monitor Volume (🔊)**: Dedicated volume slider and mute toggle controlling what you hear through your local speakers or headphones.
+
+### Pro DJ Audio Pipeline Integration
+Local music routes directly through Scrim's Pro DJ audio engine:
+- **10-Band ISO EQ & Color Filter**: All equalization, frequency kills, pan, stereo width, and channel trim set in the **10-Band EQ** card apply to local playback.
+- **Microphone Auto-Ducking**: When the DJ speaks into the microphone (PTT or Voice Activated), local music automatically ducks down by `-14 dB` with smooth attack and release envelopes.
+- **Master Limiter & Meters**: Feeds directly into Scrim's master bus limiter and twin retro analog VU meters.
+- **Listener Streaming**: Broadcast encoders (MP3 / Opus / Ogg) stream local music in pristine quality to all connected web and network listeners.
+
+### Supported Audio Formats
+Scrim supports all standard audio formats natively through Windows Media Foundation and PCM engines:
+- **MP3** (`.mp3`) with automatic ID3v1 / ID3v2 tag parsing (Title, Artist, Album, Duration).
+- **WAV** (`.wav`) standard PCM and IEEE float.
+- **FLAC** (`.flac`) lossless audio.
+- **M4A / AAC** (`.m4a`, `.aac`) Apple / MPEG-4 audio.
+- **WMA** (`.wma`) Windows Media Audio.
+- **AIFF** (`.aiff`) uncompressed audio.
+
+### Playlist Management
+- **Add Files**: Multi-select any combination of audio files from your hard drive via the standard Windows Open File dialog.
+- **Add Folder**: Scan any music folder or library. Scrim imports all audio tracks and derives clean tags automatically.
+- **Save Playlist**: Export the current queue as a standard `.m3u` / `.m3u8` playlist or `.json` playlist file to `%USERPROFILE%\.scrim\playlists\`.
+- **Load Playlist**: Import previously saved `.m3u` or `.json` playlists with automatic path resolution.
+- **Search & Filter**: Real-time search bar to instantly filter large playlists by song title or artist.
+- **Reordering**: Move tracks up (▲) or down (▼) to customize your set sequence.
+- **Dual Deck Quick-Cueing**: Click **`[A]`** or **`[B]`** on any playlist row to instantly cue the track into Deck A (Master) or Deck B (Standby) of the **Dual Decks & Crossfader** card.
+
+### Dual Decks & Crossfader Interoperability
+- **Master & Standby Workflow**: Broadcasters can cue their upcoming song into Deck B while Deck A or the main playlist is airing live.
+- **Independent CUE Markers**: Place custom cue points anywhere in a track, with instant return-to-cue for precision beatmatching.
+- **Tempo Control**: Adjust playback speed by `±8.0%` with 1-click center reset to align BPMs between songs.
+- **Equal-Loudness Crossfading**: Switch between Constant Power ($\cos/\sin$ equal energy), Linear, or Cut curves.
+- **Automated Hands-Free Transitions**: Trigger 1-Click Auto-DJ crossfade for an automated 4-second broadcast-quality segue.
+

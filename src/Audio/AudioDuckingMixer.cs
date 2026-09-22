@@ -23,12 +23,21 @@ namespace Scrim.Audio {
         public float LeftLevel { get; private set; } = 0f;
         public float RightLevel { get; private set; } = 0f;
 
+        // Native Pro DJ Channel Mixer & Multi-Band EQ Engine
+        public DjEqualizerProcessor DjEq { get; } = new();
+
+        public float MusicLeftLevel => DjEq.MusicPeakL;
+        public float MusicRightLevel => DjEq.MusicPeakR;
+        public float MicLeftLevel => DjEq.MicPeakL;
+        public float MicRightLevel => DjEq.MicPeakR;
+
         public bool PushToTalkActive { get; set; }
         public bool LatchActive { get; set; }
         public bool PushToMuteActive { get; set; }
         public bool IsToggleMuted { get; set; }
         public MicControlMode ControlMode { get; set; } = MicControlMode.PushToTalk;
         public float AppVolume { get; set; } = 1.0f;
+        public ChannelReader<byte[]>? LocalMusicAudioStream { get; set; }
 
         public bool IsMicLive {
             get {
@@ -80,6 +89,7 @@ namespace Scrim.Audio {
                     const int KeepaliveBytes = 3528;
                     byte[] silentFrame = new byte[KeepaliveBytes];
                     var micQueue = new System.Collections.Generic.Queue<byte>();
+                    var localMusicQueue = new System.Collections.Generic.Queue<byte>();
                     long lastAppPacketTicks = 0;
                     bool wasSilent = false;
 
@@ -87,6 +97,25 @@ namespace Scrim.Audio {
                         byte[]? appBuffer = null;
 
                         try {
+                            // Buffer incoming local music packets if stream is available
+                            if (LocalMusicAudioStream != null) {
+                                while (LocalMusicAudioStream.TryRead(out var lmBuf)) {
+                                    for (int b = 0; b < lmBuf.Length; b++) {
+                                        localMusicQueue.Enqueue(lmBuf[b]);
+                                    }
+                                }
+                            }
+
+                            // Keep local music queue bounded to max 150ms (26460 bytes)
+                            const int MaxLocalQueueBytes = 26460;
+                            if (localMusicQueue.Count > MaxLocalQueueBytes) {
+                                int excess = localMusicQueue.Count - MaxLocalQueueBytes;
+                                excess -= excess % 4;
+                                for (int b = 0; b < excess; b++) {
+                                    localMusicQueue.Dequeue();
+                                }
+                            }
+
                             // Try non-blocking read from app audio first
                             if (appAudio.TryRead(out var directBuf)) {
                                 appBuffer = directBuf;
@@ -95,14 +124,14 @@ namespace Scrim.Audio {
                             } else {
                                 // If in active playback mode (or initial startup), wait up to 350ms to accommodate
                                 // NAudio's 50-100ms buffer delivery intervals without injecting silence gaps.
-                                // If idle/silent, pace keepalive silence frames at 20ms (10ms if sfx/mic queued)
+                                // If idle/silent, pace keepalive silence frames at 20ms (10ms if sfx/mic/local queued)
                                 // so soundboard effects and VU decay ballistics run smoothly in real time.
                                 bool isRecentPlayback = !wasSilent && (lastAppPacketTicks == 0 || System.Diagnostics.Stopwatch.GetElapsedTime(lastAppPacketTicks).TotalMilliseconds < 350);
                                 int waitTimeoutMs;
                                 if (isRecentPlayback) {
                                     waitTimeoutMs = 350;
                                 } else {
-                                    waitTimeoutMs = (_sfxQueue.Count > 0 || _activeSfxQueue.Count >= 4 || micQueue.Count >= KeepaliveBytes) ? 10 : 20;
+                                    waitTimeoutMs = (_sfxQueue.Count > 0 || _activeSfxQueue.Count >= 4 || micQueue.Count >= KeepaliveBytes || localMusicQueue.Count >= KeepaliveBytes) ? 10 : 20;
                                 }
 
                                 using var timeoutCts = new CancellationTokenSource(waitTimeoutMs);
@@ -115,6 +144,44 @@ namespace Scrim.Audio {
                                     if (token.IsCancellationRequested) break;
                                     appBuffer = silentFrame;
                                     wasSilent = true;
+                                }
+                            }
+
+                            // Again drain any new local music packets that arrived during wait
+                            if (LocalMusicAudioStream != null) {
+                                while (LocalMusicAudioStream.TryRead(out var lmBuf)) {
+                                    for (int b = 0; b < lmBuf.Length; b++) {
+                                        localMusicQueue.Enqueue(lmBuf[b]);
+                                    }
+                                }
+                            }
+
+                            // Merge or inject local music into appBuffer
+                            if (localMusicQueue.Count >= 4 && appBuffer != null) {
+                                int lmBytesToRead = Math.Min(localMusicQueue.Count, appBuffer.Length);
+                                lmBytesToRead -= lmBytesToRead % 4;
+
+                                if (appBuffer == silentFrame) {
+                                    // Replace silent frame with local music frame
+                                    byte[] lmBuffer = new byte[appBuffer.Length];
+                                    for (int b = 0; b < lmBytesToRead; b++) {
+                                        lmBuffer[b] = localMusicQueue.Dequeue();
+                                    }
+                                    appBuffer = lmBuffer;
+                                    wasSilent = false;
+                                    lastAppPacketTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+                                } else {
+                                    // Sum external app audio with local music
+                                    for (int b = 0; b < lmBytesToRead; b += 2) {
+                                        byte lm0 = localMusicQueue.Dequeue();
+                                        byte lm1 = localMusicQueue.Dequeue();
+                                        short lmSample = (short)(lm0 | (lm1 << 8));
+                                        short appSample = BitConverter.ToInt16(appBuffer, b);
+                                        short mixed = (short)Math.Clamp(appSample + lmSample, short.MinValue, short.MaxValue);
+                                        byte[] sumBytes = BitConverter.GetBytes(mixed);
+                                        appBuffer[b] = sumBytes[0];
+                                        appBuffer[b + 1] = sumBytes[1];
+                                    }
                                 }
                             }
 
@@ -219,14 +286,19 @@ namespace Scrim.Audio {
             bool micActive = IsMicLive;
             double targetGain = micActive ? _duckingGain : 1.0;
 
+            // Process Music Deck through native channel strip (Gain, Pan, Stereo Width, EQ, and DJ Color Filter)
+            DjEq.ProcessMusicBuffer(appBuffer, appBuffer.Length);
+
+            // Process Mic Deck through native channel strip (Gain, Pan, 80Hz low-cut)
+            if (micActive) {
+                DjEq.ProcessMicBuffer(micBuffer, micBuffer.Length);
+            }
+
             while (_sfxQueue.TryDequeue(out var sfxBytes)) {
                 for (int b = 0; b < sfxBytes.Length; b++) {
                     _activeSfxQueue.Enqueue(sfxBytes[b]);
                 }
             }
-
-            float maxL = 0f;
-            float maxR = 0f;
 
             int frameBytes = appBuffer.Length - (appBuffer.Length % 4);
 
@@ -255,7 +327,7 @@ namespace Scrim.Audio {
                     _currentGain = _releaseCoef * _currentGain + (1 - _releaseCoef) * targetGain;
                 }
 
-                // Apply smooth ducking and independent stream volume to app audio
+                // Apply smooth ducking and stream volume to app audio
                 double mixedAppL = appSampleL * _currentGain * AppVolume;
                 double mixedAppR = appSampleR * _currentGain * AppVolume;
                 
@@ -263,14 +335,8 @@ namespace Scrim.Audio {
                 double sumL = mixedAppL + micSampleL + sfxL;
                 double sumR = mixedAppR + micSampleR + sfxR;
 
-                // Clamping limiter
-                if (sumL > short.MaxValue) sumL = short.MaxValue;
-                if (sumL < short.MinValue) sumL = short.MinValue;
-                if (sumR > short.MaxValue) sumR = short.MaxValue;
-                if (sumR < short.MinValue) sumR = short.MinValue;
-
-                short finalL = (short)sumL;
-                short finalR = (short)sumR;
+                // Process through Master Bus (Master Gain, Balance, and Soft-Clip Limiter)
+                (short finalL, short finalR) = DjEq.ProcessMasterSample(sumL, sumR);
 
                 byte[] bytesL = BitConverter.GetBytes(finalL);
                 byte[] bytesR = BitConverter.GetBytes(finalR);
@@ -281,16 +347,13 @@ namespace Scrim.Audio {
                     outBuffer[i + 2] = bytesR[0];
                     outBuffer[i + 3] = bytesR[1];
                 }
-
-                float absL = Math.Abs(finalL) / 32768.0f;
-                float absR = Math.Abs(finalR) / 32768.0f;
-                if (absL > maxL) maxL = absL;
-                if (absR > maxR) maxR = absR;
             }
 
             // Analog VU decay ballistics
-            LeftLevel = Math.Max(maxL, LeftLevel * 0.85f);
-            RightLevel = Math.Max(maxR, RightLevel * 0.85f);
+            LeftLevel = Math.Max(DjEq.MasterPeakL, LeftLevel * 0.85f);
+            RightLevel = Math.Max(DjEq.MasterPeakR, RightLevel * 0.85f);
+            DjEq.DecayMeters();
+
             if (LeftLevel < 0.001f) LeftLevel = 0f;
             if (RightLevel < 0.001f) RightLevel = 0f;
 

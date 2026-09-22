@@ -634,13 +634,17 @@ namespace Scrim.Server {
             };
             response.SendChunked = true;
 
-            var client = _hub.RegisterClient();
+            string clientIp = context.Request.RemoteEndPoint?.Address.ToString() ?? "127.0.0.1";
+            string clientUa = context.Request.UserAgent ?? "Web / Audio Player";
+            string mount = context.Request.Url?.AbsolutePath.TrimStart('/') ?? "stream";
+            using var clientCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            var client = _hub.RegisterClient(clientIp, clientUa, mount, clientCts);
             try {
                 using var stream = response.OutputStream;
-                while (!token.IsCancellationRequested) {
-                    var frame = await client.AudioChannel.Reader.ReadAsync(token);
-                    await stream.WriteAsync(frame, token);
-                    await stream.FlushAsync(token);
+                while (!clientCts.Token.IsCancellationRequested) {
+                    var frame = await client.AudioChannel.Reader.ReadAsync(clientCts.Token);
+                    await stream.WriteAsync(frame, clientCts.Token);
+                    await stream.FlushAsync(clientCts.Token);
                 }
             } catch {
             } finally {

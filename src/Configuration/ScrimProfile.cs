@@ -65,7 +65,7 @@ namespace Scrim.Configuration {
         public string ColumnLayoutMode { get; set; } = "Studio";
         public int CustomLeftWidth { get; set; } = 320;
         public int CustomRightWidth { get; set; } = 340;
-        public System.Collections.Generic.List<string> LeftColumnCards { get; set; } = new() { "card-audio-routing", "card-web-branding" };
+        public System.Collections.Generic.List<string> LeftColumnCards { get; set; } = new() { "card-audio-routing", "card-dj-eq", "card-web-branding" };
         public System.Collections.Generic.List<string> CenterColumnCards { get; set; } = new() { "card-vu-talk", "card-voice-fx", "card-queue", "card-chat" };
         public System.Collections.Generic.List<string> RightColumnCards { get; set; } = new() { "card-encoding", "card-media-player", "card-soundboard" };
 
@@ -75,6 +75,98 @@ namespace Scrim.Configuration {
         public bool WindowMaximized { get; set; } = false;
 
         public System.Collections.Generic.List<CustomSoundItem> CustomSounds { get; set; } = new();
+
+        // Pro DJ Stereo Mixer & Multi-Band Equalizer Configuration
+        public DjEqualizerConfig DjEq { get; set; } = new();
+
+        // SAM Broadcaster PRO Modular Configurations
+        public DualDeckConfig DualDeck { get; set; } = new();
+        public EventSchedulerConfig Scheduler { get; set; } = new();
+        public DeadAirConfig DeadAir { get; set; } = new();
+        public RotationRulesConfig RotationRules { get; set; } = new();
+        public MultiEncoderConfig MultiEncoder { get; set; } = new();
+    }
+
+    public class DualDeckConfig {
+        public float CrossfaderPosition { get; set; } = -1.0f;
+        public string Curve { get; set; } = "ConstantPower";
+        public int AutoCrossfadeSeconds { get; set; } = 4;
+        public float DeckAVolume { get; set; } = 1.0f;
+        public float DeckBVolume { get; set; } = 1.0f;
+        public float DeckAPitch { get; set; } = 0.0f;
+        public float DeckBPitch { get; set; } = 0.0f;
+    }
+
+    public class EventSchedulerConfig {
+        public bool Enabled { get; set; } = true;
+        public System.Collections.Generic.List<Scrim.Audio.ScheduledEvent> Events { get; set; } = new();
+    }
+
+    public class DeadAirConfig {
+        public bool Enabled { get; set; } = false;
+        public int SilenceSeconds { get; set; } = 10;
+        public bool AutoPlayBackup { get; set; } = true;
+        public string FallbackSound { get; set; } = "Airhorn";
+        public bool PlayAudibleAlarm { get; set; } = true;
+    }
+
+    public class RotationRulesConfig {
+        public bool Enabled { get; set; } = true;
+        public int ArtistSeparationMinutes { get; set; } = 60;
+        public int TrackSeparationMinutes { get; set; } = 180;
+        public string ClockWheelTemplate { get; set; } = "2 A-List -> 1 Jingle -> 1 Gold -> 1 Request";
+        public System.Collections.Generic.List<string> HeavyRotationTracks { get; set; } = new();
+        public System.Collections.Generic.List<string> RecentsTracks { get; set; } = new();
+        public System.Collections.Generic.List<string> ClassicGoldTracks { get; set; } = new();
+        public System.Collections.Generic.List<string> JingleTracks { get; set; } = new();
+    }
+
+    public class MultiEncoderConfig {
+        public bool MasterMp3Enabled { get; set; } = true;
+        public bool MobileAacEnabled { get; set; } = false;
+        public int MobileAacBitrate { get; set; } = 64;
+        public bool FlacStreamEnabled { get; set; } = false;
+        public bool IcecastRelayEnabled { get; set; } = false;
+        public string IcecastServerUrl { get; set; } = "http://icecast.example.com:8000/live";
+        public string IcecastPassword { get; set; } = "";
+        public string IcecastMount { get; set; } = "/live";
+    }
+
+    public class DjEqualizerConfig {
+        public bool Enabled { get; set; } = true;
+        public bool Is10BandMode { get; set; } = false;
+        public string ActivePreset { get; set; } = "Flat / Bypass";
+        public bool EqBypass { get; set; } = false;
+
+        // Music Deck
+        public float MusicTrimDb { get; set; } = 0.0f;
+        public float MusicPan { get; set; } = 0.0f;
+        public float MusicStereoWidth { get; set; } = 1.0f;
+        public bool MusicMuted { get; set; } = false;
+
+        // Microphone
+        public float MicGainDb { get; set; } = 0.0f;
+        public float MicPan { get; set; } = 0.0f;
+        public bool MicLowCut { get; set; } = true;
+
+        // 3-Band Isolator
+        public float LowGainDb { get; set; } = 0.0f;
+        public float MidGainDb { get; set; } = 0.0f;
+        public float HighGainDb { get; set; } = 0.0f;
+        public bool LowKill { get; set; } = false;
+        public bool MidKill { get; set; } = false;
+        public bool HighKill { get; set; } = false;
+
+        // DJ Sound Color Sweep Filter (-100 to +100)
+        public float ColorFilterKnob { get; set; } = 0.0f;
+
+        // 10-Band Graphic EQ (dB per ISO band)
+        public float[] Bands10Db { get; set; } = new float[10];
+
+        // Master Bus
+        public float MasterGainDb { get; set; } = 0.0f;
+        public float MasterBalance { get; set; } = 0.0f;
+        public bool SoftLimiterEnabled { get; set; } = true;
     }
 
     public class CustomSoundItem {

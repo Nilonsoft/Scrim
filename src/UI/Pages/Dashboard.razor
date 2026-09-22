@@ -32,6 +32,10 @@
 @inject ISongReactionService ReactionService
 @inject ISongHistoryService HistoryService
 @inject IFFmpegService FFmpegService
+@inject DualDeckMixerService DualDeck
+@inject EventSchedulerService SchedulerService
+@inject DeadAirRecoveryService DeadAirService
+@inject LocalMusicPlayerService LocalPlayer
 
 @if (ProfileManager.CurrentProfile.SyncConsoleThemeWithWeb) {
     var activeTheme = ThemeService.GetTheme(ProfileManager.CurrentProfile.WebTheme);
@@ -562,6 +566,7 @@
 
     private readonly Dictionary<string, string> AllAvailableCards = new() {
         { "card-audio-routing", "Audio Routing" },
+        { "card-dj-eq", "Pro DJ Mixer & 10-Band EQ" },
         { "card-network-access", "Network & Internet Broadcasting" },
         { "card-playlist", "Playlist & Tracks" },
         { "card-vu-talk", "Master VU & Microphone" },
@@ -583,7 +588,14 @@
         { "card-plugin-midi", "MIDI Controller" },
         { "card-plugin-archiver", "Stream Archiver" },
         { "card-plugin-logger", "Broadcast Track Logger" },
-        { "card-plugin-streamdeck", "Stream Deck Companion" }
+        { "card-plugin-streamdeck", "Stream Deck Companion" },
+        { "card-dual-deck", "Dual Decks & Crossfader" },
+        { "card-event-scheduler", "Automated Show Clock & Scheduler" },
+        { "card-voice-tracking", "Voice-Tracking Transition Recorder" },
+        { "card-multi-encoder", "Multi-Encoder & Relay Rack" },
+        { "card-listener-inspector", "Live Listener Connections & IP Inspector" },
+        { "card-silence-recovery", "Dead-Air Auto-Recovery & Alarm" },
+        { "card-rotation-rules", "Music Rotation Rules & Category Bins" }
     };
 
     private bool ShowAddCardMenu = false;
@@ -675,7 +687,7 @@
         if (p.LeftColumnCards?.Any() == true) {
             LeftColumn = new List<string>(p.LeftColumnCards);
         } else {
-            LeftColumn = new() { "card-audio-routing", "card-network-access", "card-web-branding" };
+            LeftColumn = new() { "card-audio-routing", "card-dj-eq", "card-network-access", "card-web-branding" };
         }
 
         if (p.CenterColumnCards?.Any() == true) {
@@ -705,6 +717,14 @@
         PluginLoader.PluginsChanged += OnPluginsChanged;
         RequestController.QueueChanged += OnQueueChanged;
         StreamServer.PollChanged += OnPollChanged;
+        DualDeck.StateChanged += OnDualDeckChanged;
+        SchedulerService.EventsChanged += OnSchedulerChanged;
+        SchedulerService.EventTriggered += OnSchedulerActionTriggered;
+        DeadAirService.StateChanged += OnDeadAirStateChanged;
+        LocalPlayer.TrackChanged += OnLocalTrackChanged;
+        LocalPlayer.PlaybackStateChanged += OnLocalPlaybackStateChanged;
+        LocalPlayer.PositionChanged += OnLocalPositionChanged;
+        LocalPlayer.PlaylistUpdated += OnLocalPlaylistUpdated;
 
         if (!string.IsNullOrWhiteSpace(MetadataService.CurrentMetadata.Title)) {
             CurrentTrackTitle = MetadataService.CurrentMetadata.Title;
@@ -801,6 +821,7 @@
         CustomBitrateInput = ProfileManager.CurrentProfile.Bitrate;
         CustomPortInput = ProfileManager.CurrentProfile.Port;
         LoadAllPluginConfigs();
+        SyncDjEqFromProfile();
 
         // Ensure Web Player HTTP server is running so listeners can always view the station
         try {
@@ -867,6 +888,10 @@
                 float right = Mixer.RightLevel;
                 float mic = MicService.InputLevel;
                 bool isLive = IsLive;
+                DeadAirService.UpdateCurrentLevel(Math.Max(left, right));
+                if (Hub.ActiveClientCount > _peakListenerCount) {
+                    _peakListenerCount = Hub.ActiveClientCount;
+                }
                 await InvokeAsync(async () => {
                     try {
                         await JSRuntime.InvokeVoidAsync("scrimDragDrop.setStreamOutLevels", left, right, mic, isLive);
@@ -912,6 +937,7 @@
             Capture.StartCapture(pid, captureDevice);
             MicService.StartCapture(SelectedDeviceId);
             MicService.SetVirtualOutputDevice(null);
+            Mixer.LocalMusicAudioStream = LocalPlayer.MusicStream;
             if (!Mixer.IsMixing) {
                 Mixer.StartMixing(Capture.AudioStream, MicService.MicrophoneStream, CancellationToken.None);
             }
@@ -1017,7 +1043,7 @@
     }
 
     private void ResetLayoutToDefault() {
-        LeftColumn = new() { "card-audio-routing", "card-network-access", "card-web-branding" };
+        LeftColumn = new() { "card-audio-routing", "card-dj-eq", "card-network-access", "card-web-branding" };
         CenterColumn = new() { "card-vu-talk", "card-voice-fx", "card-queue", "card-chat" };
         RightColumn = new() { "card-encoding", "card-media-player", "card-soundboard" };
         SaveCardLayout();
@@ -1134,6 +1160,7 @@
 
             MicService.StartCapture(SelectedDeviceId);
             MicService.SetVirtualOutputDevice(null);
+            Mixer.LocalMusicAudioStream = LocalPlayer.MusicStream;
             Mixer.StartMixing(Capture.AudioStream, MicService.MicrophoneStream, token);
 
             var format = Enum.TryParse<AudioFormat>(ProfileManager.CurrentProfile.AudioFormat, true, out var parsed) 
@@ -1921,6 +1948,137 @@
         }
     }
 
+    private string PlaylistFilterQuery = "";
+
+    private void OnLocalTrackChanged(object? sender, EventArgs e) {
+        InvokeAsync(() => {
+            if (LocalPlayer.CurrentTrack != null) {
+                CurrentTrackTitle = LocalPlayer.CurrentTrack.Title;
+                CurrentTrackArtist = LocalPlayer.CurrentTrack.Artist;
+                CurrentTrackExtra = $"Local Track • {LocalPlayer.CurrentTrack.FormattedDuration}";
+                CurrentTrackDuration = LocalPlayer.CurrentTrack.Duration;
+                CurrentTrackPosition = TimeSpan.Zero;
+                LastPositionUpdate = DateTimeOffset.UtcNow;
+                IsPlayingMedia = true;
+            }
+            StateHasChanged();
+        });
+    }
+
+    private int GetTrackIndex(LocalPlaylistTrack track) {
+        for (int i = 0; i < LocalPlayer.Playlist.Count; i++) {
+            if (LocalPlayer.Playlist[i] == track) return i;
+        }
+        return -1;
+    }
+
+    private void OnLocalPlaybackStateChanged(object? sender, EventArgs e) {
+        InvokeAsync(() => {
+            IsPlayingMedia = LocalPlayer.IsPlaying;
+            StateHasChanged();
+        });
+    }
+
+    private void OnLocalPositionChanged(object? sender, EventArgs e) {
+        InvokeAsync(() => {
+            CurrentTrackPosition = LocalPlayer.Position;
+            LastPositionUpdate = DateTimeOffset.UtcNow;
+            StateHasChanged();
+        });
+    }
+
+    private void OnLocalPlaylistUpdated(object? sender, EventArgs e) {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void OpenAddAudioFilesDialog() {
+        try {
+            var ofd = new Microsoft.Win32.OpenFileDialog {
+                Title = "Add Audio Files to Playlist",
+                Filter = "Audio Files (*.mp3;*.wav;*.m4a;*.aac;*.flac;*.wma;*.aiff)|*.mp3;*.wav;*.m4a;*.aac;*.flac;*.wma;*.aiff|All Files (*.*)|*.*",
+                Multiselect = true
+            };
+            if (ofd.ShowDialog() == true) {
+                LocalPlayer.AddTracks(ofd.FileNames);
+            }
+        } catch (Exception ex) {
+            Console.WriteLine($"[Dashboard] Error adding audio files: {ex.Message}");
+        }
+    }
+
+    private void OpenAddAudioFolderDialog() {
+        try {
+            var ofd = new Microsoft.Win32.OpenFolderDialog {
+                Title = "Add Music Folder to Playlist"
+            };
+            if (ofd.ShowDialog() == true) {
+                LocalPlayer.AddDirectory(ofd.FolderName, true);
+            }
+        } catch (Exception ex) {
+            Console.WriteLine($"[Dashboard] Error adding folder: {ex.Message}");
+        }
+    }
+
+    private void OpenSavePlaylistDialog() {
+        try {
+            var userDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var playlistDir = Path.Combine(userDir, ".scrim", "playlists");
+            var sfd = new Microsoft.Win32.SaveFileDialog {
+                Title = "Save Playlist",
+                InitialDirectory = Directory.Exists(playlistDir) ? playlistDir : userDir,
+                Filter = "M3U Playlist (*.m3u)|*.m3u|JSON Playlist (*.json)|*.json",
+                DefaultExt = ".m3u",
+                FileName = $"Playlist_{DateTime.Now:yyyyMMdd_HHmm}.m3u"
+            };
+            if (sfd.ShowDialog() == true) {
+                LocalPlayer.SavePlaylist(sfd.FileName);
+            }
+        } catch (Exception ex) {
+            Console.WriteLine($"[Dashboard] Error saving playlist: {ex.Message}");
+        }
+    }
+
+    private void OpenLoadPlaylistDialog() {
+        try {
+            var userDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var playlistDir = Path.Combine(userDir, ".scrim", "playlists");
+            var ofd = new Microsoft.Win32.OpenFileDialog {
+                Title = "Load Playlist",
+                InitialDirectory = Directory.Exists(playlistDir) ? playlistDir : userDir,
+                Filter = "Playlists (*.m3u;*.m3u8;*.json)|*.m3u;*.m3u8;*.json|All Files (*.*)|*.*"
+            };
+            if (ofd.ShowDialog() == true) {
+                LocalPlayer.LoadPlaylist(ofd.FileName);
+            }
+        } catch (Exception ex) {
+            Console.WriteLine($"[Dashboard] Error loading playlist: {ex.Message}");
+        }
+    }
+
+    private void OnLocalSeekChanged(ChangeEventArgs e) {
+        if (double.TryParse(e.Value?.ToString(), out double sec)) {
+            LocalPlayer.Seek(TimeSpan.FromSeconds(sec));
+        }
+    }
+
+    private void ToggleRepeatMode() {
+        LocalPlayer.RepeatMode = LocalPlayer.RepeatMode switch {
+            LocalPlayerRepeatMode.Off => LocalPlayerRepeatMode.All,
+            LocalPlayerRepeatMode.All => LocalPlayerRepeatMode.One,
+            _ => LocalPlayerRepeatMode.Off
+        };
+    }
+
+    private void CueTrackToDeck(LocalPlaylistTrack track, string deckId) {
+        var deck = deckId == "A" ? DualDeck.DeckA : DualDeck.DeckB;
+        deck.Title = track.Title;
+        deck.Artist = track.Artist;
+        deck.FilePath = track.FilePath;
+        deck.Duration = track.Duration;
+        deck.Position = TimeSpan.Zero;
+        StateHasChanged();
+    }
+
     public void Dispose() {
         Hub.BroadcastingStateChanged -= OnHubBroadcastingStateChanged;
         MetadataService.MetadataChanged -= OnMetadataReceived;
@@ -1935,6 +2093,14 @@
         PluginLoader.PluginsChanged -= OnPluginsChanged;
         RequestController.QueueChanged -= OnQueueChanged;
         StreamServer.PollChanged -= OnPollChanged;
+        DualDeck.StateChanged -= OnDualDeckChanged;
+        SchedulerService.EventsChanged -= OnSchedulerChanged;
+        SchedulerService.EventTriggered -= OnSchedulerActionTriggered;
+        DeadAirService.StateChanged -= OnDeadAirStateChanged;
+        LocalPlayer.TrackChanged -= OnLocalTrackChanged;
+        LocalPlayer.PlaybackStateChanged -= OnLocalPlaybackStateChanged;
+        LocalPlayer.PositionChanged -= OnLocalPositionChanged;
+        LocalPlayer.PlaylistUpdated -= OnLocalPlaylistUpdated;
         _dotNetRef?.Dispose();
         _refreshTimer?.Dispose();
         _vuTimer?.Dispose();
@@ -2157,53 +2323,206 @@
 
         "card-playlist" => @<div class="scrim-card">
             <div class="scrim-card-header scrim-drag-handle">
-                <h3 class="scrim-card-title">Playlist</h3>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#00d2ff" stroke-width="2">
+                        <path d="M9 18V5l12-2v13"></path>
+                        <circle cx="6" cy="18" r="3"></circle>
+                        <circle cx="18" cy="16" r="3"></circle>
+                    </svg>
+                    <h3 class="scrim-card-title" style="margin: 0;">Playlist & Console Player</h3>
+                    <span style="font-size: 10px; background: rgba(0, 210, 255, 0.12); color: #00d2ff; padding: 1px 6px; border-radius: 4px; font-weight: 700;">
+                        @LocalPlayer.Playlist.Count tracks
+                    </span>
+                </div>
                 <div style="display: flex; align-items: center; gap: 6px;">
                     <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
                 </div>
             </div>
 
-            <table class="playlist-table" style="margin-bottom: 8px;">
-                <thead>
-                    <tr>
-                        <th style="width: 24px;">#</th>
-                        <th>Track</th>
-                        <th style="text-align: right; width: 60px;">Time</th>
-                        <th style="width: 24px;"></th>
-                    </tr>
-                </thead>
-            </table>
-
-            <div style="max-height: 180px; overflow-y: auto; margin-bottom: 12px;">
-                @foreach (var track in PlaylistTracks) {
-                    var songCounts = ReactionService.GetSongReactions(track.Title, track.Artist);
-                    <div class="playlist-row @(track.IsPlaying ? "active-track" : "")" style="cursor: pointer; display: flex; align-items: center; padding: 6px 4px; gap: 6px;">
-                        <span class="playlist-num" @onclick="@(() => PlayTrack(track))">@track.Number</span>
-                        <div class="playlist-info" @onclick="@(() => PlayTrack(track))" style="flex: 1; min-width: 0;">
-                            <div class="playlist-title" style="color: @(track.IsPlaying ? "#00d2ff" : "#fff"); font-size: 13px; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">@track.Title</div>
-                            <div class="playlist-artist" style="font-size: 11px; color: #8e95a5; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">@track.Artist</div>
+            <!-- Integrated Console Player Transport -->
+            <div style="background: #0d1117; border: 1px solid #1e2533; border-radius: 8px; padding: 10px; margin-bottom: 10px;">
+                <!-- Now Playing Details -->
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <div style="min-width: 0; flex: 1;">
+                        <div style="font-size: 13px; font-weight: 700; color: @(LocalPlayer.IsPlaying ? "#00d2ff" : "#fff"); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                            @(LocalPlayer.CurrentTrack != null ? LocalPlayer.CurrentTrack.Title : "No Local Track Loaded")
                         </div>
-                        <div class="playlist-reactions" style="display: flex; gap: 4px; align-items: center; font-size: 10px; white-space: nowrap;">
-                            <span title="Reactions" style="background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 8px; display: inline-flex; align-items: center; gap: 3px;">
-                                <span style="color: #38bdf8;">👍@songCounts.ThumbsUp</span>
-                                <span style="color: #f43f5e;">❤️@songCounts.Heart</span>
-                                <span style="color: #94a3b8;">👎@songCounts.ThumbsDown</span>
-                            </span>
-                            @if (songCounts.ThumbsUp > 0 || songCounts.Heart > 0 || songCounts.ThumbsDown > 0) {
-                                <button class="scrim-dots-btn" style="color: #ef4444; font-size: 10px; padding: 1px 4px;" @onclick="@(() => ClearSongReactionsForTrack(track.Title, track.Artist))" title="Clear reactions for this song">🗑️</button>
-                            }
+                        <div style="font-size: 11px; color: #8e95a5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                            @(LocalPlayer.CurrentTrack != null ? $"{LocalPlayer.CurrentTrack.Artist} {(string.IsNullOrEmpty(LocalPlayer.CurrentTrack.Album) ? "" : $"• {LocalPlayer.CurrentTrack.Album}")}" : "Use '+ Add Files' or click a song to begin playback")
                         </div>
-                        <div class="playlist-time" @onclick="@(() => PlayTrack(track))">@track.Duration</div>
-                        <button class="scrim-dots-btn" style="color: #6b7280; font-size: 11px; margin-left: 2px;" @onclick="@(() => RemovePlaylistTrack(track))">✕</button>
                     </div>
-                }
+                    @if (LocalPlayer.IsPlaying) {
+                        <div style="display: flex; gap: 2px; align-items: flex-end; height: 16px; margin-left: 8px;">
+                            <div style="width: 3px; height: 12px; background: #00d2ff; border-radius: 1px;"></div>
+                            <div style="width: 3px; height: 16px; background: #00d2ff; border-radius: 1px;"></div>
+                            <div style="width: 3px; height: 8px; background: #00d2ff; border-radius: 1px;"></div>
+                        </div>
+                    }
+                </div>
+
+                <!-- Seek Slider and Time -->
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                    <span style="font-size: 10px; font-family: monospace; color: #94a3b8; min-width: 34px;">
+                        @(LocalPlayer.Position.TotalHours >= 1 ? LocalPlayer.Position.ToString(@"h\:mm\:ss") : LocalPlayer.Position.ToString(@"mm\:ss"))
+                    </span>
+                    <input type="range" min="0" max="@Math.Max(1, LocalPlayer.Duration.TotalSeconds)" step="1"
+                           value="@LocalPlayer.Position.TotalSeconds"
+                           @onchange="OnLocalSeekChanged"
+                           style="flex: 1; accent-color: #00d2ff; height: 4px; cursor: pointer;" />
+                    <span style="font-size: 10px; font-family: monospace; color: #94a3b8; min-width: 34px; text-align: right;">
+                        @(LocalPlayer.Duration.TotalHours >= 1 ? LocalPlayer.Duration.ToString(@"h\:mm\:ss") : LocalPlayer.Duration.ToString(@"mm\:ss"))
+                    </span>
+                </div>
+
+                <!-- Transport Buttons and Volume -->
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 6px;">
+                    <!-- Playback Controls -->
+                    <div style="display: flex; align-items: center; gap: 4px;">
+                        <button class="scrim-dots-btn" style="padding: 4px 8px; font-size: 12px;" @onclick="@(() => LocalPlayer.Previous())" title="Previous Track">⏮</button>
+                        <button class="scrim-btn-primary" style="padding: 4px 12px; font-size: 12px; font-weight: 700; background: @(LocalPlayer.IsPlaying ? "#f59e0b" : "#00d2ff"); color: #000;"
+                                @onclick="@(() => LocalPlayer.TogglePlayPause())" title="@(LocalPlayer.IsPlaying ? "Pause" : "Play")">
+                            @(LocalPlayer.IsPlaying ? "⏸ Pause" : "▶ Play")
+                        </button>
+                        <button class="scrim-dots-btn" style="padding: 4px 8px; font-size: 12px;" @onclick="@(() => LocalPlayer.Stop())" title="Stop">⏹</button>
+                        <button class="scrim-dots-btn" style="padding: 4px 8px; font-size: 12px;" @onclick="@(() => LocalPlayer.Next())" title="Next Track">⏭</button>
+                    </div>
+
+                    <!-- Mode Toggles: Shuffle & Repeat -->
+                    <div style="display: flex; align-items: center; gap: 4px;">
+                        <button class="pill-option @(LocalPlayer.IsShuffle ? "active" : "")"
+                                style="padding: 3px 8px; font-size: 10px; border-radius: 4px; background: @(LocalPlayer.IsShuffle ? "rgba(0, 210, 255, 0.25)" : "#1e2533"); color: @(LocalPlayer.IsShuffle ? "#00d2ff" : "#8e95a5");"
+                                @onclick="@(() => { LocalPlayer.IsShuffle = !LocalPlayer.IsShuffle; StateHasChanged(); })"
+                                title="Shuffle: @(LocalPlayer.IsShuffle ? "ON" : "OFF")">
+                            🔀
+                        </button>
+                        <button class="pill-option @(LocalPlayer.RepeatMode != LocalPlayerRepeatMode.Off ? "active" : "")"
+                                style="padding: 3px 8px; font-size: 10px; border-radius: 4px; background: @(LocalPlayer.RepeatMode != LocalPlayerRepeatMode.Off ? "rgba(0, 210, 255, 0.25)" : "#1e2533"); color: @(LocalPlayer.RepeatMode != LocalPlayerRepeatMode.Off ? "#00d2ff" : "#8e95a5");"
+                                @onclick="ToggleRepeatMode"
+                                title="Repeat Mode: @LocalPlayer.RepeatMode">
+                            @(LocalPlayer.RepeatMode switch {
+                                LocalPlayerRepeatMode.One => "🔂 1",
+                                LocalPlayerRepeatMode.All => "🔁 All",
+                                _ => "🔁 Off"
+                            })
+                        </button>
+                    </div>
+
+                    <!-- Volume Slider -->
+                    <div style="display: flex; align-items: center; gap: 4px; min-width: 90px;">
+                        <button class="scrim-dots-btn" style="padding: 2px 4px; font-size: 10px;" @onclick="@(() => { LocalPlayer.IsMuted = !LocalPlayer.IsMuted; StateHasChanged(); })">
+                            @(LocalPlayer.IsMuted ? "🔇" : (LocalPlayer.Volume < 0.5f ? "🔉" : "🔊"))
+                        </button>
+                        <input type="range" min="0" max="1" step="0.05"
+                               value="@LocalPlayer.Volume"
+                               @oninput="@((ChangeEventArgs e) => { if (float.TryParse(e.Value?.ToString(), out var v)) LocalPlayer.Volume = v; })"
+                               style="width: 60px; accent-color: #00d2ff; height: 3px;"
+                               title="Local Player Volume: @((int)(LocalPlayer.Volume * 100))%" />
+                    </div>
+                </div>
             </div>
 
-            <!-- Add Track Inputs -->
-            <div style="display: flex; gap: 6px; margin-top: 8px;">
-                <input type="text" class="scrim-input" style="flex: 2; padding: 6px 8px; font-size: 12px;" @bind="NewTrackTitle" placeholder="Song Title" />
-                <input type="text" class="scrim-input" style="flex: 1; padding: 6px 8px; font-size: 12px;" @bind="NewTrackArtist" placeholder="Artist" />
-                <button class="scrim-btn-secondary" style="padding: 6px 10px; font-size: 12px;" @onclick="AddPlaylistTrack">+ Add</button>
+            <!-- Toolbar: Add Files, Folder, Save, Load, Filter -->
+            <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; align-items: center;">
+                <button class="scrim-btn-primary" style="padding: 4px 8px; font-size: 11px;" @onclick="OpenAddAudioFilesDialog" title="Add Audio Files (MP3, WAV, FLAC, M4A, AAC)">
+                    + Add Files
+                </button>
+                <button class="scrim-btn-secondary" style="padding: 4px 8px; font-size: 11px;" @onclick="OpenAddAudioFolderDialog" title="Scan Folder for Music Files">
+                    📁 Folder
+                </button>
+                <button class="scrim-btn-secondary" style="padding: 4px 8px; font-size: 11px;" @onclick="OpenSavePlaylistDialog" title="Save Playlist (.m3u / .json)">
+                    💾 Save
+                </button>
+                <button class="scrim-btn-secondary" style="padding: 4px 8px; font-size: 11px;" @onclick="OpenLoadPlaylistDialog" title="Load Saved Playlist">
+                    📂 Load
+                </button>
+                <button class="scrim-dots-btn" style="color: #ef4444; font-size: 11px; padding: 4px 6px;" @onclick="@(() => LocalPlayer.ClearPlaylist())" title="Clear Playlist">
+                    🗑️
+                </button>
+                <input type="text" class="scrim-input" style="flex: 1; min-width: 90px; padding: 4px 6px; font-size: 11px;"
+                       placeholder="🔍 Search..." @bind="PlaylistFilterQuery" @bind:event="oninput" />
+            </div>
+
+            <!-- Tracklist -->
+            <div style="max-height: 220px; overflow-y: auto; margin-bottom: 4px; border: 1px solid #1b202c; border-radius: 6px; background: #07090e;">
+                @{
+                    var query = PlaylistFilterQuery?.Trim();
+                    var tracks = string.IsNullOrEmpty(query)
+                        ? LocalPlayer.Playlist
+                        : LocalPlayer.Playlist.Where(t => t.Title.Contains(query, StringComparison.OrdinalIgnoreCase) || t.Artist.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
+                }
+
+                @if (tracks.Count == 0) {
+                    <div style="padding: 24px; text-align: center; color: #64748b; font-size: 11px;">
+                        @(LocalPlayer.Playlist.Count == 0 ? "Playlist is empty. Click '+ Add Files' or '📁 Folder' to add local tracks." : "No tracks match search filter.")
+                    </div>
+                } else {
+                    @for (int i = 0; i < tracks.Count; i++) {
+                        var track = tracks[i];
+                        int trackIndex = GetTrackIndex(track);
+                        bool isCurrent = trackIndex == LocalPlayer.CurrentIndex;
+                        var songCounts = ReactionService.GetSongReactions(track.Title, track.Artist);
+
+                        <div class="playlist-row @(isCurrent ? "active-track" : "")"
+                             style="cursor: pointer; display: flex; align-items: center; padding: 6px 6px; gap: 6px; border-bottom: 1px solid rgba(255,255,255,0.03); background: @(isCurrent ? "rgba(0, 210, 255, 0.08)" : "transparent");"
+                             @ondblclick="@(() => LocalPlayer.PlayTrack(trackIndex))">
+                            
+                            <!-- Track Number or Play Indicator -->
+                            <div style="width: 20px; text-align: center; font-size: 11px; font-family: monospace; color: @(isCurrent ? "#00d2ff" : "#64748b");"
+                                 @onclick="@(() => LocalPlayer.PlayTrack(trackIndex))">
+                                @(isCurrent && LocalPlayer.IsPlaying ? "▶" : $"{trackIndex + 1}")
+                            </div>
+
+                            <!-- Track Info -->
+                            <div style="flex: 1; min-width: 0;" @onclick="@(() => LocalPlayer.PlayTrack(trackIndex))">
+                                <div style="color: @(isCurrent ? "#00d2ff" : "#fff"); font-size: 12px; font-weight: @(isCurrent ? "700" : "500"); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">
+                                    @track.Title
+                                </div>
+                                <div style="font-size: 10px; color: #8e95a5; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">
+                                    @track.Artist
+                                </div>
+                            </div>
+
+                            <!-- Reactions Badge -->
+                            <div style="display: flex; gap: 4px; align-items: center; font-size: 10px; white-space: nowrap;">
+                                @if (songCounts.ThumbsUp > 0 || songCounts.Heart > 0 || songCounts.ThumbsDown > 0) {
+                                    <span title="Listener Reactions" style="background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 6px; display: inline-flex; align-items: center; gap: 2px;">
+                                        @if (songCounts.ThumbsUp > 0) { <span style="color: #38bdf8;">👍@songCounts.ThumbsUp</span> }
+                                        @if (songCounts.Heart > 0) { <span style="color: #f43f5e;">❤️@songCounts.Heart</span> }
+                                        @if (songCounts.ThumbsDown > 0) { <span style="color: #94a3b8;">👎@songCounts.ThumbsDown</span> }
+                                    </span>
+                                }
+                            </div>
+
+                            <!-- Duration -->
+                            <div style="font-size: 11px; font-family: monospace; color: #8e95a5; min-width: 36px; text-align: right;" @onclick="@(() => LocalPlayer.PlayTrack(trackIndex))">
+                                @track.FormattedDuration
+                            </div>
+
+                            <!-- Quick Action Buttons: Deck A, Deck B, Move, Delete -->
+                            <div style="display: flex; align-items: center; gap: 2px; margin-left: 2px;">
+                                <button class="scrim-dots-btn" style="font-size: 9px; padding: 1px 3px; color: #00d2ff;" @onclick="@(() => CueTrackToDeck(track, "A"))" title="Load into Deck A">
+                                    [A]
+                                </button>
+                                <button class="scrim-dots-btn" style="font-size: 9px; padding: 1px 3px; color: #10b981;" @onclick="@(() => CueTrackToDeck(track, "B"))" title="Load into Deck B">
+                                    [B]
+                                </button>
+                                @if (trackIndex > 0) {
+                                    <button class="scrim-dots-btn" style="font-size: 10px; padding: 1px 2px; color: #94a3b8;" @onclick="@(() => LocalPlayer.MoveTrack(trackIndex, trackIndex - 1))" title="Move Up">
+                                        ▲
+                                    </button>
+                                }
+                                @if (trackIndex < LocalPlayer.Playlist.Count - 1) {
+                                    <button class="scrim-dots-btn" style="font-size: 10px; padding: 1px 2px; color: #94a3b8;" @onclick="@(() => LocalPlayer.MoveTrack(trackIndex, trackIndex + 1))" title="Move Down">
+                                        ▼
+                                    </button>
+                                }
+                                <button class="scrim-dots-btn" style="color: #6b7280; font-size: 10px; padding: 1px 3px;" @onclick="@(() => LocalPlayer.RemoveTrack(track))" title="Remove Track">
+                                    ✕
+                                </button>
+                            </div>
+                        </div>
+                    }
+                }
             </div>
         </div>,
 
@@ -3808,6 +4127,853 @@
             </div>
         </div>,
 
+        "card-dj-eq" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 14px;">🎚️</span>
+                    <h3 class="scrim-card-title" style="margin: 0;">Pro DJ Mixer & EQ</h3>
+                    <span style="font-size: 10px; padding: 1px 6px; border-radius: 6px; background: rgba(0, 210, 255, 0.15); color: #00d2ff; font-weight: 700;">
+                        @(Mixer.DjEq.Is10BandMode ? "10-BAND GRAPHIC" : "3-BAND ISOLATOR")
+                    </span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <button class="pill-option @(Mixer.DjEq.Is10BandMode ? "" : "active")" style="padding: 2px 8px; font-size: 10px;" @onclick="@(() => SetDjEqMode(false))">3-Band</button>
+                    <button class="pill-option @(Mixer.DjEq.Is10BandMode ? "active" : "")" style="padding: 2px 8px; font-size: 10px;" @onclick="@(() => SetDjEqMode(true))">10-Band</button>
+                    <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
+                </div>
+            </div>
+
+            <!-- Top Preset & Global Bypass Bar -->
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px;">
+                <div style="display: flex; align-items: center; gap: 6px; flex: 1;">
+                    <span style="font-size: 11px; color: #94a3b8; white-space: nowrap;">Preset:</span>
+                    <select class="scrim-select" style="padding: 3px 8px; font-size: 11px; height: 28px; flex: 1;"
+                            value="@ProfileManager.CurrentProfile.DjEq.ActivePreset"
+                            @onchange="@((ChangeEventArgs e) => SetDjEqPreset(e.Value?.ToString() ?? "Flat / Bypass"))">
+                        @foreach (var pName in DjEqPresets.Keys) {
+                            <option value="@pName">@pName</option>
+                        }
+                    </select>
+                </div>
+                <div style="display: flex; gap: 6px;">
+                    <button class="scrim-btn @(Mixer.DjEq.EqBypass ? "scrim-btn-secondary" : "scrim-btn-primary")"
+                            style="padding: 3px 10px; font-size: 10px; font-weight: 700;"
+                            @onclick="ToggleDjEqBypass"
+                            title="Toggle Equalizer Processing On / Off">
+                        @(Mixer.DjEq.EqBypass ? "EQ BYPASS" : "EQ ON")
+                    </button>
+                    <button class="scrim-btn @(Mixer.DjEq.SoftLimiterEnabled ? "scrim-btn-primary" : "scrim-btn-secondary")"
+                            style="padding: 3px 10px; font-size: 10px; font-weight: 700; background: @(Mixer.DjEq.SoftLimiterEnabled ? "rgba(16, 185, 129, 0.2)" : ""); border-color: @(Mixer.DjEq.SoftLimiterEnabled ? "#10b981" : ""); color: @(Mixer.DjEq.SoftLimiterEnabled ? "#34d399" : "");"
+                            @onclick="ToggleDjSoftLimiter"
+                            title="Toggle Analog Saturation Soft-Limiter to prevent digital clipping">
+                        @(Mixer.DjEq.SoftLimiterEnabled ? "LIMITER ON" : "LIMITER OFF")
+                    </button>
+                </div>
+            </div>
+
+            <!-- Real-Time Frequency Response Curve SVG -->
+            <div style="background: #0d1017; border: 1px solid #1e2430; border-radius: 8px; padding: 6px 8px; margin-bottom: 12px; position: relative;">
+                <svg viewBox="0 0 460 70" style="width: 100%; height: 60px; display: block; overflow: visible;">
+                    <defs>
+                        <linearGradient id="djEqAreaGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                            <stop offset="0%" stop-color="#00d2ff" stop-opacity="0.35" />
+                            <stop offset="100%" stop-color="#818cf8" stop-opacity="0.02" />
+                        </linearGradient>
+                        <linearGradient id="djEqLineGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" stop-color="#38bdf8" />
+                            <stop offset="50%" stop-color="#00d2ff" />
+                            <stop offset="100%" stop-color="#a855f7" />
+                        </linearGradient>
+                    </defs>
+                    <!-- Grid Lines: +12dB (y=10), 0dB (y=35), -12dB (y=60) -->
+                    <line x1="0" y1="10" x2="460" y2="10" stroke="rgba(255,255,255,0.06)" stroke-dasharray="3,3" />
+                    <line x1="0" y1="35" x2="460" y2="35" stroke="rgba(255,255,255,0.18)" />
+                    <line x1="0" y1="60" x2="460" y2="60" stroke="rgba(255,255,255,0.06)" stroke-dasharray="3,3" />
+                    <!-- Filled Area & Curve Line -->
+                    <path d="@GetDjSvgAreaPath()" fill="url(#djEqAreaGrad)" />
+                    <path d="@GetDjSvgPath()" fill="none" stroke="url(#djEqLineGrad)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                <div style="display: flex; justify-content: space-between; font-size: 9px; color: #64748b; margin-top: 2px; padding: 0 4px;">
+                    <span>31Hz</span>
+                    <span>125Hz</span>
+                    <span>500Hz</span>
+                    <span>2kHz</span>
+                    <span>8kHz</span>
+                    <span>16kHz</span>
+                </div>
+            </div>
+
+            <!-- Channels Section: Music Deck vs Microphone Talkover -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;">
+                <!-- Music Deck Channel Strip -->
+                <div style="background: #141720; border: 1px solid #242a38; border-radius: 8px; padding: 10px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-size: 11px; font-weight: 700; color: #38bdf8; display: flex; align-items: center; gap: 4px;">
+                            🎵 MUSIC DECK
+                        </span>
+                        <div style="display: flex; gap: 4px;">
+                            <button class="scrim-btn @(Mixer.DjEq.MusicMuted ? "scrim-btn-danger" : "scrim-btn-secondary")"
+                                    style="padding: 2px 6px; font-size: 9px; font-weight: 700;"
+                                    @onclick="ToggleDjMusicMute">
+                                @(Mixer.DjEq.MusicMuted ? "MUTED" : "MUTE")
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Channel Trim -->
+                    <div style="margin-bottom: 6px;">
+                        <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
+                            <span>Trim / Gain</span>
+                            <span style="color: #cbd5e1; font-family: monospace;">@(Mixer.DjEq.MusicTrimDb >= 0 ? "+" : "")@Mixer.DjEq.MusicTrimDb.ToString("F1") dB</span>
+                        </div>
+                        <input type="range" min="-12" max="12" step="0.5" style="width: 100%; accent-color: #38bdf8;"
+                               value="@Mixer.DjEq.MusicTrimDb"
+                               @oninput="@((ChangeEventArgs e) => OnMusicTrimChanged(Convert.ToSingle(e.Value)))" />
+                    </div>
+
+                    <!-- Stereo Pan -->
+                    <div style="margin-bottom: 6px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
+                            <span>Pan L/R</span>
+                            <div style="display: flex; align-items: center; gap: 4px;">
+                                <span style="color: #cbd5e1; font-family: monospace;">@(Mixer.DjEq.MusicPan == 0 ? "CENTER" : (Mixer.DjEq.MusicPan < 0 ? $"L {Math.Abs(Mixer.DjEq.MusicPan * 100):F0}%" : $"R {Mixer.DjEq.MusicPan * 100:F0}%"))</span>
+                                <button class="pill-option" style="padding: 1px 4px; font-size: 9px;" @onclick="ResetDjPan">C</button>
+                            </div>
+                        </div>
+                        <input type="range" min="-1" max="1" step="0.05" style="width: 100%; accent-color: #38bdf8;"
+                               value="@Mixer.DjEq.MusicPan"
+                               @oninput="@((ChangeEventArgs e) => OnMusicPanChanged(Convert.ToSingle(e.Value)))" />
+                    </div>
+
+                    <!-- Stereo Width (Mid-Side Expander) -->
+                    <div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
+                            <span>Stereo Width</span>
+                            <div style="display: flex; align-items: center; gap: 4px;">
+                                <span style="font-size: 9px; padding: 1px 5px; border-radius: 4px; background: @(Mixer.DjEq.MusicStereoWidth < 0.2f ? "rgba(239, 68, 68, 0.15); color: #ef4444;" : (Mixer.DjEq.MusicStereoWidth > 1.2f ? "rgba(168, 85, 247, 0.15); color: #c084fc;" : "rgba(34, 197, 94, 0.15); color: #4ade80;")) font-weight: 700;">
+                                    @(Mixer.DjEq.MusicStereoWidth < 0.2f ? "MONO" : (Mixer.DjEq.MusicStereoWidth > 1.2f ? "WIDE" : "STEREO"))
+                                </span>
+                                <button class="pill-option" style="padding: 1px 4px; font-size: 9px;" @onclick="ResetDjStereoWidth">1x</button>
+                            </div>
+                        </div>
+                        <input type="range" min="0" max="2" step="0.05" style="width: 100%; accent-color: #00d2ff;"
+                               value="@Mixer.DjEq.MusicStereoWidth"
+                               @oninput="@((ChangeEventArgs e) => OnMusicWidthChanged(Convert.ToSingle(e.Value)))" />
+                    </div>
+                </div>
+
+                <!-- Mic Talkover Channel Strip -->
+                <div style="background: #141720; border: 1px solid #242a38; border-radius: 8px; padding: 10px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-size: 11px; font-weight: 700; color: #818cf8; display: flex; align-items: center; gap: 4px;">
+                            🎙️ MIC TALKOVER
+                        </span>
+                        <button class="scrim-btn @(Mixer.DjEq.MicLowCut ? "scrim-btn-primary" : "scrim-btn-secondary")"
+                                style="padding: 2px 6px; font-size: 9px; font-weight: 700; background: @(Mixer.DjEq.MicLowCut ? "rgba(99, 102, 241, 0.2)" : ""); border-color: @(Mixer.DjEq.MicLowCut ? "#6366f1" : ""); color: @(Mixer.DjEq.MicLowCut ? "#818cf8" : "");"
+                                @onclick="ToggleDjMicLowCut"
+                                title="80Hz High-Pass Rumble Filter removes desk bumps and vocal plosives">
+                            @(Mixer.DjEq.MicLowCut ? "80Hz CUT ON" : "80Hz OFF")
+                        </button>
+                    </div>
+
+                    <!-- Mic Gain -->
+                    <div style="margin-bottom: 6px;">
+                        <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
+                            <span>Mic Gain</span>
+                            <span style="color: #cbd5e1; font-family: monospace;">@(Mixer.DjEq.MicGainDb >= 0 ? "+" : "")@Mixer.DjEq.MicGainDb.ToString("F1") dB</span>
+                        </div>
+                        <input type="range" min="-12" max="12" step="0.5" style="width: 100%; accent-color: #818cf8;"
+                               value="@Mixer.DjEq.MicGainDb"
+                               @oninput="@((ChangeEventArgs e) => OnMicGainChanged(Convert.ToSingle(e.Value)))" />
+                    </div>
+
+                    <!-- Mic Pan -->
+                    <div style="margin-bottom: 6px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
+                            <span>Mic Pan</span>
+                            <span style="color: #cbd5e1; font-family: monospace;">@(Mixer.DjEq.MicPan == 0 ? "CENTER" : (Mixer.DjEq.MicPan < 0 ? $"L {Math.Abs(Mixer.DjEq.MicPan * 100):F0}%" : $"R {Mixer.DjEq.MicPan * 100:F0}%"))</span>
+                        </div>
+                        <input type="range" min="-1" max="1" step="0.05" style="width: 100%; accent-color: #818cf8;"
+                               value="@Mixer.DjEq.MicPan"
+                               @oninput="@((ChangeEventArgs e) => OnMicPanChanged(Convert.ToSingle(e.Value)))" />
+                    </div>
+
+                    <!-- Mic Quick Action -->
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 10px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.05);">
+                        <span style="font-size: 10px; color: #64748b;">Live Talk State:</span>
+                        <span style="font-size: 10px; font-weight: 700; color: @(Mixer.IsMicLive ? "#4ade80" : "#94a3b8");">
+                            @(Mixer.IsMicLive ? "● TALKING (ON)" : "○ MUTED")
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Equalizer Section -->
+            @if (!Mixer.DjEq.Is10BandMode) {
+                <!-- 3-Band DJ Isolator with Kill Buttons & Color Filter -->
+                <div style="background: #11141c; border: 1px solid #1f2533; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                        <!-- High Fader -->
+                        <div style="text-align: center;">
+                            <div style="font-size: 11px; font-weight: 700; color: #38bdf8; margin-bottom: 2px;">HIGH</div>
+                            <div style="font-size: 9px; color: #64748b; margin-bottom: 4px;">2.5kHz - 20kHz</div>
+                            <input type="range" min="-26" max="6" step="0.5" style="width: 100%; accent-color: #38bdf8;"
+                                   value="@Mixer.DjEq.HighGainDb"
+                                   @oninput="@((ChangeEventArgs e) => OnHighGainChanged(Convert.ToSingle(e.Value)))" />
+                            <div style="font-size: 11px; font-family: monospace; color: #cbd5e1; margin: 4px 0 6px 0;">
+                                @(Mixer.DjEq.HighKill ? "-inf dB" : $"{(Mixer.DjEq.HighGainDb >= 0 ? "+" : "")}{Mixer.DjEq.HighGainDb:F1} dB")
+                            </div>
+                            <button class="scrim-btn @(Mixer.DjEq.HighKill ? "scrim-btn-danger" : "scrim-btn-secondary")"
+                                    style="width: 100%; padding: 4px 0; font-size: 10px; font-weight: 700; border-radius: 4px; box-shadow: @(Mixer.DjEq.HighKill ? "0 0 10px rgba(239, 68, 68, 0.4)" : "none");"
+                                    @onclick="ToggleDjHighKill">
+                                @(Mixer.DjEq.HighKill ? "KILL ACTIVE" : "HIGH KILL")
+                            </button>
+                        </div>
+
+                        <!-- Mid Fader -->
+                        <div style="text-align: center;">
+                            <div style="font-size: 11px; font-weight: 700; color: #818cf8; margin-bottom: 2px;">MID</div>
+                            <div style="font-size: 9px; color: #64748b; margin-bottom: 4px;">300Hz - 2.5kHz</div>
+                            <input type="range" min="-26" max="6" step="0.5" style="width: 100%; accent-color: #818cf8;"
+                                   value="@Mixer.DjEq.MidGainDb"
+                                   @oninput="@((ChangeEventArgs e) => OnMidGainChanged(Convert.ToSingle(e.Value)))" />
+                            <div style="font-size: 11px; font-family: monospace; color: #cbd5e1; margin: 4px 0 6px 0;">
+                                @(Mixer.DjEq.MidKill ? "-inf dB" : $"{(Mixer.DjEq.MidGainDb >= 0 ? "+" : "")}{Mixer.DjEq.MidGainDb:F1} dB")
+                            </div>
+                            <button class="scrim-btn @(Mixer.DjEq.MidKill ? "scrim-btn-danger" : "scrim-btn-secondary")"
+                                    style="width: 100%; padding: 4px 0; font-size: 10px; font-weight: 700; border-radius: 4px; box-shadow: @(Mixer.DjEq.MidKill ? "0 0 10px rgba(239, 68, 68, 0.4)" : "none");"
+                                    @onclick="ToggleDjMidKill">
+                                @(Mixer.DjEq.MidKill ? "KILL ACTIVE" : "MID KILL")
+                            </button>
+                        </div>
+
+                        <!-- Low Fader -->
+                        <div style="text-align: center;">
+                            <div style="font-size: 11px; font-weight: 700; color: #f43f5e; margin-bottom: 2px;">LOW</div>
+                            <div style="font-size: 9px; color: #64748b; margin-bottom: 4px;">20Hz - 300Hz</div>
+                            <input type="range" min="-26" max="6" step="0.5" style="width: 100%; accent-color: #f43f5e;"
+                                   value="@Mixer.DjEq.LowGainDb"
+                                   @oninput="@((ChangeEventArgs e) => OnLowGainChanged(Convert.ToSingle(e.Value)))" />
+                            <div style="font-size: 11px; font-family: monospace; color: #cbd5e1; margin: 4px 0 6px 0;">
+                                @(Mixer.DjEq.LowKill ? "-inf dB" : $"{(Mixer.DjEq.LowGainDb >= 0 ? "+" : "")}{Mixer.DjEq.LowGainDb:F1} dB")
+                            </div>
+                            <button class="scrim-btn @(Mixer.DjEq.LowKill ? "scrim-btn-danger" : "scrim-btn-secondary")"
+                                    style="width: 100%; padding: 4px 0; font-size: 10px; font-weight: 700; border-radius: 4px; box-shadow: @(Mixer.DjEq.LowKill ? "0 0 10px rgba(239, 68, 68, 0.4)" : "none");"
+                                    @onclick="ToggleDjLowKill">
+                                @(Mixer.DjEq.LowKill ? "KILL ACTIVE" : "LOW KILL")
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- DJ Sound Color Sweep Filter (LPF <-> OFF <-> HPF) -->
+                    <div style="background: #0d0f15; border: 1px solid #1a1e28; border-radius: 6px; padding: 8px 10px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                            <span style="font-size: 10px; font-weight: 700; color: #f59e0b; letter-spacing: 0.5px;">DJ SOUND COLOR FILTER</span>
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <span style="font-size: 10px; color: @(Mixer.DjEq.ColorFilterKnob < -1 ? "#38bdf8" : (Mixer.DjEq.ColorFilterKnob > 1 ? "#f43f5e" : "#64748b")); font-weight: 700;">
+                                    @(Mixer.DjEq.ColorFilterKnob < -1 ? $"LPF ({Mixer.DjEq.ColorFilterKnob:F0}%)" : (Mixer.DjEq.ColorFilterKnob > 1 ? $"HPF (+{Mixer.DjEq.ColorFilterKnob:F0}%)" : "BYPASS"))
+                                </span>
+                                <button class="pill-option" style="padding: 1px 6px; font-size: 9px;" @onclick="ResetDjColorFilter">Reset</button>
+                            </div>
+                        </div>
+                        <input type="range" min="-100" max="100" step="2" style="width: 100%; accent-color: #f59e0b;"
+                               value="@Mixer.DjEq.ColorFilterKnob"
+                               @oninput="@((ChangeEventArgs e) => OnColorFilterChanged(Convert.ToSingle(e.Value)))" />
+                        <div style="display: flex; justify-content: space-between; font-size: 9px; color: #64748b; margin-top: 2px;">
+                            <span>◄ LPF (Cut Highs)</span>
+                            <span>CENTER (Bypass)</span>
+                            <span>HPF (Cut Lows) ►</span>
+                        </div>
+                    </div>
+                </div>
+            } else {
+                <!-- 10-Band ISO Graphic Equalizer -->
+                <div style="background: #11141c; border: 1px solid #1f2533; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-size: 11px; font-weight: 700; color: #cbd5e1;">10-BAND ISO GRAPHIC EQ</span>
+                        <button class="pill-option" style="padding: 2px 8px; font-size: 10px;" @onclick="@(() => SetDjEqPreset("Flat / Bypass"))">Reset Flat</button>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px;">
+                        @for (int b = 0; b < 10; b++) {
+                            int bandIdx = b;
+                            float gain = Mixer.DjEq.Bands10Db[bandIdx];
+                            string label = bandIdx switch {
+                                0 => "31", 1 => "63", 2 => "125", 3 => "250", 4 => "500",
+                                5 => "1k", 6 => "2k", 7 => "4k", 8 => "8k", _ => "16k"
+                            };
+                            <div style="display: flex; flex-direction: column; align-items: center;">
+                                <span style="font-size: 9px; color: #94a3b8; font-family: monospace; height: 14px;">@(gain >= 0 ? "+" : "")@gain.ToString("F0")</span>
+                                <input type="range" min="-12" max="12" step="0.5"
+                                       style="writing-mode: vertical-lr; direction: rtl; height: 80px; width: 100%; margin: 4px 0; accent-color: #00d2ff;"
+                                       value="@gain"
+                                       @oninput="@((ChangeEventArgs e) => OnBand10Changed(bandIdx, Convert.ToSingle(e.Value)))" />
+                                <span style="font-size: 9px; font-weight: 600; color: #64748b;">@label</span>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+
+            <!-- Master Bus Strip -->
+            <div style="background: #141720; border: 1px solid #242a38; border-radius: 8px; padding: 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <span style="font-size: 11px; font-weight: 700; color: #cbd5e1; display: flex; align-items: center; gap: 4px;">
+                        🔊 MASTER OUTPUT BUS
+                    </span>
+                    <span style="font-size: 10px; color: #94a3b8; font-family: monospace;">
+                        @(Mixer.DjEq.MasterGainDb >= 0 ? "+" : "")@Mixer.DjEq.MasterGainDb.ToString("F1") dB
+                    </span>
+                </div>
+                <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 10px;">
+                    <div>
+                        <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
+                            <span>Master Gain</span>
+                        </div>
+                        <input type="range" min="-12" max="6" step="0.5" style="width: 100%; accent-color: #00d2ff;"
+                               value="@Mixer.DjEq.MasterGainDb"
+                               @oninput="@((ChangeEventArgs e) => OnMasterGainChanged(Convert.ToSingle(e.Value)))" />
+                    </div>
+                    <div>
+                        <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
+                            <span>Balance</span>
+                            <button class="pill-option" style="padding: 1px 4px; font-size: 9px;" @onclick="ResetDjMasterBalance">C</button>
+                        </div>
+                        <input type="range" min="-1" max="1" step="0.05" style="width: 100%; accent-color: #00d2ff;"
+                               value="@Mixer.DjEq.MasterBalance"
+                               @oninput="@((ChangeEventArgs e) => OnMasterBalanceChanged(Convert.ToSingle(e.Value)))" />
+                    </div>
+                </div>
+            </div>
+        </div>,
+
+        "card-dual-deck" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <h3 class="scrim-card-title">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <circle cx="12" cy="12" r="3"></circle>
+                    </svg>
+                    Dual Decks & Crossfader
+                </h3>
+                <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
+            </div>
+
+            <!-- Side-by-Side Decks A & B -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px;">
+                <!-- Deck A -->
+                <div style="background: #0e1118; border: 1px solid rgba(0, 210, 255, 0.35); border-radius: 8px; padding: 10px; position: relative;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <span style="font-size: 11px; font-weight: 800; color: #00d2ff; letter-spacing: 0.5px;">DECK A</span>
+                        <span style="font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 4px; background: @(DualDeck.DeckA.IsPlaying ? "rgba(0, 210, 255, 0.2)" : "#1c212c"); color: @(DualDeck.DeckA.IsPlaying ? "#00d2ff" : "#94a3b8");">
+                            @(DualDeck.DeckA.IsPlaying ? "PLAYING" : (DualDeck.DeckA.IsCueSet ? "CUED" : "STOPPED"))
+                        </span>
+                    </div>
+                    <div style="font-size: 12px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">@DualDeck.DeckA.Title</div>
+                    <div style="font-size: 10px; color: #94a3b8; margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">@DualDeck.DeckA.Artist</div>
+
+                    <!-- Deck A Controls -->
+                    <div style="display: flex; gap: 4px; margin-bottom: 8px;">
+                        <button class="pill-option" style="flex: 1; padding: 3px 0; font-size: 10px; font-weight: 700; background: @(DualDeck.DeckA.IsPlaying ? "#00d2ff" : "#1e2533"); color: @(DualDeck.DeckA.IsPlaying ? "#000" : "#fff");"
+                                @onclick="@(() => DualDeck.TogglePlay("A"))">
+                            @(DualDeck.DeckA.IsPlaying ? "⏸ Pause" : "▶ Play")
+                        </button>
+                        <button class="pill-option" style="padding: 3px 6px; font-size: 10px;" @onclick="@(() => DualDeck.SetCue("A"))">CUE</button>
+                        <button class="pill-option" style="padding: 3px 6px; font-size: 10px;" @onclick="@(() => DualDeck.Stop("A"))">■</button>
+                    </div>
+
+                    <!-- Pitch Control -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 9px; color: #94a3b8; margin-bottom: 2px;">
+                        <span>Pitch / Tempo: <strong style="color: #00d2ff;">@(DualDeck.DeckA.PitchPercent >= 0 ? "+" : "")@DualDeck.DeckA.PitchPercent.ToString("F1")%</strong></span>
+                        <button class="pill-option" style="padding: 1px 4px; font-size: 8px;" @onclick="@(() => DualDeck.DeckA.PitchPercent = 0f)">0%</button>
+                    </div>
+                    <input type="range" min="-8" max="8" step="0.1" style="width: 100%; accent-color: #00d2ff; height: 4px;"
+                           value="@DualDeck.DeckA.PitchPercent"
+                           @oninput="@((ChangeEventArgs e) => DualDeck.DeckA.PitchPercent = Convert.ToSingle(e.Value))" />
+                </div>
+
+                <!-- Deck B -->
+                <div style="background: #0e1118; border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 8px; padding: 10px; position: relative;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <span style="font-size: 11px; font-weight: 800; color: #10b981; letter-spacing: 0.5px;">DECK B</span>
+                        <span style="font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 4px; background: @(DualDeck.DeckB.IsPlaying ? "rgba(16, 185, 129, 0.2)" : "#1c212c"); color: @(DualDeck.DeckB.IsPlaying ? "#10b981" : "#94a3b8");">
+                            @(DualDeck.DeckB.IsPlaying ? "PLAYING" : (DualDeck.DeckB.IsCueSet ? "CUED" : "STOPPED"))
+                        </span>
+                    </div>
+                    <div style="font-size: 12px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">@DualDeck.DeckB.Title</div>
+                    <div style="font-size: 10px; color: #94a3b8; margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">@DualDeck.DeckB.Artist</div>
+
+                    <!-- Deck B Controls -->
+                    <div style="display: flex; gap: 4px; margin-bottom: 8px;">
+                        <button class="pill-option" style="flex: 1; padding: 3px 0; font-size: 10px; font-weight: 700; background: @(DualDeck.DeckB.IsPlaying ? "#10b981" : "#1e2533"); color: @(DualDeck.DeckB.IsPlaying ? "#000" : "#fff");"
+                                @onclick="@(() => DualDeck.TogglePlay("B"))">
+                            @(DualDeck.DeckB.IsPlaying ? "⏸ Pause" : "▶ Play")
+                        </button>
+                        <button class="pill-option" style="padding: 3px 6px; font-size: 10px;" @onclick="@(() => DualDeck.SetCue("B"))">CUE</button>
+                        <button class="pill-option" style="padding: 3px 6px; font-size: 10px;" @onclick="@(() => DualDeck.Stop("B"))">■</button>
+                    </div>
+
+                    <!-- Pitch Control -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 9px; color: #94a3b8; margin-bottom: 2px;">
+                        <span>Pitch / Tempo: <strong style="color: #10b981;">@(DualDeck.DeckB.PitchPercent >= 0 ? "+" : "")@DualDeck.DeckB.PitchPercent.ToString("F1")%</strong></span>
+                        <button class="pill-option" style="padding: 1px 4px; font-size: 8px;" @onclick="@(() => DualDeck.DeckB.PitchPercent = 0f)">0%</button>
+                    </div>
+                    <input type="range" min="-8" max="8" step="0.1" style="width: 100%; accent-color: #10b981; height: 4px;"
+                           value="@DualDeck.DeckB.PitchPercent"
+                           @oninput="@((ChangeEventArgs e) => DualDeck.DeckB.PitchPercent = Convert.ToSingle(e.Value))" />
+                </div>
+            </div>
+
+            <!-- Professional Crossfader Strip -->
+            <div style="background: #0a0c10; border: 1px solid #1a1e28; border-radius: 8px; padding: 10px; margin-bottom: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <span style="font-size: 10px; font-weight: 700; color: #00d2ff;">DECK A (@((DualDeck.GetCrossfaderGains().GainA * 100).ToString("F0"))%)</span>
+                    <span style="font-size: 9px; color: #64748b;">CROSSFADER [@DualDeck.CrossfaderPosition.ToString("F2")]</span>
+                    <span style="font-size: 10px; font-weight: 700; color: #10b981;">DECK B (@((DualDeck.GetCrossfaderGains().GainB * 100).ToString("F0"))%)</span>
+                </div>
+                <input type="range" min="-1" max="1" step="0.01" style="width: 100%; accent-color: #f59e0b; height: 6px;"
+                       value="@DualDeck.CrossfaderPosition"
+                       @oninput="@((ChangeEventArgs e) => DualDeck.CrossfaderPosition = Convert.ToSingle(e.Value))" />
+                
+                <!-- Crossfade Curve Selector & Auto Crossfade -->
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px;">
+                    <div style="display: flex; gap: 4px;">
+                        @foreach (var curve in Enum.GetValues<CrossfadeCurve>()) {
+                            <button class="pill-option @(DualDeck.Curve == curve ? "active" : "")" style="padding: 2px 6px; font-size: 9px;"
+                                    @onclick="@(() => DualDeck.Curve = curve)">
+                                @curve
+                            </button>
+                        }
+                    </div>
+                    <div style="display: flex; gap: 4px;">
+                        <button class="scrim-btn-secondary" style="padding: 2px 8px; font-size: 10px;" @onclick="@(() => _ = DualDeck.TriggerAutoCrossfadeAsync(4))">
+                            ⚡ 1-Click Auto-DJ Crossfade
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>,
+
+        "card-event-scheduler" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <h3 class="scrim-card-title">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <polyline points="12 6 12 12 16 14"></polyline>
+                    </svg>
+                    Automated Show Clock & Scheduler
+                </h3>
+                <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
+            </div>
+
+            <!-- Top Status Row -->
+            <div style="display: flex; justify-content: space-between; align-items: center; background: #11141c; border: 1px solid #1f2533; border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="width: 8px; height: 8px; border-radius: 50%; background: @(SchedulerService.Events.Any(e => e.IsEnabled) ? "#10b981" : "#64748b"); display: inline-block;"></span>
+                    <span style="font-size: 11px; font-weight: 700; color: #cbd5e1;">@(SchedulerService.Events.Any(e => e.IsEnabled) ? "SCHEDULER ENGINE ARMED" : "SCHEDULER STANDBY")</span>
+                </div>
+                @{
+                    var upcoming = SchedulerService.GetNextUpcomingEvent();
+                    string nextText = upcoming.Event != null ? $"{(int)upcoming.TimeRemaining.TotalMinutes}m {upcoming.TimeRemaining.Seconds:D2}s" : "--:--";
+                }
+                <div style="font-size: 11px; color: #00d2ff; font-family: monospace; font-weight: 700;">
+                    Next: @nextText
+                </div>
+            </div>
+
+            <!-- Scheduled Events Table -->
+            <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; max-height: 180px; overflow-y: auto;">
+                @if (SchedulerService.Events.Any()) {
+                    @foreach (var ev in SchedulerService.Events) {
+                        <div style="background: #0f121a; border: 1px solid #1e2433; border-radius: 6px; padding: 6px 10px; display: flex; justify-content: space-between; align-items: center;">
+                            <div style="flex: 1; min-width: 0;">
+                                <div style="display: flex; align-items: center; gap: 6px;">
+                                    <span style="font-size: 11px; font-weight: 700; color: #fff;">@ev.Name</span>
+                                    <span style="font-size: 9px; padding: 1px 4px; border-radius: 3px; background: rgba(0, 210, 255, 0.15); color: #00d2ff;">@ev.ActionType</span>
+                                </div>
+                                <div style="font-size: 10px; color: #94a3b8;">
+                                    @(ev.TriggerType == EventTriggerType.Hourly ? $"Hourly at :{ev.Minute:D2}" : (ev.TriggerType == EventTriggerType.Daily ? $"Daily at {ev.Hour:D2}:{ev.Minute:D2}" : $"Every {ev.IntervalMinutes}m"))
+                                    • Next: @ev.CalculateNextExecution(DateTime.Now).ToString("HH:mm:ss")
+                                </div>
+                            </div>
+                            <div style="display: flex; gap: 4px;">
+                                <button class="pill-option" style="padding: 2px 6px; font-size: 9px;" @onclick="@(() => TriggerScheduledEventNow(ev.Id))" title="Trigger immediately">⚡ Fire</button>
+                                <button class="pill-option" style="padding: 2px 6px; font-size: 9px; color: #ef4444;" @onclick="@(() => SchedulerService.RemoveEvent(ev.Id))" title="Delete">✕</button>
+                            </div>
+                        </div>
+                    }
+                } else {
+                    <div style="font-size: 11px; color: #64748b; text-align: center; padding: 12px;">No automated events scheduled. Add one below.</div>
+                }
+            </div>
+
+            <!-- Add Event Form -->
+            <div style="background: #090c12; border: 1px solid #161b26; border-radius: 8px; padding: 8px 10px;">
+                <div style="display: flex; gap: 6px; margin-bottom: 6px;">
+                    <input type="text" class="scrim-input" style="flex: 2; font-size: 11px;" placeholder="Event Name" @bind="_newSchedulerName" />
+                    <select class="scrim-select" style="flex: 1; font-size: 11px;" @bind="_newSchedulerAction">
+                        <option value="PlayJingle">Play Jingle</option>
+                        <option value="PostChatMessage">Chat Post</option>
+                        <option value="SwitchTheme">Switch Theme</option>
+                        <option value="TriggerPoll">Launch Poll</option>
+                    </select>
+                </div>
+                <div style="display: flex; gap: 6px; margin-bottom: 6px;">
+                    <select class="scrim-select" style="flex: 1; font-size: 11px;" @bind="_newSchedulerType">
+                        <option value="Hourly">Hourly Sweep</option>
+                        <option value="Daily">Daily Show Clock</option>
+                        <option value="Interval">Minute Interval</option>
+                    </select>
+                    <input type="text" class="scrim-input" style="flex: 2; font-size: 11px;" placeholder="Payload (e.g. jingle name / message)" @bind="_newSchedulerPayload" />
+                    <button class="scrim-btn-primary" style="padding: 0 10px; font-size: 11px;" @onclick="AddScheduledEventUI">+ Add</button>
+                </div>
+            </div>
+        </div>,
+
+        "card-voice-tracking" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <h3 class="scrim-card-title">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;">
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                    </svg>
+                    Voice-Tracking Transition Recorder
+                </h3>
+                <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
+            </div>
+
+            <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 8px; padding: 10px; margin-bottom: 10px;">
+                <div style="font-size: 11px; font-weight: 700; color: #10b981; margin-bottom: 4px;">VOICE-TRACK STUDIO RAMP</div>
+                <div style="font-size: 10px; color: #94a3b8; line-height: 1.4;">
+                    Record DJ announcements, song intros, and sweeps directly over the music bed with automated ducking before it airs live.
+                </div>
+            </div>
+
+            <!-- Transition Visualizer Map -->
+            <div style="background: #0a0d14; border: 1px solid #1a202c; border-radius: 8px; padding: 10px; margin-bottom: 10px;">
+                <div style="display: flex; justify-content: space-between; font-size: 10px; color: #64748b; margin-bottom: 4px;">
+                    <span>Outro Fade: @CurrentTrackTitle</span>
+                    <span style="color: #f59e0b; font-weight: 700;">[DJ VOICE OVERLAY]</span>
+                    <span>Intro: Next Track</span>
+                </div>
+                <div style="height: 24px; background: #141924; border-radius: 4px; display: flex; overflow: hidden; align-items: center; padding: 0 4px; position: relative;">
+                    <div style="width: 35%; height: 100%; background: linear-gradient(90deg, rgba(0, 210, 255, 0.4), rgba(0, 210, 255, 0.1)); border-right: 1px dashed #00d2ff;"></div>
+                    <div style="width: 30%; height: 100%; background: rgba(245, 158, 11, 0.3); border-left: 1px solid #f59e0b; border-right: 1px solid #f59e0b; display: flex; align-items: center; justify-content: center;">
+                        <span style="font-size: 9px; font-weight: 700; color: #f59e0b;">MIC CLIP</span>
+                    </div>
+                    <div style="width: 35%; height: 100%; background: linear-gradient(90deg, rgba(16, 185, 129, 0.1), rgba(16, 185, 129, 0.4)); border-left: 1px dashed #10b981;"></div>
+                </div>
+            </div>
+
+            <!-- Voice-Track Controls -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px;">
+                <div>
+                    <span style="font-size: 10px; color: #94a3b8;">Ducking Level: <strong style="color: #fff;">@_voiceTrackDuckingDb dB</strong></span>
+                    <input type="range" min="-24" max="-6" step="1" style="width: 100%; accent-color: #10b981;"
+                           value="@_voiceTrackDuckingDb"
+                           @oninput="@((ChangeEventArgs e) => _voiceTrackDuckingDb = Convert.ToInt32(e.Value))" />
+                </div>
+                <div>
+                    <span style="font-size: 10px; color: #94a3b8;">Cross-Ramp: <strong style="color: #fff;">@_voiceTrackRampSec s</strong></span>
+                    <input type="range" min="0.5" max="4.0" step="0.5" style="width: 100%; accent-color: #10b981;"
+                           value="@_voiceTrackRampSec"
+                           @oninput="@((ChangeEventArgs e) => _voiceTrackRampSec = Convert.ToDouble(e.Value))" />
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 6px;">
+                <button class="scrim-btn-primary" style="flex: 1; font-size: 11px; background: @(_isRecordingVoiceTrack ? "#ef4444" : "var(--accent-blue, #00d2ff)");"
+                        @onclick="ToggleVoiceTrackRecording">
+                    @(_isRecordingVoiceTrack ? "■ Stop Recording (" + _voiceTrackLengthSec + "s)" : "● Record Voice Track")
+                </button>
+                <button class="scrim-btn-secondary" style="font-size: 11px; padding: 0 10px;" @onclick="AuditionVoiceTrack" disabled="@(!_hasRecordedVoiceTrack)">
+                    ▶ Audition
+                </button>
+                <button class="scrim-btn-secondary" style="font-size: 11px; padding: 0 10px; color: #10b981;" @onclick="CommitVoiceTrackToQueue" disabled="@(!_hasRecordedVoiceTrack)">
+                    ✓ Commit
+                </button>
+            </div>
+        </div>,
+
+        "card-multi-encoder" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <h3 class="scrim-card-title">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;">
+                        <path d="M5 12.55a11 11 0 0 1 14.08 0"></path>
+                        <path d="M1.42 9a16 16 0 0 1 21.16 0"></path>
+                        <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
+                        <line x1="12" y1="20" x2="12.01" y2="20"></line>
+                    </svg>
+                    Multi-Encoder & Relay Rack
+                </h3>
+                <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
+            </div>
+
+            <div style="font-size: 10px; color: #94a3b8; margin-bottom: 8px;">
+                Simultaneously broadcast multiple codecs and bitrates, or relay out to Icecast/SHOUTcast servers.
+            </div>
+
+            <!-- Encoder Rack List -->
+            <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px;">
+                <!-- Primary MP3 Encoder -->
+                <div style="background: #10131b; border: 1px solid #1f2637; border-radius: 6px; padding: 8px 10px; display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <span style="font-size: 11px; font-weight: 700; color: #fff;">Stream 1: MP3 Standard</span>
+                            <span style="font-size: 9px; font-weight: 700; color: #00d2ff; background: rgba(0, 210, 255, 0.15); padding: 1px 4px; border-radius: 3px;">128 kbps</span>
+                        </div>
+                        <div style="font-size: 10px; color: #64748b;">HTTP Public Stream • Port @ProfileManager.CurrentProfile.Port</div>
+                    </div>
+                    <span style="font-size: 9px; font-weight: 700; color: @(IsLive ? "#10b981" : "#64748b"); background: @(IsLive ? "rgba(16, 185, 129, 0.15)" : "#161b26"); padding: 2px 6px; border-radius: 4px;">
+                        @(IsLive ? "STREAMING" : "STANDBY")
+                    </span>
+                </div>
+
+                <!-- Secondary AAC+ Mobile Encoder -->
+                <div style="background: #10131b; border: 1px solid #1f2637; border-radius: 6px; padding: 8px 10px; display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <span style="font-size: 11px; font-weight: 700; color: #fff;">Stream 2: AAC+ Mobile</span>
+                            <span style="font-size: 9px; font-weight: 700; color: #f59e0b; background: rgba(245, 158, 11, 0.15); padding: 1px 4px; border-radius: 3px;">64 kbps</span>
+                        </div>
+                        <div style="font-size: 10px; color: #64748b;">Low-Bandwidth Mobile Optimized • HE-AAC</div>
+                    </div>
+                    <button class="pill-option @(_multiEncoderAacActive ? "active" : "")" style="padding: 2px 8px; font-size: 9px;"
+                            @onclick="@(() => _multiEncoderAacActive = !_multiEncoderAacActive)">
+                        @(_multiEncoderAacActive ? "ON" : "OFF")
+                    </button>
+                </div>
+
+                <!-- High-Res FLAC Stream -->
+                <div style="background: #10131b; border: 1px solid #1f2637; border-radius: 6px; padding: 8px 10px; display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <span style="font-size: 11px; font-weight: 700; color: #fff;">Stream 3: FLAC Lossless</span>
+                            <span style="font-size: 9px; font-weight: 700; color: #10b981; background: rgba(16, 185, 129, 0.15); padding: 1px 4px; border-radius: 3px;">1411 kbps</span>
+                        </div>
+                        <div style="font-size: 10px; color: #64748b;">Studio Audiophile Reference Stream</div>
+                    </div>
+                    <button class="pill-option @(_multiEncoderFlacActive ? "active" : "")" style="padding: 2px 8px; font-size: 9px;"
+                            @onclick="@(() => _multiEncoderFlacActive = !_multiEncoderFlacActive)">
+                        @(_multiEncoderFlacActive ? "ON" : "OFF")
+                    </button>
+                </div>
+
+                <!-- External Icecast / SHOUTcast Relay -->
+                <div style="background: #10131b; border: 1px solid #1f2637; border-radius: 6px; padding: 8px 10px; display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <span style="font-size: 11px; font-weight: 700; color: #fff;">External Relay (Icecast/SHOUTcast)</span>
+                        </div>
+                        <div style="font-size: 10px; color: #64748b;">Relay to remote CDN or radio cluster</div>
+                    </div>
+                    <button class="pill-option @(_externalRelayEnabled ? "active" : "")" style="padding: 2px 8px; font-size: 9px;"
+                            @onclick="@(() => _externalRelayEnabled = !_externalRelayEnabled)">
+                        @(_externalRelayEnabled ? "LINKED" : "OFF")
+                    </button>
+                </div>
+            </div>
+
+            @if (_externalRelayEnabled) {
+                <div style="background: #090c12; border: 1px solid #161b26; border-radius: 6px; padding: 8px; display: grid; grid-template-columns: 2fr 1fr; gap: 6px;">
+                    <input type="text" class="scrim-input" style="font-size: 10px;" placeholder="Host (e.g. stream.myradio.com)" @bind="_relayHost" />
+                    <input type="number" class="scrim-input" style="font-size: 10px;" placeholder="Port (8000)" @bind="_relayPort" />
+                    <input type="text" class="scrim-input" style="font-size: 10px;" placeholder="Mount (/live)" @bind="_relayMount" />
+                    <input type="password" class="scrim-input" style="font-size: 10px;" placeholder="Source Password" @bind="_relayPassword" />
+                </div>
+            }
+        </div>,
+
+        "card-listener-inspector" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <h3 class="scrim-card-title">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;">
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                        <circle cx="9" cy="7" r="4"></circle>
+                        <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                    </svg>
+                    Live Listener Connections & IP Inspector
+                </h3>
+                <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
+            </div>
+
+            <!-- Stats Bar -->
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px;">
+                <div style="background: #0f121a; border: 1px solid #1f2536; border-radius: 6px; padding: 6px 8px; text-align: center;">
+                    <div style="font-size: 9px; color: #94a3b8;">ACTIVE NOW</div>
+                    <div style="font-size: 16px; font-weight: 800; color: #00d2ff;">@Hub.ActiveClientCount</div>
+                </div>
+                <div style="background: #0f121a; border: 1px solid #1f2536; border-radius: 6px; padding: 6px 8px; text-align: center;">
+                    <div style="font-size: 9px; color: #94a3b8;">PEAK SESSION</div>
+                    <div style="font-size: 16px; font-weight: 800; color: #10b981;">@_peakListenerCount</div>
+                </div>
+                <div style="background: #0f121a; border: 1px solid #1f2536; border-radius: 6px; padding: 6px 8px; text-align: center;">
+                    <div style="font-size: 9px; color: #94a3b8;">FORMAT</div>
+                    <div style="font-size: 12px; font-weight: 800; color: #f59e0b; margin-top: 2px;">MP3 @(ProfileManager.CurrentProfile.Bitrate)k</div>
+                </div>
+            </div>
+
+            <!-- Active Clients Table -->
+            <div style="max-height: 180px; overflow-y: auto; border: 1px solid #1e2433; border-radius: 6px; margin-bottom: 8px;">
+                @{
+                    var clients = Hub.GetActiveClients();
+                }
+                @if (clients.Any()) {
+                    <table style="width: 100%; border-collapse: collapse; font-size: 10px;">
+                        <thead>
+                            <tr style="background: #141824; color: #94a3b8; border-bottom: 1px solid #1f2637; text-align: left;">
+                                <th style="padding: 4px 6px;">IP / Host</th>
+                                <th style="padding: 4px 6px;">Duration</th>
+                                <th style="padding: 4px 6px;">Data</th>
+                                <th style="padding: 4px 6px; text-align: right;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var c in clients) {
+                                var dur = DateTime.UtcNow - c.ConnectedAt;
+                                var mb = c.BytesTransferred / (1024.0 * 1024.0);
+                                <tr style="border-bottom: 1px solid #131722;">
+                                    <td style="padding: 5px 6px; color: #fff; font-family: monospace;">@c.IpAddress</td>
+                                    <td style="padding: 5px 6px; color: #cbd5e1;">@($"{(int)dur.TotalMinutes}m {dur.Seconds:D2}s")</td>
+                                    <td style="padding: 5px 6px; color: #00d2ff;">@(mb.ToString("F1")) MB</td>
+                                    <td style="padding: 5px 6px; text-align: right;">
+                                        <button class="pill-option" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.3); padding: 1px 6px; font-size: 9px;"
+                                                @onclick="@(() => Hub.DisconnectClient(c.ClientId))" title="Kick / Disconnect Listener">
+                                            Kick
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                } else {
+                    <div style="padding: 16px; text-align: center; color: #64748b; font-size: 11px;">
+                        No external listeners currently connected.
+                    </div>
+                }
+            </div>
+        </div>,
+
+        "card-silence-recovery" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <h3 class="scrim-card-title">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                    </svg>
+                    Dead-Air Auto-Recovery & Alarm
+                </h3>
+                <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
+            </div>
+
+            <!-- State Alert Banner -->
+            <div style="background: @(DeadAirService.IsInDeadAirState ? "rgba(239, 68, 68, 0.2)" : "rgba(16, 185, 129, 0.1)"); border: 1px solid @(DeadAirService.IsInDeadAirState ? "#ef4444" : "rgba(16, 185, 129, 0.3)"); border-radius: 8px; padding: 10px; margin-bottom: 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 11px; font-weight: 800; color: @(DeadAirService.IsInDeadAirState ? "#ef4444" : "#10b981");">
+                        @(DeadAirService.IsInDeadAirState ? "⚠️ DEAD AIR DETECTED! RECOVERY ACTIVE" : (DeadAirService.IsEnabled ? "✓ SILENCE WATCHDOG ARMED" : "STANDBY (ARM TO MONITOR)"))
+                    </span>
+                    <span style="font-size: 10px; color: #cbd5e1; font-family: monospace;">
+                        Countdown: @(Math.Max(0, DeadAirService.SilenceThresholdSeconds - DeadAirService.CurrentSilenceDurationSeconds))s
+                    </span>
+                </div>
+            </div>
+
+            <!-- Metrics Bar -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px;">
+                <div style="background: #0f121a; border: 1px solid #1f2536; border-radius: 6px; padding: 6px 8px;">
+                    <div style="font-size: 9px; color: #94a3b8;">MONITOR STATUS</div>
+                    <div style="font-size: 14px; font-weight: 800; color: @(DeadAirService.IsEnabled ? "#10b981" : "#64748b");">
+                        @(DeadAirService.IsEnabled ? "ENABLED" : "OFFLINE")
+                    </div>
+                </div>
+                <div style="background: #0f121a; border: 1px solid #1f2536; border-radius: 6px; padding: 6px 8px;">
+                    <div style="font-size: 9px; color: #94a3b8;">INCIDENTS RECOVERED</div>
+                    <div style="font-size: 14px; font-weight: 800; color: #00d2ff;">
+                        @DeadAirService.RecoveryTriggerCount
+                    </div>
+                </div>
+            </div>
+
+            <!-- Configuration Sliders -->
+            <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px;">
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                    <span style="font-size: 11px; font-weight: 700; color: #cbd5e1;">Arm Silence Watchdog</span>
+                    <button class="pill-option @(DeadAirService.IsEnabled ? "active" : "")" style="padding: 2px 10px; font-size: 10px;"
+                            @onclick="@(() => DeadAirService.IsEnabled = !DeadAirService.IsEnabled)">
+                        @(DeadAirService.IsEnabled ? "ARMED" : "DISARMED")
+                    </button>
+                </div>
+                <div>
+                    <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
+                        <span>Trip Timeout (Seconds of Silence)</span>
+                        <span style="color: #fff; font-weight: 700;">@DeadAirService.SilenceThresholdSeconds s</span>
+                    </div>
+                    <input type="range" min="3" max="30" step="1" style="width: 100%; accent-color: #ef4444;"
+                           value="@DeadAirService.SilenceThresholdSeconds"
+                           @oninput="@((ChangeEventArgs e) => DeadAirService.SilenceThresholdSeconds = Convert.ToInt32(e.Value))" />
+                </div>
+            </div>
+
+            <!-- Emergency Actions -->
+            <div style="display: flex; gap: 6px;">
+                <button class="scrim-btn-secondary" style="flex: 1; font-size: 10px;" @onclick="@(() => DeadAirService.ResetAlarm())">
+                    Reset Watchdog
+                </button>
+            </div>
+        </div>,
+
+        "card-rotation-rules" => @<div class="scrim-card">
+            <div class="scrim-card-header scrim-drag-handle">
+                <h3 class="scrim-card-title">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <path d="M16 12l-4-4-4 4"></path>
+                        <path d="M12 16V8"></path>
+                    </svg>
+                    Music Rotation Rules & Category Bins
+                </h3>
+                <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
+            </div>
+
+            <div style="font-size: 10px; color: #94a3b8; margin-bottom: 8px;">
+                SAM Pro style clockwheel rules: enforce artist separation and categorical rotation intervals.
+            </div>
+
+            <!-- Category Bins Grid -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px;">
+                <div style="background: #0e121a; border: 1px solid #1c2333; border-radius: 6px; padding: 6px 8px;">
+                    <div style="font-size: 10px; font-weight: 700; color: #00d2ff;">Heavy Rotation (A-List)</div>
+                    <div style="font-size: 9px; color: #64748b;">Power currents • 30m cycle</div>
+                </div>
+                <div style="background: #0e121a; border: 1px solid #1c2333; border-radius: 6px; padding: 6px 8px;">
+                    <div style="font-size: 10px; font-weight: 700; color: #10b981;">Medium Rotation (B-List)</div>
+                    <div style="font-size: 9px; color: #64748b;">Recent hits • 60m cycle</div>
+                </div>
+                <div style="background: #0e121a; border: 1px solid #1c2333; border-radius: 6px; padding: 6px 8px;">
+                    <div style="font-size: 10px; font-weight: 700; color: #f59e0b;">Gold & Classics</div>
+                    <div style="font-size: 9px; color: #64748b;">Recurrent library • 120m cycle</div>
+                </div>
+                <div style="background: #0e121a; border: 1px solid #1c2333; border-radius: 6px; padding: 6px 8px;">
+                    <div style="font-size: 10px; font-weight: 700; color: #ec4899;">Sweepers & IDs</div>
+                    <div style="font-size: 9px; color: #64748b;">Top-of-hour station promos</div>
+                </div>
+            </div>
+
+            <!-- Separation Rules -->
+            <div style="background: #080b10; border: 1px solid #151a24; border-radius: 6px; padding: 8px; margin-bottom: 10px;">
+                <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 4px;">
+                    <span>Artist Separation Limit:</span>
+                    <span style="color: #fff; font-weight: 700;">@_rotationArtistSeparationMin min</span>
+                </div>
+                <input type="range" min="15" max="120" step="5" style="width: 100%; accent-color: #00d2ff; height: 4px;"
+                       value="@_rotationArtistSeparationMin"
+                       @oninput="@((ChangeEventArgs e) => _rotationArtistSeparationMin = Convert.ToInt32(e.Value))" />
+            </div>
+
+            <button class="scrim-btn-primary" style="width: 100%; font-size: 11px;" @onclick="GenerateClockWheelQueue">
+                ⚡ Generate 1-Hour Clock Sequence
+            </button>
+        </div>,
+
         _ => @<div></div>
     };
 
@@ -3817,6 +4983,123 @@
     private bool ShowBansManager = false;
     private string NewBlacklistWord = "";
     private bool ShowAssignNicknameModal = false;
+
+    // SAM Pro Suite State & Methods
+    private int _peakListenerCount = 0;
+    private bool _multiEncoderAacActive = true;
+    private bool _multiEncoderFlacActive = false;
+    private bool _externalRelayEnabled = false;
+    private string _relayHost = "stream.example.com";
+    private int _relayPort = 8000;
+    private string _relayMount = "/live";
+    private string _relayPassword = "";
+
+    private string _newSchedulerName = "";
+    private string _newSchedulerAction = "PlayJingle";
+    private string _newSchedulerType = "Hourly";
+    private string _newSchedulerPayload = "";
+
+    private bool _isRecordingVoiceTrack = false;
+    private bool _hasRecordedVoiceTrack = false;
+    private int _voiceTrackLengthSec = 0;
+    private int _voiceTrackDuckingDb = -12;
+    private double _voiceTrackRampSec = 1.5;
+    private int _rotationArtistSeparationMin = 45;
+
+    private void OnDualDeckChanged(object? sender, EventArgs e) => InvokeAsync(StateHasChanged);
+    private void OnSchedulerChanged(object? sender, EventArgs e) => InvokeAsync(StateHasChanged);
+    private void OnSchedulerActionTriggered(object? sender, ScheduledEvent ev) => InvokeAsync(() => ExecuteScheduledEvent(ev));
+    private void OnDeadAirStateChanged(object? sender, EventArgs e) => InvokeAsync(StateHasChanged);
+
+    private void AddScheduledEventUI() {
+        if (string.IsNullOrWhiteSpace(_newSchedulerName)) return;
+        var action = Enum.TryParse<ScheduledActionType>(_newSchedulerAction, out var a) ? a : ScheduledActionType.PlayJingle;
+        var type = Enum.TryParse<EventTriggerType>(_newSchedulerType, out var t) ? t : EventTriggerType.Hourly;
+        SchedulerService.AddEvent(new ScheduledEvent {
+            Name = _newSchedulerName,
+            ActionType = action,
+            TriggerType = type,
+            Minute = 0,
+            ActionPayload = _newSchedulerPayload
+        });
+        _newSchedulerName = "";
+        _newSchedulerPayload = "";
+    }
+
+    private void TriggerScheduledEventNow(string eventId) {
+        var ev = SchedulerService.Events.FirstOrDefault(e => e.Id == eventId);
+        if (ev != null) {
+            ExecuteScheduledEvent(ev);
+        }
+    }
+
+    private void ExecuteScheduledEvent(ScheduledEvent ev) {
+        switch (ev.ActionType) {
+            case ScheduledActionType.PlayJingle:
+                break;
+            case ScheduledActionType.PostChatMessage:
+                if (!string.IsNullOrWhiteSpace(ev.ActionPayload)) {
+                    ChatService.AddMessage("Radio Host", ev.ActionPayload, true);
+                }
+                break;
+            case ScheduledActionType.SwitchTheme:
+                if (!string.IsNullOrWhiteSpace(ev.ActionPayload)) {
+                    ProfileManager.CurrentProfile.WebTheme = ev.ActionPayload;
+                    ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+                }
+                break;
+            case ScheduledActionType.TriggerPoll:
+                if (!string.IsNullOrWhiteSpace(ev.ActionPayload)) {
+                    StreamServer.CreatePoll(ev.ActionPayload, new List<string> { "Yes / Fire 🔥", "No / Skip ⏭️" });
+                }
+                break;
+        }
+        StateHasChanged();
+    }
+
+    private async Task ToggleVoiceTrackRecording() {
+        if (_isRecordingVoiceTrack) {
+            _isRecordingVoiceTrack = false;
+            _hasRecordedVoiceTrack = true;
+        } else {
+            _isRecordingVoiceTrack = true;
+            _voiceTrackLengthSec = 0;
+            _ = Task.Run(async () => {
+                while (_isRecordingVoiceTrack) {
+                    await Task.Delay(1000);
+                    _voiceTrackLengthSec++;
+                    await InvokeAsync(StateHasChanged);
+                }
+            });
+        }
+    }
+
+    private void AuditionVoiceTrack() {
+        // Segue audition feedback
+    }
+
+    private void CommitVoiceTrackToQueue() {
+        _hasRecordedVoiceTrack = false;
+        PlaylistTracks.Insert(1, new PlaylistItem {
+            Number = 2,
+            Title = $"[VOICE-TRACK] Intro / Outro ({_voiceTrackLengthSec}s)",
+            Artist = "DJ Voice Studio",
+            Duration = $"00:{_voiceTrackLengthSec:D2}"
+        });
+        for (int i = 0; i < PlaylistTracks.Count; i++) {
+            PlaylistTracks[i].Number = i + 1;
+        }
+    }
+
+    private void GenerateClockWheelQueue() {
+        PlaylistTracks.Add(new PlaylistItem { Number = PlaylistTracks.Count + 1, Title = "Station Top-of-Hour ID", Artist = "Scrim Sweeper", Duration = "00:15" });
+        PlaylistTracks.Add(new PlaylistItem { Number = PlaylistTracks.Count + 1, Title = "Power Track 1", Artist = "Heavy Current", Duration = "03:45" });
+        PlaylistTracks.Add(new PlaylistItem { Number = PlaylistTracks.Count + 1, Title = "Classic Gold Track", Artist = "Legendary Band", Duration = "04:12" });
+        PlaylistTracks.Add(new PlaylistItem { Number = PlaylistTracks.Count + 1, Title = "Mid-Tempo Groove", Artist = "Recent Artist", Duration = "03:30" });
+        PlaylistTracks.Add(new PlaylistItem { Number = PlaylistTracks.Count + 1, Title = "Power Track 2", Artist = "High Energy", Duration = "03:55" });
+        StateHasChanged();
+    }
+
     private string AssignTargetUser = "";
     private string NewAssignedNickname = "";
     private bool ShowHostEmojiPicker = false;
@@ -4492,5 +5775,244 @@
 
     private void ClearTrackLog() {
         _broadcastTrackLog.Clear();
+    }
+
+    // --- Native Pro DJ Mixer & Equalizer Methods ---
+    private readonly Dictionary<string, (float Low, float Mid, float High, float[] Bands10)> DjEqPresets = new() {
+        { "Flat / Bypass", (0.0f, 0.0f, 0.0f, new float[] { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }) },
+        { "Club / EDM Bass", (5.5f, -1.5f, 4.0f, new float[] { 6.0f, 5.0f, 3.0f, 0.5f, -2.0f, -1.0f, 1.5f, 3.0f, 4.5f, 5.0f }) },
+        { "Radio DJ Voice", (1.0f, 4.5f, 3.0f, new float[] { -4.0f, -1.0f, 1.0f, 2.0f, 3.5f, 4.5f, 4.0f, 2.5f, 1.5f, 0.5f }) },
+        { "Rock & Live", (3.0f, 2.5f, 2.0f, new float[] { 3.5f, 3.0f, 1.5f, 0.0f, 1.5f, 3.0f, 2.5f, 2.0f, 2.5f, 2.0f }) },
+        { "Warm Vinyl & Acoustic", (3.5f, 1.0f, -3.0f, new float[] { 2.5f, 3.5f, 2.5f, 1.5f, 0.5f, -0.5f, -1.5f, -2.5f, -3.5f, -4.5f }) },
+        { "Hip-Hop Thump", (6.0f, -2.0f, 2.0f, new float[] { 6.0f, 5.5f, 3.5f, 0.0f, -2.5f, -1.5f, 1.0f, 2.0f, 3.0f, 3.5f }) },
+        { "Lofi Lounge", (2.0f, -1.0f, -5.0f, new float[] { 1.0f, 2.5f, 1.5f, 0.0f, -1.0f, -2.0f, -3.5f, -5.0f, -6.0f, -7.0f }) },
+        { "Treble Sparkle", (-1.0f, 1.0f, 5.5f, new float[] { -2.0f, -1.5f, -0.5f, 0.5f, 1.0f, 2.0f, 3.5f, 5.0f, 6.0f, 6.5f }) }
+    };
+
+    private void SyncDjEqFromProfile() {
+        var cfg = ProfileManager.CurrentProfile.DjEq;
+        if (cfg == null) return;
+        var eq = Mixer.DjEq;
+        eq.MusicTrimDb = cfg.MusicTrimDb;
+        eq.MusicPan = cfg.MusicPan;
+        eq.MusicStereoWidth = cfg.MusicStereoWidth;
+        eq.MusicMuted = cfg.MusicMuted;
+        eq.MicGainDb = cfg.MicGainDb;
+        eq.MicPan = cfg.MicPan;
+        eq.MicLowCut = cfg.MicLowCut;
+        eq.LowGainDb = cfg.LowGainDb;
+        eq.MidGainDb = cfg.MidGainDb;
+        eq.HighGainDb = cfg.HighGainDb;
+        eq.LowKill = cfg.LowKill;
+        eq.MidKill = cfg.MidKill;
+        eq.HighKill = cfg.HighKill;
+        eq.ColorFilterKnob = cfg.ColorFilterKnob;
+        eq.Is10BandMode = cfg.Is10BandMode;
+        eq.MasterGainDb = cfg.MasterGainDb;
+        eq.MasterBalance = cfg.MasterBalance;
+        eq.SoftLimiterEnabled = cfg.SoftLimiterEnabled;
+        eq.EqBypass = cfg.EqBypass;
+        if (cfg.Bands10Db != null && cfg.Bands10Db.Length >= 10) {
+            Array.Copy(cfg.Bands10Db, eq.Bands10Db, 10);
+        }
+        eq.RecalculateFilters();
+    }
+
+    private void SaveDjEqToProfile() {
+        var cfg = ProfileManager.CurrentProfile.DjEq;
+        var eq = Mixer.DjEq;
+        cfg.MusicTrimDb = eq.MusicTrimDb;
+        cfg.MusicPan = eq.MusicPan;
+        cfg.MusicStereoWidth = eq.MusicStereoWidth;
+        cfg.MusicMuted = eq.MusicMuted;
+        cfg.MicGainDb = eq.MicGainDb;
+        cfg.MicPan = eq.MicPan;
+        cfg.MicLowCut = eq.MicLowCut;
+        cfg.LowGainDb = eq.LowGainDb;
+        cfg.MidGainDb = eq.MidGainDb;
+        cfg.HighGainDb = eq.HighGainDb;
+        cfg.LowKill = eq.LowKill;
+        cfg.MidKill = eq.MidKill;
+        cfg.HighKill = eq.HighKill;
+        cfg.ColorFilterKnob = eq.ColorFilterKnob;
+        cfg.Is10BandMode = eq.Is10BandMode;
+        cfg.MasterGainDb = eq.MasterGainDb;
+        cfg.MasterBalance = eq.MasterBalance;
+        cfg.SoftLimiterEnabled = eq.SoftLimiterEnabled;
+        cfg.EqBypass = eq.EqBypass;
+        if (cfg.Bands10Db == null || cfg.Bands10Db.Length < 10) {
+            cfg.Bands10Db = new float[10];
+        }
+        Array.Copy(eq.Bands10Db, cfg.Bands10Db, 10);
+        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+    }
+
+    private void SetDjEqMode(bool is10Band) {
+        Mixer.DjEq.Is10BandMode = is10Band;
+        Mixer.DjEq.RecalculateFilters();
+        SaveDjEqToProfile();
+    }
+
+    private void SetDjEqPreset(string presetName) {
+        if (!DjEqPresets.TryGetValue(presetName, out var preset)) return;
+        ProfileManager.CurrentProfile.DjEq.ActivePreset = presetName;
+        Mixer.DjEq.LowGainDb = preset.Low;
+        Mixer.DjEq.MidGainDb = preset.Mid;
+        Mixer.DjEq.HighGainDb = preset.High;
+        Mixer.DjEq.LowKill = false;
+        Mixer.DjEq.MidKill = false;
+        Mixer.DjEq.HighKill = false;
+        Mixer.DjEq.ColorFilterKnob = 0.0f;
+        Array.Copy(preset.Bands10, Mixer.DjEq.Bands10Db, 10);
+        Mixer.DjEq.RecalculateFilters();
+        SaveDjEqToProfile();
+    }
+
+    private void ToggleDjLowKill() {
+        Mixer.DjEq.LowKill = !Mixer.DjEq.LowKill;
+        Mixer.DjEq.RecalculateFilters();
+        SaveDjEqToProfile();
+    }
+
+    private void ToggleDjMidKill() {
+        Mixer.DjEq.MidKill = !Mixer.DjEq.MidKill;
+        Mixer.DjEq.RecalculateFilters();
+        SaveDjEqToProfile();
+    }
+
+    private void ToggleDjHighKill() {
+        Mixer.DjEq.HighKill = !Mixer.DjEq.HighKill;
+        Mixer.DjEq.RecalculateFilters();
+        SaveDjEqToProfile();
+    }
+
+    private void ResetDjColorFilter() {
+        Mixer.DjEq.ColorFilterKnob = 0.0f;
+        Mixer.DjEq.RecalculateFilters();
+        SaveDjEqToProfile();
+    }
+
+    private void ToggleDjEqBypass() {
+        Mixer.DjEq.EqBypass = !Mixer.DjEq.EqBypass;
+        SaveDjEqToProfile();
+    }
+
+    private void ToggleDjSoftLimiter() {
+        Mixer.DjEq.SoftLimiterEnabled = !Mixer.DjEq.SoftLimiterEnabled;
+        SaveDjEqToProfile();
+    }
+
+    private void ToggleDjMusicMute() {
+        Mixer.DjEq.MusicMuted = !Mixer.DjEq.MusicMuted;
+        SaveDjEqToProfile();
+    }
+
+    private void ToggleDjMicLowCut() {
+        Mixer.DjEq.MicLowCut = !Mixer.DjEq.MicLowCut;
+        Mixer.DjEq.RecalculateFilters();
+        SaveDjEqToProfile();
+    }
+
+    private void ResetDjPan() {
+        Mixer.DjEq.MusicPan = 0.0f;
+        SaveDjEqToProfile();
+    }
+
+    private void ResetDjStereoWidth() {
+        Mixer.DjEq.MusicStereoWidth = 1.0f;
+        SaveDjEqToProfile();
+    }
+
+    private void ResetDjMasterBalance() {
+        Mixer.DjEq.MasterBalance = 0.0f;
+        SaveDjEqToProfile();
+    }
+
+    private void OnMusicTrimChanged(float val) {
+        Mixer.DjEq.MusicTrimDb = val;
+        SaveDjEqToProfile();
+    }
+
+    private void OnMusicPanChanged(float val) {
+        Mixer.DjEq.MusicPan = val;
+        SaveDjEqToProfile();
+    }
+
+    private void OnMusicWidthChanged(float val) {
+        Mixer.DjEq.MusicStereoWidth = val;
+        SaveDjEqToProfile();
+    }
+
+    private void OnMicGainChanged(float val) {
+        Mixer.DjEq.MicGainDb = val;
+        SaveDjEqToProfile();
+    }
+
+    private void OnMicPanChanged(float val) {
+        Mixer.DjEq.MicPan = val;
+        SaveDjEqToProfile();
+    }
+
+    private void OnHighGainChanged(float val) {
+        Mixer.DjEq.HighGainDb = val;
+        Mixer.DjEq.HighKill = false;
+        Mixer.DjEq.RecalculateFilters();
+        SaveDjEqToProfile();
+    }
+
+    private void OnMidGainChanged(float val) {
+        Mixer.DjEq.MidGainDb = val;
+        Mixer.DjEq.MidKill = false;
+        Mixer.DjEq.RecalculateFilters();
+        SaveDjEqToProfile();
+    }
+
+    private void OnLowGainChanged(float val) {
+        Mixer.DjEq.LowGainDb = val;
+        Mixer.DjEq.LowKill = false;
+        Mixer.DjEq.RecalculateFilters();
+        SaveDjEqToProfile();
+    }
+
+    private void OnColorFilterChanged(float val) {
+        Mixer.DjEq.ColorFilterKnob = val;
+        Mixer.DjEq.RecalculateFilters();
+        SaveDjEqToProfile();
+    }
+
+    private void OnBand10Changed(int bandIndex, float val) {
+        if (bandIndex >= 0 && bandIndex < 10) {
+            Mixer.DjEq.Bands10Db[bandIndex] = val;
+            Mixer.DjEq.RecalculateFilters();
+            SaveDjEqToProfile();
+        }
+    }
+
+    private void OnMasterGainChanged(float val) {
+        Mixer.DjEq.MasterGainDb = val;
+        SaveDjEqToProfile();
+    }
+
+    private void OnMasterBalanceChanged(float val) {
+        Mixer.DjEq.MasterBalance = val;
+        SaveDjEqToProfile();
+    }
+
+    private string GetDjSvgPath() {
+        var pts = Mixer.DjEq.CalculateResponseCurve(48);
+        var sb = new System.Text.StringBuilder();
+        for (int i = 0; i < pts.Length; i++) {
+            float x = (float)i / (pts.Length - 1) * 460f;
+            float y = 35f - (pts[i] / 12f) * 25f;
+            y = Math.Clamp(y, 4f, 66f);
+            if (i == 0) sb.Append($"M {x:F1} {y:F1}");
+            else sb.Append($" L {x:F1} {y:F1}");
+        }
+        return sb.ToString();
+    }
+
+    private string GetDjSvgAreaPath() {
+        string linePath = GetDjSvgPath();
+        return $"{linePath} L 460 70 L 0 70 Z";
     }
 }

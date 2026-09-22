@@ -17,11 +17,22 @@
 - **1-Click Speaker Restoration**: Safely restores your physical speakers/headphones at any time with a single click.
 
 ### 🎚️ Modular Studio Console
-- **3-Column Drag & Drop Interface**: Customize your studio layout with 11 reorderable cards (Audio Routing, Network & Internet, Master VU, Voice FX, Song Queue, Live Station Chat, Encoding, Media Player, Soundboard, Website Branding, and Playlist).
+- **3-Column Drag & Drop Interface**: Customize your studio layout with 12 reorderable cards (Audio Routing, Pro DJ Mixer & EQ, Network & Internet, Master VU, Voice FX, Song Queue, Live Station Chat, Encoding, Media Player, Soundboard, Website Branding, and Playlist).
 - **Integrated Broadcast Soundboard**: Built-in sound effects (Airhorn, Applause, Rimshot, etc.) and custom `.wav` files mix directly into the live broadcast stream with analog VU needle reaction while simultaneously playing in DJ headphones.
 - **Proportional Column Layouts**: Toggle between **Studio** (Little-Big-Little) and **Equal** (1fr-1fr-1fr) sizing modes.
 - **Synchronized ON AIR & Transmitter (TX)**: Visual status badges and real-time audio transmission indicators keep you informed when sound is flowing.
 - **Calibrated Stereo dB VU Meters**: High-frequency analog-style response bars with precise numeric decibel readouts (`-40 dB` to `0.0 dB`).
+
+### 🎛️ Professional DJ Stereo Mixer & Full EQ
+- **Hardware-Class DJ Console Strip**: Dedicated module mimicking industry-standard DJ software (Pioneer DJM, Traktor, Serato) with real-time audio DSP. Details in [Pro DJ Mixer & EQ Guide](docs/pro-dj-mixer-and-eq.md).
+- **Stereo Music Deck & Channel Separation**: Independent Left/Right channel panning (constant-power law), Mid-Side Stereo Width Expander (0% True Mono sum to 200% Super-Wide soundstage), channel trim gain (-12dB to +12dB), and channel mute.
+- **Microphone Channel Strip**: Dedicated mic gain, stereo pan, 80Hz rumble high-pass filter to eliminate desk bumps/plosives, and talkover status.
+- **3-Band DJ Isolator Mode**: Low (20-300Hz), Mid (300-2.5kHz), and High (2.5k-20kHz) faders (-26dB to +6dB) with instant **LOW KILL**, **MID KILL**, and **HIGH KILL** buttons for drop transitions and acapella/vocal isolation.
+- **DJ Sound Color Sweep Filter**: Bi-polar filter sweeping from resonant Low-Pass Filter (cuts highs) to neutral bypass to resonant High-Pass Filter (cuts lows).
+- **10-Band ISO Graphic Equalizer**: 10 standard ISO frequency bands (31Hz to 16kHz) with precision vertical sliders.
+- **Real-Time SVG Frequency Response Curve**: Live visual curve showing exact filter frequency shapes across 20Hz - 20kHz with gradient fill.
+- **Analog Soft-Clip Limiter**: Transparent hyperbolic tangent (`tanh`) saturation preventing harsh digital clipping even under extreme EQ boosts.
+- **Pro DJ Presets**: Instant 1-click presets for *Flat / Bypass*, *Club / EDM Bass*, *Radio DJ Voice*, *Rock & Live*, *Warm Vinyl & Acoustic*, *Hip-Hop Thump*, *Lofi Lounge*, and *Treble Sparkle*.
 
 ### 🎙️ Live Microphone & Voice FX Engine
 - **Push-to-Talk & Push-to-Mute**: Flexible hardware-style microphone switching.
@@ -53,6 +64,23 @@
 - **Anonymous Live Chat**: Real-time discussion between listeners and broadcaster without signups or accounts; verified `[HOST]` badges and broadcaster pause/clear controls.
 - **4 Selectable Visualizers**: Choose between Neon Frequency Spectrum, Dynamic Waveform, Glowing Retro VU Meter, or Pulsing Sound Bars.
 - **Listener Song Requests & Dedications**: Remote listeners can submit song requests with free-form dedications (e.g. for a friend, partner, or crew), visible in the live queue and the DJ's moderation card.
+
+### 📻 SAM Broadcaster PRO Modular Suite
+- **Modular On-Demand Workflow**: 7 professional modular cards inspired by SAM Broadcaster PRO. Left off by default to maintain an uncluttered studio, broadcasters can add, reposition, or close each card individually via **+ Add / Manage Cards**.
+- **Dual Decks & Crossfader (`card-dual-deck`)**: Deck A and Deck B with individual CUE points, pitch sliders (-8% to +8%), and equal-loudness crossfader with 1-click Auto-DJ crossfade.
+- **Automated Show Clock & Scheduler (`card-event-scheduler`)**: Automated sweeps, hourly station IDs, chat announcements, theme changes, and polls on hourly, daily, or minute intervals.
+- **Voice-Tracking Transition Recorder (`card-voice-tracking`)**: Record DJ voice clips with automated music bed ducking over track intros/outros before air.
+- **Multi-Encoder & Relay Rack (`card-multi-encoder`)**: Broadcast multiple simultaneous stream formats (MP3 128k, AAC+ 64k mobile, FLAC lossless) or relay to remote Icecast/SHOUTcast servers.
+- **Live Listener Connections & IP Inspector (`card-listener-inspector`)**: Real-time listener connection table with IP addresses, mount points, session duration, bandwidth transferred, player types, and 1-click disconnect/kick.
+- **Dead-Air Auto-Recovery & Alarm (`card-silence-recovery`)**: Master bus silence watchdog with configurable threshold, live countdown timer, and automated backup jingles/alarms.
+- **Music Rotation Rules & Category Bins (`card-rotation-rules`)**: Categorical crates (Heavy, Medium, Gold Classics, Sweepers), artist separation limits, and 1-hour clockwheel queue generator.
+
+### 🎵 Local Music Playback & Playlist Management Console
+- **Console-Native Playback**: Play your local music library directly from Scrim without needing third-party players (Spotify, VLC, Winamp).
+- **Pro DJ Audio Pipeline Integration**: Local music flows into Scrim's Pro DJ audio engine — the 10-Band ISO EQ, DJ Color sweep filter, stereo pan/width, and microphone auto-ducking (-14dB talkover) apply identically to local files.
+- **Comprehensive Format Support**: Plays `.mp3` (with ID3 tags), `.wav`, `.flac`, `.m4a`, `.aac`, `.wma`, and `.aiff` natively.
+- **Interactive Console Player**: Now Playing strip with animated visualizer, interactive seek scrubber, transport controls (Play/Pause, Stop, Prev, Next), shuffle, repeat (Off / All / 1), and local monitor volume.
+- **Playlist Workstation**: Add files, scan folders, filter with real-time search, move tracks up/down, export/import `.m3u` and `.json` playlists, and 1-click cue to Deck A or Deck B. See [User Guide](docs/user-guide.md#14-local-music-playback--playlist-management-console).
 
 ### 🔌 Extensible C# & Python Plugin System
 - **Dual Runtime Support**: Dynamically discover and execute compiled .NET class libraries (`.dll`) and pure Python plugins (`.py` or packaged folders with `plugin.json`).
@@ -97,9 +125,12 @@
 
 Comprehensive guides, specifications, and architecture documents are located in the [`docs/`](docs/) directory:
 
+- 📋 **[Release Notes (v1.0.9)](docs/patch-notes-v1.0.9.md)**: What's new in v1.0.9 (Local Music Playback & Playlist Management Console).
 - 🚀 **[Post-Installation & User Guide](docs/post-install-guide.md)**: Comprehensive end-user handbook—from running the installer, setting up FFmpeg, 1-click virtual audio routing, and going on air to station chat, custom banners, and sharing links.
+- 📻 **[SAM Broadcaster PRO Modular Suite Guide](docs/sam-pro-features-guide.md)**: Detailed breakdown of the 7 modular cards (Dual Decks, Event Scheduler, Voice Tracking, Multi-Encoder Rack, Listener IP Inspector, Dead-Air Recovery, and Music Rotation Rules).
 - 🔒 **[Easy Streaming Guide (Caddy & Free HTTPS)](docs/easy-streaming-guide.md)**: Beginner-friendly guide to streaming without port numbers (`:4242`) using Caddy and free automatic Let's Encrypt SSL certificates.
-- 📖 **[User & Feature Guide](docs/user-guide.md)**: Complete walkthrough of all 11 console cards, real-time live chat, virtual audio, mic controls, and web player options.
+- 🎛️ **[Pro DJ Stereo Mixer & Full EQ Guide](docs/pro-dj-mixer-and-eq.md)**: Hardware-grade channel strip routing (Trim, Pan, Mid-Side Stereo Width Expander 0% to 200%), 3-Band Isolator with Low/Mid/High Kills, DJ Sound Color Filter (HPF/LPF), 10-Band ISO Graphic EQ, real-time SVG response curves, and analog soft-clipping limiter.
+- 📖 **[User & Feature Guide](docs/user-guide.md)**: Complete walkthrough of all console cards, real-time live chat, virtual audio, mic controls, and web player options.
 - 🎨 **[Web Player Themes & Custom Theme Guide](docs/web-themes.md)**: Guide to built-in themes (Dark, Goth, Pink, Flowers, Light, Rock & Roll) and creating user JSON themes in `~/.scrim/themes/`.
 - 🌐 **[Network & Outside Broadcasting Guide](docs/network-broadcasting.md)**: Details on local LAN sharing, UPnP port forwarding, custom domain overrides, and media player endpoints.
 - 📐 **[Project Specification & Architecture](docs/spec.md)**: Deep technical dive into the WASAPI loopback capture, mixing pipelines, and transcoding engine.
@@ -115,7 +146,7 @@ Scrim includes automated WiX Toolset v5 scripts to generate a standalone Windows
 pwsh -NoProfile -File ./build-installer.ps1
 ```
 
-The resulting installer (`bin/ScrimSetup-v1.0.0.msi`) bundles all dependencies, driver payloads, and offline documentation (`docs/` and `README.md`) for 1-click per-user installation (`%LOCALAPPDATA%\Programs\Scrim`) without requiring administrator elevation, complete with desktop and Start Menu shortcuts and in-place upgrade support.
+The resulting installer (`bin/ScrimSetup-v1.0.9.msi`) bundles all dependencies, driver payloads, and offline documentation (`docs/` and `README.md`) for 1-click per-user installation (`%LOCALAPPDATA%\Programs\Scrim`) without requiring administrator elevation, complete with desktop and Start Menu shortcuts and in-place upgrade support.
 
 ---
 
