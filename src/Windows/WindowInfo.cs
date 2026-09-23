@@ -3,5 +3,6 @@ namespace Scrim.Windows {
         public uint ProcessId { get; set; }
         public string Title { get; set; } = string.Empty;
         public string ProcessName { get; set; } = string.Empty;
+        public bool IsPlayingAudio { get; set; } = false;
     }
 }

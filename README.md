@@ -97,9 +97,11 @@
   - Station 1: Spotify via WASAPI Process Loopback (`Spotify.exe`) on `/spotify` or `/stream`
   - Station 2: Built-in local player automation crates & clockwheels on `/vault`
   - Station 3: Chrome via WASAPI Process Loopback (`chrome.exe`) on `/chrome`
+  - Station 4: External DJ Ingest (`source` via Icecast/BUTT/OBS) on `/guest`
+- **External DJ Ingest (Icecast SOURCE & HTTP PUT)**: Spin up a station and allow remote guest DJs or co-hosts to stream live directly into Scrim using standard broadcast tools (BUTT, Mixxx, OBS Studio, Traktor, VirtualDJ, SAM Broadcaster). Supports Icecast password authentication, live track metadata synchronization via `/admin/metadata`, and zero-loss direct pass-through streaming.
 - **Multi-Mount Stream & API Routing**: Dynamic HTTP path-based routing (`/<mount>`, `/api/stations`, `/api/branding?station=...`, `/api/events?station=...`) ensures completely isolated listener chats, song requests, song reactions, history, and real-time SSE events.
 - **Console Station Switcher Tab Bar**: Seamlessly switch between station control views in the console with live broadcast indicator dots, per-station ON AIR toggles, and 1-click station creation.
-- **Interactive Web Player Channel Dial**: Listeners can browse and toggle between available broadcast channels directly on the web player front-end with instantaneous stream reconnects and synchronized metadata/chat.
+- **Interactive Web Player Channel Dial**: Listeners can browse and toggle between available broadcast channels directly on the web player front-end with instantaneous stream reconnects and synchronized metadata/chat. Extra stations can be unlinked/excluded from the main page dial by default, keeping them private to direct link or PWA holders.
 - **Independent Mobile Web Apps (PWA)**: Each station features its own dynamic Web App Manifest (`/pwa/{mount}`). Listeners can install multiple stations from the same broadcaster as separate, standalone apps on their iOS or Android home screen, each with its own app icon, title, and direct start URL. See [Multi-Station Console Architecture](docs/multi-station-console.md).
 
 ### 🔌 Extensible C# & Python Plugin System

@@ -6,6 +6,7 @@ using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using Scrim.Configuration;
 using Scrim.Metadata;
@@ -134,28 +135,29 @@ namespace Scrim.Server {
             var profile = _profileManager.CurrentProfile;
 
             for (int attempt = 0; attempt < 10; attempt++) {
-                var listener = new HttpListener();
-                listener.Prefixes.Add($"http://localhost:{targetPort}/");
-                listener.Prefixes.Add($"http://127.0.0.1:{targetPort}/");
+                // Prefer loopback HttpListener + dual-mode socket TcpListener bridge.
+                // This ensures non-admin execution, custom hostnames, and raw Icecast SOURCE protocol support.
+                int internalLoopbackPort = FindAvailablePort(targetPort + 1000);
+                var loopbackListener = new HttpListener();
+                loopbackListener.Prefixes.Add($"http://127.0.0.1:{internalLoopbackPort}/");
+                loopbackListener.Prefixes.Add($"http://localhost:{internalLoopbackPort}/");
 
-                bool addedNetworkPrefixes = false;
-                if (profile.EnableNetworkAccess) {
-                    try {
-                        listener.Prefixes.Add($"http://+:{targetPort}/");
-                        addedNetworkPrefixes = true;
-                    } catch { }
-
-                    foreach (var ip in (_networkDiscovery.GetAllLocalIps() ?? Enumerable.Empty<string>())) {
-                        try {
-                            listener.Prefixes.Add($"http://{ip}:{targetPort}/");
-                            addedNetworkPrefixes = true;
-                        } catch { }
-                    }
-                }
-
+                TcpListener? bridge = null;
                 try {
-                    listener.Start();
-                    _listener = listener;
+                    loopbackListener.Start();
+                    try {
+                        bridge = new TcpListener(IPAddress.IPv6Any, targetPort);
+                        bridge.Server.DualMode = true;
+                        bridge.Start();
+                    } catch {
+                        bridge?.Stop();
+                        bridge = new TcpListener(IPAddress.Any, targetPort);
+                        bridge.Start();
+                    }
+
+                    _listener = loopbackListener;
+                    _bridgeListener = bridge;
+
                     if (targetPort != port) {
                         profile.Port = targetPort;
                         _profileManager.SaveProfile(profile);
@@ -164,52 +166,27 @@ namespace Scrim.Server {
                         Task.Run(() => _networkDiscovery.TryMapUpnpPort(targetPort));
                     }
                     break;
-                } catch (Exception) {
-                    try { listener.Close(); } catch { }
+                } catch {
+                    try { loopbackListener.Close(); } catch { }
+                    try { bridge?.Stop(); } catch { }
+                    _bridgeListener = null;
 
-                    // If network / wildcard prefixes failed (e.g. Access is Denied without admin rights):
-                    // Start an internal loopback HttpListener on an available high port,
-                    // and bind a non-elevated socket TcpListener on targetPort (0.0.0.0:targetPort).
-                    // This allows LAN, WAN, and custom hostnames (e.g. 192.168.x.x) to connect cleanly
-                    // without HTTP.sys rejecting them with "HTTP Error 400. The request hostname is invalid."
-                    if (addedNetworkPrefixes) {
-                        int internalLoopbackPort = FindAvailablePort(targetPort + 1000);
-                        var loopbackListener = new HttpListener();
-                        loopbackListener.Prefixes.Add($"http://127.0.0.1:{internalLoopbackPort}/");
-                        loopbackListener.Prefixes.Add($"http://localhost:{internalLoopbackPort}/");
-
-                        TcpListener? bridge = null;
-                        try {
-                            loopbackListener.Start();
-                            try {
-                                bridge = new TcpListener(IPAddress.IPv6Any, targetPort);
-                                bridge.Server.DualMode = true;
-                                bridge.Start();
-                            } catch {
-                                bridge?.Stop();
-                                bridge = new TcpListener(IPAddress.Any, targetPort);
-                                bridge.Start();
-                            }
-
-                            _listener = loopbackListener;
-                            _bridgeListener = bridge;
-
-                            if (targetPort != port) {
-                                profile.Port = targetPort;
-                                _profileManager.SaveProfile(profile);
-                            }
-                            if (profile.EnableNetworkAccess && profile.EnableUpnpPortForwarding) {
-                                Task.Run(() => _networkDiscovery.TryMapUpnpPort(targetPort));
-                            }
-                            break;
-                        } catch {
-                            try { loopbackListener.Close(); } catch { }
-                            try { bridge?.Stop(); } catch { }
-                            _bridgeListener = null;
+                    // Fallback to direct HttpListener if TcpListener binding failed
+                    var listener = new HttpListener();
+                    listener.Prefixes.Add($"http://localhost:{targetPort}/");
+                    listener.Prefixes.Add($"http://127.0.0.1:{targetPort}/");
+                    try {
+                        listener.Start();
+                        _listener = listener;
+                        if (targetPort != port) {
+                            profile.Port = targetPort;
+                            _profileManager.SaveProfile(profile);
                         }
+                        break;
+                    } catch {
+                        try { listener.Close(); } catch { }
                     }
 
-                    // Advance port if binding failed
                     targetPort++;
                 }
             }
@@ -247,7 +224,7 @@ namespace Scrim.Server {
             }
         }
 
-        private static async Task ForwardClientAsync(TcpClient client, int internalPort, string mountPoint, CancellationToken token) {
+        private async Task ForwardClientAsync(TcpClient client, int internalPort, string mountPoint, CancellationToken token) {
             try {
                 using (client)
                 using (var server = new TcpClient()) {
@@ -258,9 +235,7 @@ namespace Scrim.Server {
                     server.ReceiveTimeout = 30000;
                     server.SendTimeout = 30000;
 
-                    await server.ConnectAsync(IPAddress.Loopback, internalPort, token);
                     using var clientStream = client.GetStream();
-                    using var serverStream = server.GetStream();
 
                     var buffer = new byte[32768];
                     int totalRead = 0;
@@ -296,6 +271,17 @@ namespace Scrim.Server {
                     if (headerEnd == -1) return;
 
                     string headerText = System.Text.Encoding.ASCII.GetString(buffer, 0, headerEnd);
+
+                    // Check for Icecast SOURCE or PUT ingest connection
+                    if (headerText.StartsWith("SOURCE ", StringComparison.OrdinalIgnoreCase) ||
+                        headerText.StartsWith("PUT ", StringComparison.OrdinalIgnoreCase)) {
+                        bool handled = await TryHandleTcpIcecastIngestAsync(client, clientStream, headerText, buffer, headerEnd, totalRead, token);
+                        if (handled) return;
+                    }
+
+                    await server.ConnectAsync(IPAddress.Loopback, internalPort, token);
+                    using var serverStream = server.GetStream();
+
                     string originalHost = "";
                     bool hasConnectionHeader = false;
                     var rawLines = headerText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
@@ -334,6 +320,92 @@ namespace Scrim.Server {
                     await Task.WhenAny(t1, t2);
                 }
             } catch { }
+        }
+
+        private async Task<bool> TryHandleTcpIcecastIngestAsync(TcpClient client, NetworkStream clientStream, string headerText, byte[] buffer, int headerEnd, int totalRead, CancellationToken token) {
+            var lines = headerText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+            if (lines.Length == 0) return false;
+
+            var firstLineParts = lines[0].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (firstLineParts.Length < 2) return false;
+
+            string verb = firstLineParts[0].ToUpperInvariant();
+            string rawPath = firstLineParts[1];
+            string mount = rawPath.Trim().Split('?')[0].Trim('/');
+
+            var station = _stationManager?.GetStationByMount(mount);
+            if (station == null || station.Config.SourceType != AudioSourceType.IcecastIngest) {
+                if (verb == "SOURCE") {
+                    byte[] notFound = System.Text.Encoding.ASCII.GetBytes("HTTP/1.0 404 Mount Point Not Found\r\n\r\n");
+                    await clientStream.WriteAsync(notFound, token);
+                    return true;
+                }
+                return false;
+            }
+
+            string authHeader = "";
+            string icePass = "";
+            string iceName = "";
+            for (int i = 1; i < lines.Length; i++) {
+                string l = lines[i];
+                if (l.StartsWith("Authorization:", StringComparison.OrdinalIgnoreCase)) {
+                    authHeader = l.Substring(14).Trim();
+                } else if (l.StartsWith("ice-password:", StringComparison.OrdinalIgnoreCase)) {
+                    icePass = l.Substring(13).Trim();
+                } else if (l.StartsWith("ice-name:", StringComparison.OrdinalIgnoreCase)) {
+                    iceName = l.Substring(9).Trim();
+                }
+            }
+
+            string suppliedPass = "";
+            if (!string.IsNullOrEmpty(icePass)) {
+                suppliedPass = icePass;
+            } else if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase)) {
+                try {
+                    string decoded = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(authHeader.Substring(6).Trim()));
+                    int colon = decoded.IndexOf(':');
+                    suppliedPass = colon >= 0 ? decoded.Substring(colon + 1) : decoded;
+                } catch { }
+            }
+
+            if (!string.IsNullOrEmpty(station.Config.IngestPassword) &&
+                !string.Equals(suppliedPass, station.Config.IngestPassword, StringComparison.Ordinal)) {
+                byte[] unauth = System.Text.Encoding.ASCII.GetBytes("HTTP/1.0 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"Scrim Icecast Ingest\"\r\n\r\n");
+                await clientStream.WriteAsync(unauth, token);
+                return true;
+            }
+
+            byte[] okResponse = System.Text.Encoding.ASCII.GetBytes("HTTP/1.0 200 OK\r\n\r\n");
+            await clientStream.WriteAsync(okResponse, token);
+            await clientStream.FlushAsync(token);
+
+            var ingestChannel = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(200) { FullMode = BoundedChannelFullMode.DropOldest });
+
+            int remaining = totalRead - headerEnd;
+            if (remaining > 0) {
+                byte[] firstChunk = new byte[remaining];
+                Buffer.BlockCopy(buffer, headerEnd, firstChunk, 0, remaining);
+                ingestChannel.Writer.TryWrite(firstChunk);
+            }
+
+            station.StartIngestBroadcast(ingestChannel.Reader, iceName);
+
+            try {
+                byte[] chunkBuffer = new byte[8192];
+                while (!token.IsCancellationRequested && client.Connected) {
+                    int read = await clientStream.ReadAsync(chunkBuffer.AsMemory(0, chunkBuffer.Length), token);
+                    if (read <= 0) break;
+                    byte[] chunk = new byte[read];
+                    Buffer.BlockCopy(chunkBuffer, 0, chunk, 0, read);
+                    ingestChannel.Writer.TryWrite(chunk);
+                }
+            } catch { }
+            finally {
+                ingestChannel.Writer.TryComplete();
+                station.StopIngestBroadcast();
+            }
+
+            return true;
         }
 
         private async Task AcceptLoop(CancellationToken token) {
@@ -506,8 +578,18 @@ namespace Scrim.Server {
                 HandleGreenRoomAuth(context);
             } else if (path == "/greenroom" || path == "/greenroom/") {
                 HandleGreenRoomWebPortal(context);
+            } else if (path == "/admin/metadata") {
+                HandleAdminMetadataRequest(context);
             } else if (path == "/api/status" || IsStationApiRoute(path, "status")) {
                 HandleStatusRequest(context);
+            } else if (context.Request.HttpMethod == "PUT") {
+                string mount = path.TrimStart('/');
+                var station = _stationManager?.GetStationByMount(mount);
+                if (station != null && station.Config.SourceType == AudioSourceType.IcecastIngest) {
+                    _ = HandleHttpPutIngestAsync(context, station, token);
+                    return;
+                }
+                Scrim.Web.EmbeddedWebPlayer.ServeAsync(context);
             } else {
                 // Serve Web Player assets: /, /index.html, /player.css, /player.js, /assets/*, etc.
                 Scrim.Web.EmbeddedWebPlayer.ServeAsync(context);
@@ -565,13 +647,27 @@ namespace Scrim.Server {
                 response.ContentType = "application/json; charset=utf-8";
                 response.Headers.Add("Access-Control-Allow-Origin", "*");
 
-                var stations = _stationManager != null
+                var allStations = _stationManager != null
                     ? _stationManager.GetAllStations()
                     : new System.Collections.Generic.List<StationPipeline>();
 
-                var items = stations.Select(s => {
+                string? queryStation = context.Request.QueryString["station"] ?? context.Request.QueryString["mount"];
+                bool includeAll = string.Equals(context.Request.QueryString["all"], "true", StringComparison.OrdinalIgnoreCase);
+
+                var filteredStations = allStations.Where(s => {
+                    if (includeAll) return true;
+                    if (s.IsPrimary || s.Config.ShowOnMainPage) return true;
+                    if (!string.IsNullOrWhiteSpace(queryStation) &&
+                        (string.Equals(s.Config.MountPoint?.Trim('/'), queryStation.Trim('/'), StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(s.Config.Id, queryStation, StringComparison.OrdinalIgnoreCase))) {
+                        return true;
+                    }
+                    return false;
+                }).ToList();
+
+                var items = filteredStations.Select(s => {
                     string m = s.Config.MountPoint?.Trim().Trim('/') ?? "stream";
-                    return $"{{\"id\":\"{EscapeJson(s.Config.Id)}\",\"name\":\"{EscapeJson(s.Config.Name)}\",\"stationName\":\"{EscapeJson(s.Config.StationName)}\",\"mount\":\"{EscapeJson(m)}\",\"streamUrl\":\"/{EscapeJson(m)}\",\"isLive\":{(s.IsLive ? "true" : "false")},\"listeners\":{s.Hub.ActiveClientCount},\"genre\":\"{EscapeJson(s.Config.GenreTag)}\",\"theme\":\"{EscapeJson(s.Config.WebTheme)}\",\"accentColor\":\"{EscapeJson(s.Config.AccentColor)}\",\"sourceType\":\"{s.Config.SourceType}\"}}";
+                    return $"{{\"id\":\"{EscapeJson(s.Config.Id)}\",\"name\":\"{EscapeJson(s.Config.Name)}\",\"stationName\":\"{EscapeJson(s.Config.StationName)}\",\"mount\":\"{EscapeJson(m)}\",\"streamUrl\":\"/{EscapeJson(m)}\",\"isLive\":{(s.IsLive ? "true" : "false")},\"listeners\":{s.Hub.ActiveClientCount},\"genre\":\"{EscapeJson(s.Config.GenreTag)}\",\"theme\":\"{EscapeJson(s.Config.WebTheme)}\",\"accentColor\":\"{EscapeJson(s.Config.AccentColor)}\",\"sourceType\":\"{s.Config.SourceType}\",\"showOnMainPage\":{(s.Config.ShowOnMainPage ? "true" : "false")}}}";
                 });
 
                 string json = $"[{string.Join(",", items)}]";
@@ -807,6 +903,116 @@ namespace Scrim.Server {
             response.ContentLength64 = bytes.Length;
             response.OutputStream.Write(bytes, 0, bytes.Length);
             response.Close();
+        }
+
+        private void HandleAdminMetadataRequest(HttpListenerContext context) {
+            // Standard Icecast 2 metadata update endpoint:
+            // GET /admin/metadata?mode=updinfo&mount=/guest&song=Artist+-+Title
+            string mount = context.Request.QueryString["mount"] ?? "";
+            string song = context.Request.QueryString["song"] ?? "";
+            var station = _stationManager?.GetStationByMount(mount) ?? ResolveStationPipeline(context);
+
+            if (station == null) {
+                context.Response.StatusCode = 404;
+                context.Response.Close();
+                return;
+            }
+
+            // Authenticate: check Basic Auth or pass query param
+            string authHeader = context.Request.Headers["Authorization"] ?? "";
+            string passParam = context.Request.QueryString["pass"] ?? "";
+            bool authOk = false;
+
+            if (!string.IsNullOrEmpty(station.Config.IngestPassword)) {
+                if (!string.IsNullOrEmpty(passParam) && string.Equals(passParam, station.Config.IngestPassword, StringComparison.Ordinal)) {
+                    authOk = true;
+                } else if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase)) {
+                    try {
+                        string decoded = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(authHeader.Substring(6).Trim()));
+                        int colon = decoded.IndexOf(':');
+                        string suppliedPass = colon >= 0 ? decoded.Substring(colon + 1) : decoded;
+                        if (string.Equals(suppliedPass, station.Config.IngestPassword, StringComparison.Ordinal)) {
+                            authOk = true;
+                        }
+                    } catch { }
+                }
+            } else {
+                authOk = true;
+            }
+
+            if (!authOk) {
+                context.Response.StatusCode = 401;
+                context.Response.Headers.Add("WWW-Authenticate", "Basic realm=\"Scrim Ingest Metadata\"");
+                context.Response.Close();
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(song)) {
+                string title = song.Trim();
+                string artist = station.ConnectedDjName ?? "Guest DJ";
+                if (title.Contains(" - ")) {
+                    var parts = title.Split(new[] { " - " }, 2, StringSplitOptions.None);
+                    artist = parts[0].Trim();
+                    title = parts[1].Trim();
+                }
+                station.UpdateIngestMetadata(title, artist);
+            }
+
+            byte[] respBytes = System.Text.Encoding.UTF8.GetBytes("<?xml version=\"1.0\"?>\n<iceresponse><message>Metadata update successful</message><return>1</return></iceresponse>");
+            context.Response.StatusCode = 200;
+            context.Response.ContentType = "text/xml; charset=utf-8";
+            context.Response.ContentLength64 = respBytes.Length;
+            context.Response.OutputStream.Write(respBytes, 0, respBytes.Length);
+            context.Response.Close();
+        }
+
+        private async Task HandleHttpPutIngestAsync(HttpListenerContext context, StationPipeline station, CancellationToken token) {
+            try {
+                string authHeader = context.Request.Headers["Authorization"] ?? "";
+                string icePass = context.Request.Headers["ice-password"] ?? "";
+                string suppliedPass = "";
+                if (!string.IsNullOrEmpty(icePass)) {
+                    suppliedPass = icePass;
+                } else if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase)) {
+                    try {
+                        string decoded = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(authHeader.Substring(6).Trim()));
+                        int colon = decoded.IndexOf(':');
+                        suppliedPass = colon >= 0 ? decoded.Substring(colon + 1) : decoded;
+                    } catch { }
+                }
+
+                if (!string.IsNullOrEmpty(station.Config.IngestPassword) &&
+                    !string.Equals(suppliedPass, station.Config.IngestPassword, StringComparison.Ordinal)) {
+                    context.Response.StatusCode = 401;
+                    context.Response.Headers.Add("WWW-Authenticate", "Basic realm=\"Scrim Ingest\"");
+                    context.Response.Close();
+                    return;
+                }
+
+                string djName = context.Request.Headers["ice-name"] ?? "";
+                var ingestChannel = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(200) { FullMode = BoundedChannelFullMode.DropOldest });
+                station.StartIngestBroadcast(ingestChannel.Reader, djName);
+
+                context.Response.StatusCode = 200;
+                context.Response.StatusDescription = "OK";
+                context.Response.SendChunked = true;
+
+                using var inputStream = context.Request.InputStream;
+                byte[] buffer = new byte[8192];
+                while (!token.IsCancellationRequested) {
+                    int read = await inputStream.ReadAsync(buffer.AsMemory(0, buffer.Length), token);
+                    if (read <= 0) break;
+                    byte[] chunk = new byte[read];
+                    Buffer.BlockCopy(buffer, 0, chunk, 0, read);
+                    ingestChannel.Writer.TryWrite(chunk);
+                }
+
+                ingestChannel.Writer.TryComplete();
+                station.StopIngestBroadcast();
+                try { context.Response.Close(); } catch { }
+            } catch {
+                station.StopIngestBroadcast();
+            }
         }
 
         private void HandleStatusRequest(HttpListenerContext context) {

@@ -327,14 +327,60 @@
                         <option value="@AudioSourceType.BuiltInPlayer">Built-in Local Player (Clockwheel &amp; Automation Crate)</option>
                         <option value="@AudioSourceType.AudioDevice">Audio Hardware Input / Mic</option>
                         <option value="@AudioSourceType.SystemMix">Master System Mix</option>
+                        <option value="@AudioSourceType.IcecastIngest">🎧 External DJ Ingest (Icecast / BUTT / OBS / Mixxx)</option>
                     </select>
                 </div>
-                @if (NewStationSource == AudioSourceType.ProcessLoopback) {
-                    <div>
-                        <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">Target Application / Process</label>
-                        <input class="scrim-input" style="width: 100%; box-sizing: border-box;" @bind="NewStationProcess" placeholder="e.g. Spotify.exe or chrome.exe" />
+                @if (NewStationSource == AudioSourceType.IcecastIngest) {
+                    <div style="background: rgba(0, 210, 255, 0.04); border: 1px solid rgba(0, 210, 255, 0.2); border-radius: 8px; padding: 10px 12px;">
+                        <label style="font-size: 11px; font-weight: 600; color: #00d2ff; display: block; margin-bottom: 4px;">Guest DJ Ingest Password</label>
+                        <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+                            <input class="scrim-input" style="flex: 1;" @bind="NewStationIngestPassword" placeholder="e.g. scrimpass" />
+                            <button type="button" class="scrim-btn-secondary" style="font-size: 11px; padding: 4px 10px;" @onclick="GenerateRandomIngestPassword" title="Generate Random Password">🎲 Generate</button>
+                        </div>
+                        <div style="font-size: 10px; color: #94a3b8; line-height: 1.6;">
+                            <strong style="color: #cbd5e1;">Icecast 2 Connection Details for Guest DJ:</strong><br />
+                            • <strong>Server / Host:</strong> <span style="font-family: monospace; color: #38bdf8;">@(GetIngestServerHost())</span><br />
+                            • <strong>Port:</strong> <span style="font-family: monospace; color: #38bdf8;">@(ProfileManager.CurrentProfile.Port)</span><br />
+                            • <strong>Mount Point:</strong> <span style="font-family: monospace; color: #38bdf8;">/@(string.IsNullOrWhiteSpace(NewStationMount) ? "channel" : NewStationMount.Trim().Trim('/'))</span><br />
+                            • <strong>Username:</strong> <span style="font-family: monospace; color: #38bdf8;">source</span><br />
+                            • <strong>Password:</strong> <span style="font-family: monospace; color: #38bdf8;">@NewStationIngestPassword</span><br />
+                            • <strong>Compatible DJ Software:</strong> BUTT, Mixxx, OBS Studio, Traktor, SAM Broadcaster, VirtualDJ
+                        </div>
                     </div>
                 }
+                @if (NewStationSource == AudioSourceType.ProcessLoopback) {
+                    <div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                            <label style="font-size: 11px; font-weight: 600; color: #94a3b8;">Target Application / Audio Source</label>
+                            <button type="button" class="btn btn-sm btn-link p-0 text-decoration-none" style="font-size: 10px; color: #00d2ff; background: none; border: none; cursor: pointer;" @onclick="ForceRefreshWindows" title="Re-scan open applications and audio sessions">🔄 Refresh Apps</button>
+                        </div>
+                        <select class="scrim-select" style="width: 100%; box-sizing: border-box;" @bind="NewStationProcessId" @bind:after="OnNewStationProcessChanged">
+                            <option value="0">-- Select an Application --</option>
+                            @if (Windows.Any(w => w.IsPlayingAudio)) {
+                                <optgroup label="🔊 Currently Playing Audio">
+                                    @foreach (var w in Windows.Where(w => w.IsPlayingAudio)) {
+                                        <option value="@w.ProcessId">🔊 @w.ProcessName - @w.Title</option>
+                                    }
+                                </optgroup>
+                            }
+                            <optgroup label="Available Applications">
+                                @foreach (var w in Windows.Where(w => !w.IsPlayingAudio)) {
+                                    <option value="@w.ProcessId">@(!string.IsNullOrEmpty(w.ProcessName) && !w.Title.StartsWith(w.ProcessName, StringComparison.OrdinalIgnoreCase) ? $"{w.ProcessName} - {w.Title}" : w.Title)</option>
+                                }
+                            </optgroup>
+                        </select>
+                        <span style="font-size: 10px; color: #64748b; margin-top: 3px; display: block;">Select the app to capture (e.g. Spotify, Chrome, VLC). Scrim will isolate its audio and stream it on this station.</span>
+                    </div>
+                }
+                <div style="padding-top: 4px;">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;">
+                        <input type="checkbox" @bind="NewStationShowOnMainPage" style="accent-color: #00d2ff; width: 14px; height: 14px;" />
+                        <span style="font-size: 11px; font-weight: 600; color: #cbd5e1;">Link on Main Page (Channel Dial)</span>
+                    </label>
+                    <span style="font-size: 10px; color: #64748b; margin-top: 2px; margin-left: 22px; display: block;">
+                        Unchecked by default. Leave unchecked to keep this station unlisted from the main web player dial. Listeners can still tune in directly via its direct URL or dedicated PWA.
+                    </span>
+                </div>
             </div>
 
             <div style="display: flex; justify-content: flex-end; gap: 8px;">
@@ -1599,15 +1645,68 @@
     private string NewStationName = "";
     private string NewStationMount = "";
     private AudioSourceType NewStationSource = AudioSourceType.ProcessLoopback;
-    private string NewStationProcess = "Spotify.exe";
+    private string NewStationIngestPassword = "scrimpass";
+    private bool NewStationShowOnMainPage = false;
+    private uint NewStationProcessId = 0;
+    private string NewStationProcess = "";
+
+    private void GenerateRandomIngestPassword() {
+        NewStationIngestPassword = GenerateRandomToken(8);
+    }
+
+    private static string GenerateRandomToken(int length) {
+        const string chars = "abcdefghjkmnpqrstuvwxyz23456789";
+        var rng = new Random();
+        return new string(Enumerable.Repeat(chars, length).Select(s => s[rng.Next(s.Length)]).ToArray());
+    }
+
+    private string GetIngestServerHost() {
+        var ip = NetworkDiscovery.GetAllLocalIps()?.FirstOrDefault();
+        return !string.IsNullOrEmpty(ip) ? ip : "127.0.0.1";
+    }
+
+    private void ToggleActiveStationShowOnMainPage(ChangeEventArgs e) {
+        var activeSt = StationManager.GetActiveStation();
+        if (activeSt != null && e.Value is bool val) {
+            activeSt.Config.ShowOnMainPage = val;
+            ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+            StateHasChanged();
+        }
+    }
 
     private void OnAddNewStation() {
+        ForceRefreshWindows();
         int nextNum = StationManager.GetAllStations().Count + 1;
         NewStationName = $"Station {nextNum}";
         NewStationMount = $"channel{nextNum}";
         NewStationSource = AudioSourceType.ProcessLoopback;
-        NewStationProcess = "Spotify.exe";
+        NewStationIngestPassword = GenerateRandomToken(8);
+        NewStationShowOnMainPage = false;
+
+        var firstPlaying = Windows.FirstOrDefault(w => w.IsPlayingAudio) ?? Windows.FirstOrDefault();
+        if (firstPlaying != null) {
+            NewStationProcessId = firstPlaying.ProcessId;
+            NewStationProcess = firstPlaying.ProcessName;
+            NewStationName = $"{firstPlaying.ProcessName} Stream";
+            NewStationMount = firstPlaying.ProcessName.ToLowerInvariant().Replace(" ", "").Replace(".exe", "");
+        } else {
+            NewStationProcessId = 0;
+            NewStationProcess = "";
+        }
         ShowAddStationModal = true;
+    }
+
+    private void OnNewStationProcessChanged() {
+        var win = Windows.FirstOrDefault(w => w.ProcessId == NewStationProcessId);
+        if (win != null) {
+            NewStationProcess = win.ProcessName;
+            if (string.IsNullOrWhiteSpace(NewStationName) || NewStationName.StartsWith("Station ")) {
+                NewStationName = $"{win.ProcessName} Stream";
+            }
+            if (string.IsNullOrWhiteSpace(NewStationMount) || NewStationMount.StartsWith("channel")) {
+                NewStationMount = win.ProcessName.ToLowerInvariant().Replace(" ", "").Replace(".exe", "");
+            }
+        }
     }
 
     private void ConfirmAddStation() {
@@ -1620,6 +1719,9 @@
             StationName = NewStationName.Trim(),
             MountPoint = mount,
             SourceType = NewStationSource,
+            IngestPassword = string.IsNullOrWhiteSpace(NewStationIngestPassword) ? "scrimpass" : NewStationIngestPassword.Trim(),
+            ShowOnMainPage = NewStationShowOnMainPage,
+            TargetProcessId = (int)NewStationProcessId,
             TargetProcessName = NewStationProcess.Trim(),
             Bitrate = ProfileManager.CurrentProfile.Bitrate,
             AudioFormat = ProfileManager.CurrentProfile.AudioFormat,
@@ -2712,9 +2814,28 @@
                     <div>
                         <div style="font-size: 11px; font-weight: 700; color: #00d2ff;">Active Station: @activeSt.Config.Name</div>
                         <div style="font-size: 10px; color: #94a3b8;">Mount: /@(activeSt.Config.MountPoint?.Trim('/') ?? "stream") • Audio Source: @activeSt.Config.SourceType</div>
+                        @if (!activeSt.IsPrimary) {
+                            <label style="display: inline-flex; align-items: center; gap: 5px; font-size: 10px; color: #cbd5e1; cursor: pointer; margin-top: 4px;">
+                                <input type="checkbox" checked="@activeSt.Config.ShowOnMainPage" @onchange="ToggleActiveStationShowOnMainPage" style="accent-color: #00d2ff;" />
+                                <span>Link on Main Page Channel Dial</span>
+                            </label>
+                        }
                     </div>
                     <span class="station-tab-dot @(activeSt.IsLive ? "live" : "offline")"></span>
                 </div>
+                @if (activeSt.Config.SourceType == AudioSourceType.IcecastIngest) {
+                    <div style="margin-bottom: 12px; background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 10px 12px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                            <span style="font-size: 11px; font-weight: 700; color: #10b981;">🎧 External DJ Ingest</span>
+                            <span style="font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; background: @(activeSt.IsDjConnected ? "rgba(16, 185, 129, 0.2)" : "rgba(245, 158, 11, 0.2)"); color: @(activeSt.IsDjConnected ? "#34d399" : "#fbbf24");">
+                                @(activeSt.IsDjConnected ? $"● Live: {activeSt.ConnectedDjName}" : "⏳ Waiting for DJ to connect...")
+                            </span>
+                        </div>
+                        <div style="font-size: 10px; color: #94a3b8; font-family: monospace; line-height: 1.4;">
+                            Host: @(GetIngestServerHost()):@(ProfileManager.CurrentProfile.Port) • Mount: /@(activeSt.Config.MountPoint?.Trim('/') ?? "stream") • User: source • Pass: @activeSt.Config.IngestPassword
+                        </div>
+                    </div>
+                }
             }
             
             <div style="margin-bottom: 14px;">
@@ -2724,9 +2845,18 @@
                     @if (SelectedProcessId != 0 && !Windows.Any(w => w.ProcessId == SelectedProcessId)) {
                         <option @key="SelectedProcessId" value="@SelectedProcessId">@(string.IsNullOrEmpty(SelectedProcessDisplayName) ? "Selected Application" : SelectedProcessDisplayName)</option>
                     }
-                    @foreach (var w in Windows) {
-                        <option @key="w.ProcessId" value="@w.ProcessId">@(!string.IsNullOrEmpty(w.ProcessName) && !w.Title.StartsWith(w.ProcessName, StringComparison.OrdinalIgnoreCase) ? $"{w.ProcessName} - {w.Title}" : w.Title)</option>
+                    @if (Windows.Any(w => w.IsPlayingAudio)) {
+                        <optgroup label="🔊 Currently Playing Audio">
+                            @foreach (var w in Windows.Where(w => w.IsPlayingAudio)) {
+                                <option @key="w.ProcessId" value="@w.ProcessId">🔊 @w.ProcessName - @w.Title</option>
+                            }
+                        </optgroup>
                     }
+                    <optgroup label="Available Applications">
+                        @foreach (var w in Windows.Where(w => !w.IsPlayingAudio)) {
+                            <option @key="w.ProcessId" value="@w.ProcessId">@(!string.IsNullOrEmpty(w.ProcessName) && !w.Title.StartsWith(w.ProcessName, StringComparison.OrdinalIgnoreCase) ? $"{w.ProcessName} - {w.Title}" : w.Title)</option>
+                        }
+                    </optgroup>
                 </select>
             </div>
 

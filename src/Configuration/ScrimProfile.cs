@@ -139,7 +139,8 @@ namespace Scrim.Configuration {
                     EnableSongHistory = EnableSongHistory,
                     SongHistoryLimit = SongHistoryLimit,
                     AudioFormat = AudioFormat,
-                    Bitrate = Bitrate
+                    Bitrate = Bitrate,
+                    ShowOnMainPage = true
                 };
                 Stations.Add(defaultStation);
                 ActiveStationId = defaultStation.Id;
@@ -155,7 +156,8 @@ namespace Scrim.Configuration {
         ProcessLoopback,
         BuiltInPlayer,
         AudioDevice,
-        SystemMix
+        SystemMix,
+        IcecastIngest
     }
 
     public class StationConfig {
@@ -170,6 +172,8 @@ namespace Scrim.Configuration {
         public string CaptureDeviceId { get; set; } = "";
         public string CaptureDeviceName { get; set; } = "";
         public int AppStreamVolume { get; set; } = 100;
+        public string IngestPassword { get; set; } = "scrimpass";
+        public bool ShowOnMainPage { get; set; } = false;
 
         // Branding & Web Presentation
         public string StationName { get; set; } = "GLOBAL INDIE RADIO";

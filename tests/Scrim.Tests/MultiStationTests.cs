@@ -2,6 +2,8 @@ using System;
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Text;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using Moq;
 using Scrim.Audio;
@@ -87,7 +89,8 @@ namespace Scrim.Tests {
                 SourceType = AudioSourceType.ProcessLoopback,
                 TargetProcessName = "Spotify.exe",
                 WebTheme = "cyberpunk",
-                AccentColor = "#10b981"
+                AccentColor = "#10b981",
+                ShowOnMainPage = true
             });
             profile.Stations.Add(new StationConfig {
                 Id = "vault-channel",
@@ -96,7 +99,8 @@ namespace Scrim.Tests {
                 MountPoint = "vault",
                 SourceType = AudioSourceType.BuiltInPlayer,
                 WebTheme = "retro",
-                AccentColor = "#f59e0b"
+                AccentColor = "#f59e0b",
+                ShowOnMainPage = true
             });
 
             var profileMock = new Mock<IProfileManager>();
@@ -173,6 +177,179 @@ namespace Scrim.Tests {
                 Assert.Contains("/pwa/vault", vaultManifestJson);
                 Assert.Contains("/?station=vault", vaultManifestJson);
                 Assert.Contains("#f59e0b", vaultManifestJson);
+            } finally {
+                server.Stop();
+                stationManager.Dispose();
+            }
+        }
+
+        [Fact]
+        public void StationPipeline_IcecastIngest_BroadcastLifecycle() {
+            var config = new StationConfig {
+                Id = "guest-station",
+                Name = "Guest DJ Lounge",
+                MountPoint = "guest",
+                SourceType = AudioSourceType.IcecastIngest,
+                IngestPassword = "guestsecretpass"
+            };
+
+            var mockMetadata = new Mock<IMetadataService>();
+            mockMetadata.Setup(m => m.CurrentMetadata).Returns(new MediaMetadata { Title = "Initial", Artist = "Initial" });
+
+            using var pipeline = new StationPipeline(config, mockMetadata.Object);
+
+            Assert.False(pipeline.IsLive);
+            Assert.False(pipeline.IsDjConnected);
+            Assert.Null(pipeline.ConnectedDjName);
+
+            // Calling StartBroadcast does not make it live because it waits for DJ connection
+            pipeline.StartBroadcast();
+            Assert.False(pipeline.IsLive);
+
+            // Connect external DJ stream
+            var channel = Channel.CreateBounded<byte[]>(10);
+            pipeline.StartIngestBroadcast(channel.Reader, "DJ Shadow");
+
+            Assert.True(pipeline.IsLive);
+            Assert.True(pipeline.IsDjConnected);
+            Assert.Equal("DJ Shadow", pipeline.ConnectedDjName);
+            Assert.Equal("Live Guest Set", pipeline.MetadataService?.CurrentMetadata.Title);
+            Assert.Equal("DJ Shadow", pipeline.MetadataService?.CurrentMetadata.Artist);
+
+            // Update live metadata (e.g. from /admin/metadata)
+            pipeline.UpdateIngestMetadata("Organ Donor", "DJ Shadow");
+            Assert.Equal("Organ Donor", pipeline.MetadataService?.CurrentMetadata.Title);
+            Assert.Equal("DJ Shadow", pipeline.MetadataService?.CurrentMetadata.Artist);
+
+            // Disconnect DJ
+            pipeline.StopIngestBroadcast();
+            Assert.False(pipeline.IsLive);
+            Assert.False(pipeline.IsDjConnected);
+            Assert.Null(pipeline.ConnectedDjName);
+        }
+
+        [Fact]
+        public async Task HttpStreamServer_IcecastMetadataUpdate_EndpointWorks() {
+            int testPort = 4288;
+            var profile = new ScrimProfile {
+                Port = testPort,
+                EnableNetworkAccess = false
+            };
+            profile.Stations.Clear();
+            profile.Stations.Add(new StationConfig {
+                Id = "guest-dj",
+                Name = "Guest Ingest",
+                MountPoint = "guest",
+                SourceType = AudioSourceType.IcecastIngest,
+                IngestPassword = "secretguestpass"
+            });
+
+            var profileMock = new Mock<IProfileManager>();
+            profileMock.Setup(p => p.CurrentProfile).Returns(profile);
+
+            var metaMock = new Mock<IMetadataService>();
+            metaMock.Setup(m => m.CurrentMetadata).Returns(new MediaMetadata());
+
+            var hub = new BroadcastHub();
+            var reqCtrl = new SongRequestController();
+            var netMock = new Mock<INetworkDiscoveryService>();
+            var stationManager = new MultiStationManager(profileMock.Object, metaMock.Object, hub);
+
+            using var server = new HttpStreamServer(hub, metaMock.Object, reqCtrl, profileMock.Object, netMock.Object, stationManager: stationManager);
+            server.Start(testPort);
+
+            try {
+                using var client = new HttpClient();
+
+                // 1. Unauthorized request (no auth) -> 401
+                var unauthRes = await client.GetAsync($"http://localhost:{testPort}/admin/metadata?mode=updinfo&mount=guest&song=TestArtist+-+TestSong");
+                Assert.Equal(HttpStatusCode.Unauthorized, unauthRes.StatusCode);
+
+                // 2. Authorized request with Basic Auth -> 200 OK with Icecast XML response
+                var request = new HttpRequestMessage(HttpMethod.Get, $"http://localhost:{testPort}/admin/metadata?mode=updinfo&mount=guest&song=Daft+Punk+-+One+More+Time");
+                string credentials = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("source:secretguestpass"));
+                request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", credentials);
+
+                var authRes = await client.SendAsync(request);
+                Assert.Equal(HttpStatusCode.OK, authRes.StatusCode);
+                string responseXml = await authRes.Content.ReadAsStringAsync();
+                Assert.Contains("Metadata update successful", responseXml);
+
+                // Verify station metadata was updated
+                var station = stationManager.GetStationByMount("guest");
+                Assert.NotNull(station);
+                Assert.Equal("One More Time", station.MetadataService?.CurrentMetadata.Title);
+                Assert.Equal("Daft Punk", station.MetadataService?.CurrentMetadata.Artist);
+            } finally {
+                server.Stop();
+                stationManager.Dispose();
+            }
+        }
+
+        [Fact]
+        public async Task HttpStreamServer_StationsEndpoint_ExcludesUnlistedStationsByDefault() {
+            int testPort = 4292;
+            var profile = new ScrimProfile {
+                Port = testPort,
+                EnableNetworkAccess = false
+            };
+            profile.Stations.Clear();
+            var st1 = profile.EnsureDefaultStation();
+            st1.MountPoint = "main";
+            st1.ShowOnMainPage = true;
+
+            var st2 = new StationConfig {
+                Id = "guest-dj",
+                Name = "Guest Lounge",
+                MountPoint = "guest",
+                ShowOnMainPage = false
+            };
+            var st3 = new StationConfig {
+                Id = "rock-station",
+                Name = "Rock Classics",
+                MountPoint = "rock",
+                ShowOnMainPage = true
+            };
+            profile.Stations.Add(st2);
+            profile.Stations.Add(st3);
+
+            var profileMock = new Mock<IProfileManager>();
+            profileMock.Setup(p => p.CurrentProfile).Returns(profile);
+
+            var hub = new BroadcastHub();
+            var metaMock = new Mock<IMetadataService>();
+            metaMock.Setup(m => m.CurrentMetadata).Returns(new MediaMetadata());
+            var reqCtrl = new SongRequestController();
+            var netMock = new Mock<INetworkDiscoveryService>();
+            var stationManager = new MultiStationManager(profileMock.Object, metaMock.Object, hub);
+
+            using var server = new HttpStreamServer(hub, metaMock.Object, reqCtrl, profileMock.Object, netMock.Object, stationManager: stationManager);
+            server.Start(testPort);
+
+            try {
+                using var client = new HttpClient();
+
+                // 1. GET /api/stations on main page: returns main and rock, excludes guest
+                var res = await client.GetAsync($"http://localhost:{testPort}/api/stations");
+                Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+                string json = await res.Content.ReadAsStringAsync();
+                Assert.Contains("main", json);
+                Assert.Contains("rock", json);
+                Assert.DoesNotContain("guest", json);
+
+                // 2. GET /api/stations?station=guest: includes guest because listener is directly viewing it
+                var directRes = await client.GetAsync($"http://localhost:{testPort}/api/stations?station=guest");
+                Assert.Equal(HttpStatusCode.OK, directRes.StatusCode);
+                string directJson = await directRes.Content.ReadAsStringAsync();
+                Assert.Contains("guest", directJson);
+
+                // 3. GET /api/stations?all=true: includes all stations
+                var allRes = await client.GetAsync($"http://localhost:{testPort}/api/stations?all=true");
+                Assert.Equal(HttpStatusCode.OK, allRes.StatusCode);
+                string allJson = await allRes.Content.ReadAsStringAsync();
+                Assert.Contains("main", allJson);
+                Assert.Contains("guest", allJson);
+                Assert.Contains("rock", allJson);
             } finally {
                 server.Stop();
                 stationManager.Dispose();

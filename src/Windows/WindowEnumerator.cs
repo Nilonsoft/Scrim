@@ -97,8 +97,57 @@ namespace Scrim.Windows {
                 }
             } catch { }
 
+            // Identify processes currently playing audio via Windows CoreAudio API
+            try {
+                using var enumerator = new NAudio.CoreAudioApi.MMDeviceEnumerator();
+                var devices = enumerator.EnumerateAudioEndPoints(NAudio.CoreAudioApi.DataFlow.Render, NAudio.CoreAudioApi.DeviceState.Active);
+                foreach (var device in devices) {
+                    try {
+                        var sessionManager = device.AudioSessionManager;
+                        if (sessionManager == null) continue;
+                        var sessions = sessionManager.Sessions;
+                        for (int i = 0; i < sessions.Count; i++) {
+                            try {
+                                var session = sessions[i];
+                                uint pid = (uint)session.GetProcessID;
+                                if (pid == 0 || pid == myPid) continue;
+
+                                bool isPlaying = false;
+                                if (session.State == NAudio.CoreAudioApi.Interfaces.AudioSessionState.AudioSessionStateActive) {
+                                    isPlaying = true;
+                                }
+                                try {
+                                    if (session.AudioMeterInformation != null && session.AudioMeterInformation.MasterPeakValue > 0.0001f) {
+                                        isPlaying = true;
+                                    }
+                                } catch { }
+
+                                if (isPlaying) {
+                                    if (windowMap.TryGetValue(pid, out var existingInfo)) {
+                                        existingInfo.IsPlayingAudio = true;
+                                    } else {
+                                        try {
+                                            var proc = Process.GetProcessById((int)pid);
+                                            string pName = proc.ProcessName;
+                                            string title = !string.IsNullOrWhiteSpace(proc.MainWindowTitle) ? proc.MainWindowTitle : pName;
+                                            windowMap[pid] = new WindowInfo {
+                                                ProcessId = pid,
+                                                ProcessName = pName,
+                                                Title = title,
+                                                IsPlayingAudio = true
+                                            };
+                                        } catch { }
+                                    }
+                                }
+                            } catch { }
+                        }
+                    } catch { }
+                }
+            } catch { }
+
             return windowMap.Values
-                .OrderBy(w => w.ProcessName, StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(w => w.IsPlayingAudio)
+                .ThenBy(w => w.ProcessName, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(w => w.Title, StringComparer.OrdinalIgnoreCase)
                 .ToList();
         }

@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -11,6 +12,7 @@ namespace Scrim.Server {
     public class StationPipeline : IDisposable {
         private readonly object _stateLock = new();
         private CancellationTokenSource? _broadcastCts;
+        private readonly StationMetadataService? _stationMetadataService;
 
         public StationConfig Config { get; private set; }
         public BroadcastHub Hub { get; }
@@ -26,6 +28,9 @@ namespace Scrim.Server {
         public bool IsPrimary { get; }
         private bool _isLive = false;
         public bool IsLive => IsPrimary ? Hub.IsBroadcasting : _isLive;
+        public bool IsDjConnected { get; private set; } = false;
+        public string? ConnectedDjName { get; private set; }
+
         public event EventHandler<bool>? BroadcastingStateChanged;
         public event Action? StationUpdated;
 
@@ -38,7 +43,14 @@ namespace Scrim.Server {
             RequestController = new SongRequestController { IsEnabled = config.EnableSongRequests };
             ChatService = new LiveChatService();
             ChatService.NotifyStatusChanged(config.EnableChat);
-            MetadataService = metadataService;
+
+            if (metadataService != null) {
+                _stationMetadataService = new StationMetadataService(metadataService);
+                MetadataService = _stationMetadataService;
+            } else {
+                MetadataService = null;
+            }
+
             ReactionService = new SongReactionService(MetadataService);
             HistoryService = new SongHistoryService(MetadataService);
 
@@ -58,7 +70,7 @@ namespace Scrim.Server {
                 ChatService.NotifyStatusChanged(newConfig.EnableChat);
                 Mixer.AppVolume = (float)newConfig.AppStreamVolume / 100.0f;
 
-                if (IsLive) {
+                if (IsLive && Config.SourceType != AudioSourceType.IcecastIngest) {
                     var format = Enum.TryParse<AudioFormat>(newConfig.AudioFormat, true, out var parsed)
                         ? parsed
                         : AudioFormat.Mp3;
@@ -76,6 +88,11 @@ namespace Scrim.Server {
                     return;
                 }
 
+                if (Config.SourceType == AudioSourceType.IcecastIngest) {
+                    // For external DJ ingest, broadcast is driven by incoming DJ connection
+                    return;
+                }
+
                 _broadcastCts = new CancellationTokenSource();
                 var token = _broadcastCts.Token;
 
@@ -88,8 +105,16 @@ namespace Scrim.Server {
                         }
                     } else {
                         Capture = new ProcessLoopbackCapture();
-                        if (Config.SourceType == AudioSourceType.ProcessLoopback && Config.TargetProcessId != 0) {
-                            Capture.StartCapture((uint)Config.TargetProcessId, null);
+                        if (Config.SourceType == AudioSourceType.ProcessLoopback) {
+                            uint targetPid = (uint)Config.TargetProcessId;
+                            if (targetPid == 0 && !string.IsNullOrWhiteSpace(Config.TargetProcessName)) {
+                                string cleanName = Config.TargetProcessName.Replace(".exe", "").Trim();
+                                var matchProc = System.Diagnostics.Process.GetProcessesByName(cleanName).FirstOrDefault();
+                                if (matchProc != null) {
+                                    targetPid = (uint)matchProc.Id;
+                                }
+                            }
+                            Capture.StartCapture(targetPid, null);
                         } else if (Config.SourceType == AudioSourceType.AudioDevice && !string.IsNullOrEmpty(Config.CaptureDeviceId)) {
                             Capture.StartCapture(0, Config.CaptureDeviceId);
                         } else {
@@ -123,9 +148,51 @@ namespace Scrim.Server {
             }
         }
 
+        public void StartIngestBroadcast(ChannelReader<byte[]> incomingAudioStream, string? djName = null) {
+            lock (_stateLock) {
+                StopBroadcast();
+                IsDjConnected = true;
+                ConnectedDjName = string.IsNullOrWhiteSpace(djName) ? "Guest DJ" : djName;
+                _isLive = true;
+
+                if (!string.IsNullOrWhiteSpace(djName) && _stationMetadataService != null) {
+                    _stationMetadataService.UpdateMetadata("Live Guest Set", djName);
+                }
+
+                Hub.StartBroadcasting(incomingAudioStream);
+                BroadcastingStateChanged?.Invoke(this, true);
+            }
+        }
+
+        public void StopIngestBroadcast() {
+            lock (_stateLock) {
+                if (!IsDjConnected && !_isLive) return;
+                IsDjConnected = false;
+                ConnectedDjName = null;
+                _isLive = false;
+
+                try {
+                    Hub.StopBroadcasting();
+                } catch { }
+
+                _stationMetadataService?.ResetToFallback();
+                BroadcastingStateChanged?.Invoke(this, false);
+            }
+        }
+
+        public void UpdateIngestMetadata(string songTitle, string? artist = null) {
+            if (_stationMetadataService != null) {
+                _stationMetadataService.UpdateMetadata(songTitle, artist ?? ConnectedDjName ?? "Guest DJ");
+            }
+        }
+
         public void StopBroadcast() {
             lock (_stateLock) {
                 if (IsPrimary) {
+                    return;
+                }
+                if (IsDjConnected) {
+                    StopIngestBroadcast();
                     return;
                 }
                 if (!_isLive && !Hub.IsBroadcasting) return;
@@ -151,9 +218,66 @@ namespace Scrim.Server {
 
         public void Dispose() {
             StopBroadcast();
+            StopIngestBroadcast();
             try {
+                _stationMetadataService?.Dispose();
                 HistoryService.Dispose();
             } catch { }
+        }
+    }
+
+    public class StationMetadataService : IMetadataService {
+        private readonly IMetadataService? _fallbackService;
+        public MediaMetadata CurrentMetadata { get; private set; } = new MediaMetadata();
+        public event EventHandler<MediaMetadata>? MetadataChanged;
+        public bool HasExplicitMetadata { get; private set; } = false;
+
+        public StationMetadataService(IMetadataService? fallbackService = null) {
+            _fallbackService = fallbackService;
+            if (_fallbackService != null) {
+                _fallbackService.MetadataChanged += OnFallbackMetadataChanged;
+                CurrentMetadata = _fallbackService.CurrentMetadata;
+            }
+        }
+
+        private void OnFallbackMetadataChanged(object? sender, MediaMetadata meta) {
+            if (!HasExplicitMetadata) {
+                CurrentMetadata = meta;
+                MetadataChanged?.Invoke(this, meta);
+            }
+        }
+
+        public void UpdateMetadata(string title, string artist, string album = "") {
+            HasExplicitMetadata = true;
+            var meta = new MediaMetadata {
+                Title = title,
+                Artist = artist,
+                Album = album,
+                IsPlaying = true
+            };
+            CurrentMetadata = meta;
+            MetadataChanged?.Invoke(this, meta);
+        }
+
+        public void ResetToFallback() {
+            HasExplicitMetadata = false;
+            if (_fallbackService != null) {
+                CurrentMetadata = _fallbackService.CurrentMetadata;
+                MetadataChanged?.Invoke(this, CurrentMetadata);
+            }
+        }
+
+        public void StartMonitoring(uint targetProcessId) => _fallbackService?.StartMonitoring(targetProcessId);
+        public void StopMonitoring() => _fallbackService?.StopMonitoring();
+        public Task<bool> TogglePlayPauseAsync() => _fallbackService?.TogglePlayPauseAsync() ?? Task.FromResult(false);
+        public Task<bool> SkipNextAsync() => _fallbackService?.SkipNextAsync() ?? Task.FromResult(false);
+        public Task<bool> SkipPreviousAsync() => _fallbackService?.SkipPreviousAsync() ?? Task.FromResult(false);
+        public Task<bool> SeekAsync(TimeSpan position) => _fallbackService?.SeekAsync(position) ?? Task.FromResult(false);
+
+        public void Dispose() {
+            if (_fallbackService != null) {
+                _fallbackService.MetadataChanged -= OnFallbackMetadataChanged;
+            }
         }
     }
 }
