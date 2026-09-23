@@ -900,8 +900,7 @@
         if (!CollapsedCards.Add(cardId)) {
             CollapsedCards.Remove(cardId);
         }
-        ProfileManager.CurrentProfile.CollapsedCards = CollapsedCards.ToList();
-        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        SaveCardLayout();
         StateHasChanged();
     }
 
@@ -1041,13 +1040,15 @@
         if (p.RightColumnCards?.Any() == true) RightColumn = new List<string>(p.RightColumnCards);
         if (p.CollapsedCards != null) CollapsedCards = new HashSet<string>(p.CollapsedCards);
 
-        SyncDjEqFromProfile();
+        _stationLayouts.Clear();
+        _stationDjEqs.Clear();
+        LoadStationState(StationManager.GetActiveStation());
         _ = ReinitDragDropAsync();
         StateHasChanged();
     }
     private string CopiedUrlTarget = "";
     private bool IsLive = false;
-    private int ListenerCount => Hub.ActiveClientCount;
+    private int ListenerCount => ActiveHub.ActiveClientCount;
     private uint SelectedProcessId = 0;
     private string SelectedProcessDisplayName = "";
     private string SelectedDeviceId = "";
@@ -1152,6 +1153,17 @@
             CollapsedCards = new HashSet<string>(p.CollapsedCards);
         }
 
+        var activeSt = StationManager.GetActiveStation();
+        if (activeSt != null) {
+            _stationLayouts[activeSt.Config.Id] = new StationLayoutState {
+                Left = new List<string>(LeftColumn),
+                Center = new List<string>(CenterColumn),
+                Right = new List<string>(RightColumn),
+                Collapsed = CollapsedCards.ToList()
+            };
+            LoadStationState(activeSt);
+        }
+
         // Subscribe to live Windows system media changes
         MetadataService.MetadataChanged += OnMetadataReceived;
 
@@ -1179,7 +1191,7 @@
         RelayService.StreamStatusUpdated += OnRelayStreamStatusUpdated;
         RelayService.ActiveRelayDisconnected += OnActiveRelayDisconnected;
         RelayService.RemoteGreenRoomMessageReceived += OnRemoteGreenRoomMessageReceived;
-        Mixer.RelayAudioStream = RelayService.RelayAudioStream;
+        ActiveMixer.RelayAudioStream = RelayService.RelayAudioStream;
         _greenRoomMessages = StreamServer.GetGreenRoomMessages().ToList();
         StreamServer.GreenRoomMessagePosted += OnGreenRoomMessagePosted;
         StationManager.StationsChanged += OnStationManagerChanged;
@@ -1221,7 +1233,7 @@
         }
 
         if (Enum.TryParse<MicControlMode>(p.MicControlMode, true, out var savedMode)) {
-            Mixer.ControlMode = savedMode;
+            ActiveMixer.ControlMode = savedMode;
         }
 
         if (p.MicMonitoring) {
@@ -1276,7 +1288,7 @@
         }
         MicService.SetVirtualOutputDevice(null);
 
-        Mixer.AppVolume = (float)ProfileManager.CurrentProfile.AppStreamVolume / 100f;
+        ActiveMixer.AppVolume = (float)ActiveStationConfig.AppStreamVolume / 100f;
         CustomBitrateInput = ProfileManager.CurrentProfile.Bitrate;
         CustomPortInput = ProfileManager.CurrentProfile.Port;
         LoadAllPluginConfigs();
@@ -1343,13 +1355,13 @@
         _vuTimer = new System.Timers.Timer(50);
         _vuTimer.Elapsed += async (s, e) => {
             try {
-                float left = Mixer.LeftLevel;
-                float right = Mixer.RightLevel;
+                float left = ActiveMixer.LeftLevel;
+                float right = ActiveMixer.RightLevel;
                 float mic = MicService.InputLevel;
                 bool isLive = IsLive;
                 DeadAirService.UpdateCurrentLevel(Math.Max(left, right));
-                if (Hub.ActiveClientCount > _peakListenerCount) {
-                    _peakListenerCount = Hub.ActiveClientCount;
+                if (ActiveHub.ActiveClientCount > _peakListenerCount) {
+                    _peakListenerCount = ActiveHub.ActiveClientCount;
                 }
                 await InvokeAsync(async () => {
                     try {
@@ -1396,10 +1408,10 @@
             Capture.StartCapture(pid, captureDevice);
             MicService.StartCapture(SelectedDeviceId);
             MicService.SetVirtualOutputDevice(null);
-            Mixer.LocalMusicAudioStream = LocalPlayer.MusicStream;
-            Mixer.RelayAudioStream = RelayService.RelayAudioStream;
-            if (!Mixer.IsMixing) {
-                Mixer.StartMixing(Capture.AudioStream, MicService.MicrophoneStream, CancellationToken.None);
+            ActiveMixer.LocalMusicAudioStream = LocalPlayer.MusicStream;
+            ActiveMixer.RelayAudioStream = RelayService.RelayAudioStream;
+            if (!ActiveMixer.IsMixing) {
+                ActiveMixer.StartMixing(Capture.AudioStream, MicService.MicrophoneStream, CancellationToken.None);
             }
         } catch { }
     }
@@ -1520,11 +1532,21 @@
     }
 
     private void SaveCardLayout() {
-        ProfileManager.CurrentProfile.LeftColumnCards = new List<string>(LeftColumn);
-        ProfileManager.CurrentProfile.CenterColumnCards = new List<string>(CenterColumn);
-        ProfileManager.CurrentProfile.RightColumnCards = new List<string>(RightColumn);
-        ProfileManager.CurrentProfile.CollapsedCards = CollapsedCards.ToList();
-        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        var activeId = ActiveStationConfig.Id;
+        _stationLayouts[activeId] = new StationLayoutState {
+            Left = new List<string>(LeftColumn),
+            Center = new List<string>(CenterColumn),
+            Right = new List<string>(RightColumn),
+            Collapsed = CollapsedCards.ToList()
+        };
+        var active = StationManager.GetActiveStation();
+        if (active == null || active.IsPrimary) {
+            ProfileManager.CurrentProfile.LeftColumnCards = new List<string>(LeftColumn);
+            ProfileManager.CurrentProfile.CenterColumnCards = new List<string>(CenterColumn);
+            ProfileManager.CurrentProfile.RightColumnCards = new List<string>(RightColumn);
+            ProfileManager.CurrentProfile.CollapsedCards = CollapsedCards.ToList();
+            ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        }
         StateHasChanged();
     }
 
@@ -1632,11 +1654,157 @@
         StateHasChanged();
     }
 
+    private StationConfig ActiveStationConfig => StationManager.GetActiveStation()?.Config ?? ProfileManager.CurrentProfile.EnsureDefaultStation();
+    private StationPipeline? ActivePipeline => StationManager.GetActiveStation();
+    private AudioDuckingMixer ActiveMixer => ActivePipeline?.Mixer ?? Mixer;
+    private BroadcastHub ActiveHub => ActivePipeline?.Hub ?? Hub;
+    private MultiFormatTranscoder ActiveTranscoder => ActivePipeline?.Transcoder ?? Transcoder;
+    private SongRequestController ActiveRequestController => ActivePipeline?.RequestController ?? RequestController;
+    private ILiveChatService ActiveChatService => ActivePipeline?.ChatService ?? ChatService;
+    private ISongReactionService ActiveReactionService => ActivePipeline?.ReactionService ?? ReactionService;
+    private ISongHistoryService ActiveHistoryService => ActivePipeline?.HistoryService ?? HistoryService;
+    private IMetadataService? ActiveMetadataService => ActivePipeline?.MetadataService ?? MetadataService;
+
+    private class StationLayoutState {
+        public List<string> Left { get; set; } = new();
+        public List<string> Center { get; set; } = new();
+        public List<string> Right { get; set; } = new();
+        public List<string> Collapsed { get; set; } = new();
+    }
+
+    private readonly Dictionary<string, StationLayoutState> _stationLayouts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DjEqualizerConfig> _stationDjEqs = new(StringComparer.OrdinalIgnoreCase);
+    private string ActiveDjEqPreset => _stationDjEqs.TryGetValue(ActiveStationConfig.Id, out var cfg) && !string.IsNullOrEmpty(cfg.ActivePreset)
+        ? cfg.ActivePreset
+        : ProfileManager.CurrentProfile.DjEq?.ActivePreset ?? "Flat / Bypass";
+
+    private string GetNormalizedMount() {
+        var active = StationManager.GetActiveStation();
+        var mount = active?.Config.MountPoint ?? ProfileManager.CurrentProfile.StreamMountPoint;
+        return string.IsNullOrWhiteSpace(mount) ? "stream" : mount.Trim().Trim('/');
+    }
+
+    private string GetStationWebUrl(string baseUrl) {
+        if (string.IsNullOrWhiteSpace(baseUrl)) return baseUrl;
+        var active = StationManager.GetActiveStation();
+        if (active != null && !active.IsPrimary) {
+            string mount = GetNormalizedMount();
+            return $"{baseUrl.TrimEnd('/')}/?station={Uri.EscapeDataString(mount)}";
+        }
+        return baseUrl;
+    }
+
+    private string GetStationStreamUrl(string baseUrl) {
+        if (string.IsNullOrWhiteSpace(baseUrl)) return baseUrl;
+        string mount = GetNormalizedMount();
+        return $"{baseUrl.TrimEnd('/')}/{mount}";
+    }
+
+    private void SyncStationToProfile(StationConfig stConfig) {
+        var active = StationManager.GetActiveStation();
+        if (active != null) {
+            active.ApplyConfig(stConfig);
+            if (active.IsPrimary) {
+                var p = ProfileManager.CurrentProfile;
+                p.StationName = stConfig.StationName;
+                p.PageTitle = stConfig.PageTitle;
+                p.ShowTitle = stConfig.ShowTitle;
+                p.HostName = stConfig.HostName;
+                p.StationTagline = stConfig.StationTagline;
+                p.GenreTag = stConfig.GenreTag;
+                p.AccentColor = stConfig.AccentColor;
+                p.WebTheme = stConfig.WebTheme;
+                p.LogoUrl = stConfig.LogoUrl;
+                p.BannerUrl = stConfig.BannerUrl;
+                p.BroadcasterBio = stConfig.BroadcasterBio;
+                p.ScheduleDescription = stConfig.ScheduleDescription;
+                p.EnableChat = stConfig.EnableChat;
+                p.EnableSongRequests = stConfig.EnableSongRequests;
+                p.EnableSongHistory = stConfig.EnableSongHistory;
+                p.SongHistoryLimit = stConfig.SongHistoryLimit;
+                p.AudioFormat = stConfig.AudioFormat;
+                p.Bitrate = stConfig.Bitrate;
+                p.TargetProcessId = stConfig.TargetProcessId;
+                p.TargetProcessName = stConfig.TargetProcessName;
+                p.CaptureDeviceId = stConfig.CaptureDeviceId;
+                p.AppStreamVolume = stConfig.AppStreamVolume;
+            }
+        }
+        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+    }
+
+    private void LoadStationState(StationPipeline? active) {
+        if (active == null) return;
+        var cfg = active.Config;
+
+        if (_stationLayouts.TryGetValue(cfg.Id, out var savedLayout)) {
+            LeftColumn = new List<string>(savedLayout.Left);
+            CenterColumn = new List<string>(savedLayout.Center);
+            RightColumn = new List<string>(savedLayout.Right);
+            CollapsedCards = new HashSet<string>(savedLayout.Collapsed);
+        } else {
+            if (active.IsPrimary) {
+                var p = ProfileManager.CurrentProfile;
+                LeftColumn = p.LeftColumnCards?.Any() == true ? new List<string>(p.LeftColumnCards) : new() { "card-audio-routing", "card-dj-eq", "card-network-access", "card-web-branding" };
+                CenterColumn = p.CenterColumnCards?.Any() == true ? new List<string>(p.CenterColumnCards) : new() { "card-vu-talk", "card-voice-fx", "card-queue", "card-chat" };
+                RightColumn = p.RightColumnCards?.Any() == true ? new List<string>(p.RightColumnCards) : new() { "card-encoding", "card-media-player", "card-soundboard" };
+                CollapsedCards = p.CollapsedCards != null ? new HashSet<string>(p.CollapsedCards) : new();
+            } else {
+                LeftColumn = new() { "card-audio-routing", "card-dj-eq", "card-network-access", "card-web-branding" };
+                CenterColumn = new() { "card-vu-talk", "card-voice-fx", "card-queue", "card-chat" };
+                RightColumn = new() { "card-encoding", "card-media-player", "card-soundboard" };
+                CollapsedCards = new();
+            }
+            _stationLayouts[cfg.Id] = new StationLayoutState {
+                Left = new List<string>(LeftColumn),
+                Center = new List<string>(CenterColumn),
+                Right = new List<string>(RightColumn),
+                Collapsed = CollapsedCards.ToList()
+            };
+        }
+        _ = ReinitDragDropAsync();
+
+        WindowInfo? initialWin = null;
+        if (!string.IsNullOrEmpty(cfg.TargetProcessName) && !cfg.TargetProcessName.Equals("System Audio", StringComparison.OrdinalIgnoreCase)) {
+            initialWin = Windows.FirstOrDefault(w => string.Equals(w.ProcessName, cfg.TargetProcessName, StringComparison.OrdinalIgnoreCase))
+                      ?? Windows.FirstOrDefault(w => w.Title.Contains(cfg.TargetProcessName, StringComparison.OrdinalIgnoreCase));
+        }
+        if (initialWin == null && cfg.TargetProcessId > 0) {
+            initialWin = Windows.FirstOrDefault(w => w.ProcessId == (uint)cfg.TargetProcessId);
+        }
+
+        if (initialWin != null) {
+            SelectedProcessId = initialWin.ProcessId;
+            SelectedProcessDisplayName = !string.IsNullOrEmpty(initialWin.ProcessName) ? initialWin.ProcessName : initialWin.Title;
+        } else if (!string.IsNullOrEmpty(cfg.TargetProcessName) && !cfg.TargetProcessName.Equals("System Audio", StringComparison.OrdinalIgnoreCase)) {
+            SelectedProcessId = (uint)(cfg.TargetProcessId > 0 ? cfg.TargetProcessId : 999999);
+            SelectedProcessDisplayName = cfg.TargetProcessName;
+        } else {
+            SelectedProcessId = 0;
+            SelectedProcessDisplayName = "System Audio";
+        }
+
+        ConsoleChatMessages = (active.ChatService ?? ChatService).GetRecentMessages().ToList();
+        SyncDjEqFromProfile();
+    }
+
     private void OnSwitchStation(string stationId) {
+        var prev = StationManager.GetActiveStation();
+        if (prev != null) {
+            _stationLayouts[prev.Config.Id] = new StationLayoutState {
+                Left = new List<string>(LeftColumn),
+                Center = new List<string>(CenterColumn),
+                Right = new List<string>(RightColumn),
+                Collapsed = CollapsedCards.ToList()
+            };
+            SaveDjEqToProfile();
+        }
+
         StationManager.SetActiveStation(stationId);
         var active = StationManager.GetActiveStation();
         if (active != null) {
             IsLive = active.IsLive;
+            LoadStationState(active);
         }
         StateHasChanged();
     }
@@ -1713,6 +1881,17 @@
         if (string.IsNullOrWhiteSpace(NewStationName)) return;
         string mount = string.IsNullOrWhiteSpace(NewStationMount) ? $"channel{StationManager.GetAllStations().Count + 1}" : NewStationMount.Trim().Trim('/');
 
+        var prev = StationManager.GetActiveStation();
+        if (prev != null) {
+            _stationLayouts[prev.Config.Id] = new StationLayoutState {
+                Left = new List<string>(LeftColumn),
+                Center = new List<string>(CenterColumn),
+                Right = new List<string>(RightColumn),
+                Collapsed = CollapsedCards.ToList()
+            };
+            SaveDjEqToProfile();
+        }
+
         var newConfig = new StationConfig {
             Id = Guid.NewGuid().ToString("N"),
             Name = NewStationName.Trim(),
@@ -1731,6 +1910,7 @@
 
         StationManager.AddStation(newConfig);
         StationManager.SetActiveStation(newConfig.Id);
+        LoadStationState(StationManager.GetActiveStation());
         ShowAddStationModal = false;
         StateHasChanged();
     }
@@ -1821,18 +2001,18 @@
     }
 
     private void SetMicControlMode(MicControlMode mode) {
-        Mixer.ControlMode = mode;
+        ActiveMixer.ControlMode = mode;
         ProfileManager.CurrentProfile.MicControlMode = mode.ToString();
         ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
         if (mode == MicControlMode.PushToMute) {
-            Mixer.IsToggleMuted = false;
-            Mixer.PushToMuteActive = false;
+            ActiveMixer.IsToggleMuted = false;
+            ActiveMixer.PushToMuteActive = false;
             if (!IsLive) {
                 MicService.StartCapture(SelectedDeviceId);
             }
         } else {
-            Mixer.LatchActive = false;
-            Mixer.PushToTalkActive = false;
+            ActiveMixer.LatchActive = false;
+            ActiveMixer.PushToTalkActive = false;
             if (!IsLive) {
                 MicService.StopCapture();
             }
@@ -1841,15 +2021,15 @@
     }
 
     private void ToggleMicState() {
-        if (Mixer.ControlMode == MicControlMode.PushToMute) {
-            Mixer.IsToggleMuted = !Mixer.IsToggleMuted;
+        if (ActiveMixer.ControlMode == MicControlMode.PushToMute) {
+            ActiveMixer.IsToggleMuted = !ActiveMixer.IsToggleMuted;
         } else {
-            Mixer.LatchActive = !Mixer.LatchActive;
+            ActiveMixer.LatchActive = !ActiveMixer.LatchActive;
         }
 
-        if (Mixer.IsMicLive && !IsLive) {
+        if (ActiveMixer.IsMicLive && !IsLive) {
             MicService.StartCapture(SelectedDeviceId);
-        } else if (!Mixer.IsMicLive && !IsLive) {
+        } else if (!ActiveMixer.IsMicLive && !IsLive) {
             MicService.StopCapture();
         }
 
@@ -1857,10 +2037,10 @@
     }
 
     private void OnMicButtonDown() {
-        if (Mixer.ControlMode == MicControlMode.PushToMute) {
-            Mixer.PushToMuteActive = true;
+        if (ActiveMixer.ControlMode == MicControlMode.PushToMute) {
+            ActiveMixer.PushToMuteActive = true;
         } else {
-            Mixer.PushToTalkActive = true;
+            ActiveMixer.PushToTalkActive = true;
             if (!IsLive) {
                 MicService.StartCapture(SelectedDeviceId);
             }
@@ -1868,11 +2048,11 @@
     }
 
     private void OnMicButtonUp() {
-        if (Mixer.ControlMode == MicControlMode.PushToMute) {
-            Mixer.PushToMuteActive = false;
+        if (ActiveMixer.ControlMode == MicControlMode.PushToMute) {
+            ActiveMixer.PushToMuteActive = false;
         } else {
-            Mixer.PushToTalkActive = false;
-            if (!IsLive && !Mixer.LatchActive) {
+            ActiveMixer.PushToTalkActive = false;
+            if (!IsLive && !ActiveMixer.LatchActive) {
                 MicService.StopCapture();
             }
         }
@@ -1886,7 +2066,7 @@
             MicService.StartCapture(SelectedDeviceId);
         } else if (!MicService.IsMicTestMode) {
             MicService.StopMonitoringPlayback();
-            if (!IsLive && !Mixer.IsMicLive) {
+            if (!IsLive && !ActiveMixer.IsMicLive) {
                 MicService.StopCapture();
             }
         }
@@ -1899,7 +2079,7 @@
             MicService.StartCapture(SelectedDeviceId);
         } else if (!MicService.IsMonitoring) {
             MicService.StopMonitoringPlayback();
-            if (!IsLive && !Mixer.IsMicLive) {
+            if (!IsLive && !ActiveMixer.IsMicLive) {
                 MicService.StopCapture();
             }
         }
@@ -2027,9 +2207,13 @@
 
     private void SetAppStreamVolume(int volume) {
         volume = Math.Clamp(volume, 0, 150);
-        ProfileManager.CurrentProfile.AppStreamVolume = volume;
-        Mixer.AppVolume = (float)volume / 100f;
-        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        ActiveStationConfig.AppStreamVolume = volume;
+        ActiveMixer.AppVolume = (float)volume / 100f;
+        var active = StationManager.GetActiveStation();
+        if (active == null || active.IsPrimary) {
+            ProfileManager.CurrentProfile.AppStreamVolume = volume;
+            ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        }
         StateHasChanged();
     }
 
@@ -2076,21 +2260,29 @@
     }
 
     private void SetFormat(string format) {
-        ProfileManager.CurrentProfile.AudioFormat = format;
-        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        ActiveStationConfig.AudioFormat = format;
+        var active = StationManager.GetActiveStation();
+        if (active == null || active.IsPrimary) {
+            ProfileManager.CurrentProfile.AudioFormat = format;
+            ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        }
 
         if (Enum.TryParse<AudioFormat>(format, true, out var parsed)) {
-            Transcoder.SetFormat(parsed, ProfileManager.CurrentProfile.Bitrate);
+            ActiveTranscoder.SetFormat(parsed, ActiveStationConfig.Bitrate);
         }
         StateHasChanged();
     }
 
     private void SetBitrate(int bitrate) {
-        ProfileManager.CurrentProfile.Bitrate = bitrate;
-        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        ActiveStationConfig.Bitrate = bitrate;
+        var active = StationManager.GetActiveStation();
+        if (active == null || active.IsPrimary) {
+            ProfileManager.CurrentProfile.Bitrate = bitrate;
+            ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        }
 
-        if (Enum.TryParse<AudioFormat>(ProfileManager.CurrentProfile.AudioFormat, true, out var parsed)) {
-            Transcoder.SetFormat(parsed, bitrate);
+        if (Enum.TryParse<AudioFormat>(ActiveStationConfig.AudioFormat, true, out var parsed)) {
+            ActiveTranscoder.SetFormat(parsed, bitrate);
         }
         StateHasChanged();
     }
@@ -2306,7 +2498,7 @@
             try {
                 var (wav, pcmStereo) = GenerateSound(soundName);
                 if (SelectedProcessId != 0) {
-                    Mixer.PlaySoundEffect(pcmStereo);
+                    ActiveMixer.PlaySoundEffect(pcmStereo);
                 }
                 using var ms = new MemoryStream(wav);
                 using var sp = new System.Media.SoundPlayer(ms);
@@ -2321,7 +2513,7 @@
                 if (File.Exists(sound.FilePath)) {
                     byte[]? pcm = LoadWavToPcm16Stereo44100(sound.FilePath);
                     if (pcm != null && pcm.Length > 0 && SelectedProcessId != 0) {
-                        Mixer.PlaySoundEffect(pcm);
+                        ActiveMixer.PlaySoundEffect(pcm);
                     }
                     using var sp = new System.Media.SoundPlayer(sound.FilePath);
                     sp.PlaySync();
@@ -3128,7 +3320,7 @@
                         var track = tracks[i];
                         int trackIndex = GetTrackIndex(track);
                         bool isCurrent = trackIndex == LocalPlayer.CurrentIndex;
-                        var songCounts = ReactionService.GetSongReactions(track.Title, track.Artist);
+                        var songCounts = ActiveReactionService.GetSongReactions(track.Title, track.Artist);
 
                         <div class="playlist-row @(isCurrent ? "active-track" : "")"
                              style="cursor: pointer; display: flex; align-items: center; padding: 6px 6px; gap: 6px; border-bottom: 1px solid rgba(255,255,255,0.03); background: @(isCurrent ? "rgba(0, 210, 255, 0.08)" : "transparent");"
@@ -3249,30 +3441,30 @@
             <!-- Big Circular Mic Toggle & Push-to-Talk / Push-to-Mute Button -->
             <div class="talk-button-wrapper">
                 <div class="pill-group" style="margin-bottom: 12px; justify-content: center;">
-                    <button class="pill-option @(Mixer.ControlMode == MicControlMode.PushToTalk ? "active" : "")" 
+                    <button class="pill-option @(ActiveMixer.ControlMode == MicControlMode.PushToTalk ? "active" : "")" 
                             @onclick="@(() => SetMicControlMode(MicControlMode.PushToTalk))">
                         Push to Talk
                     </button>
-                    <button class="pill-option @(Mixer.ControlMode == MicControlMode.PushToMute ? "active" : "")" 
+                    <button class="pill-option @(ActiveMixer.ControlMode == MicControlMode.PushToMute ? "active" : "")" 
                             @onclick="@(() => SetMicControlMode(MicControlMode.PushToMute))">
                         Push to Mute
                     </button>
                 </div>
 
-                <button class="talk-btn @(Mixer.IsMicLive ? "active" : "")"
+                <button class="talk-btn @(ActiveMixer.IsMicLive ? "active" : "")"
                         @onclick="ToggleMicState"
                         @onmousedown="OnMicButtonDown"
                         @onmouseup="OnMicButtonUp"
                         @ontouchstart="OnMicButtonDown"
                         @ontouchend="OnMicButtonUp"
                         title="Click to toggle mic on/off, or hold down to talk/mute">
-                    @(Mixer.IsMicLive ? (Mixer.ControlMode == MicControlMode.PushToTalk ? "TALK" : "LIVE") : "MUTED")
+                    @(ActiveMixer.IsMicLive ? (ActiveMixer.ControlMode == MicControlMode.PushToTalk ? "TALK" : "LIVE") : "MUTED")
                 </button>
                 
                 <div class="talk-subtitle">
-                    @(Mixer.ControlMode == MicControlMode.PushToTalk 
-                        ? (Mixer.IsMicLive ? "🔴 ON AIR (Click to Mute)" : "Click or Hold to Talk") 
-                        : (Mixer.IsMicLive ? "🟢 OPEN MIC (Click or Hold to Mute)" : "🔇 MUTED (Click to Unmute)"))
+                    @(ActiveMixer.ControlMode == MicControlMode.PushToTalk 
+                        ? (ActiveMixer.IsMicLive ? "🔴 ON AIR (Click to Mute)" : "Click or Hold to Talk") 
+                        : (ActiveMixer.IsMicLive ? "🟢 OPEN MIC (Click or Hold to Mute)" : "🔇 MUTED (Click to Unmute)"))
                 </div>
 
                 <!-- Mic Monitoring & Mic Test Options -->
@@ -3364,7 +3556,7 @@
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                 <span class="scrim-label" style="margin: 0;">Line: Status</span>
                 <button class="scrim-btn-secondary" style="padding: 4px 12px; font-size: 11px;" @onclick="ToggleMicState">
-                    @(Mixer.IsMicLive ? "DISCONNECT" : "CONNECT")
+                    @(ActiveMixer.IsMicLive ? "DISCONNECT" : "CONNECT")
                 </button>
             </div>
             <div>
@@ -3380,7 +3572,7 @@
 
         "card-queue" => @<div class="scrim-card">
             @{
-                var liveQueue = RequestController.GetLiveQueue().ToList();
+                var liveQueue = ActiveRequestController.GetLiveQueue().ToList();
             }
             <div class="scrim-card-header scrim-drag-handle">
                 <div style="display: flex; align-items: center; gap: 8px;">
@@ -3390,11 +3582,11 @@
                     </span>
                 </div>
                 <div style="display: flex; align-items: center; gap: 6px;">
-                    <button class="pill-option @(ProfileManager.CurrentProfile.EnableSongRequests ? "active" : "")" 
+                    <button class="pill-option @(ActiveStationConfig.EnableSongRequests ? "active" : "")" 
                             style="padding: 2px 8px; font-size: 10px;"
                             @onclick="ToggleSongRequestsEnabled" 
                             title="Turn Song Requests On / Off">
-                        @(ProfileManager.CurrentProfile.EnableSongRequests ? "ON" : "OFF")
+                        @(ActiveStationConfig.EnableSongRequests ? "ON" : "OFF")
                     </button>
                     @if (liveQueue.Any()) {
                         <button class="pill-option" style="padding: 2px 8px; font-size: 10px; color: #f87171; border-color: rgba(239, 68, 68, 0.35);" 
@@ -3407,7 +3599,7 @@
                     <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
                 </div>
             </div>
-            @if (!ProfileManager.CurrentProfile.EnableSongRequests) {
+            @if (!ActiveStationConfig.EnableSongRequests) {
                 <div style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.28); border-radius: 6px; padding: 6px 10px; margin-bottom: 8px; font-size: 10.5px; color: #fca5a5; display: flex; justify-content: space-between; align-items: center;">
                     <span>⏸️ Song requests are currently <strong>PAUSED</strong> for web listeners.</span>
                     <button class="pill-option" style="padding: 1px 6px; font-size: 9.5px; border-color: rgba(239, 68, 68, 0.4); color: #fca5a5;" @onclick="ToggleSongRequestsEnabled">Resume</button>
@@ -3452,8 +3644,8 @@
 
                             <!-- Actions: Accept, Decline, Remove -->
                             <div style="display: flex; align-items: center; gap: 5px;">
-                                <button class="scrim-btn-secondary" style="padding: 4px 8px; font-size: 11px; color: #22c55e;" @onclick="@(() => RequestController.UpdateStatus(req.Id, "Accepted"))" title="Accept Request">✓</button>
-                                <button class="scrim-btn-secondary" style="padding: 4px 8px; font-size: 11px; color: #f59e0b;" @onclick="@(() => RequestController.UpdateStatus(req.Id, "Declined"))" title="Decline Request">✗</button>
+                                <button class="scrim-btn-secondary" style="padding: 4px 8px; font-size: 11px; color: #22c55e;" @onclick="@(() => ActiveRequestController.UpdateStatus(req.Id, "Accepted"))" title="Accept Request">✓</button>
+                                <button class="scrim-btn-secondary" style="padding: 4px 8px; font-size: 11px; color: #f59e0b;" @onclick="@(() => ActiveRequestController.UpdateStatus(req.Id, "Declined"))" title="Decline Request">✗</button>
                                 <button class="scrim-dots-btn" style="color: #ef4444; font-size: 12px; width: 26px; height: 26px;" @onclick="@(() => RemoveSongRequest(req.Id))" title="Remove Request">🗑️</button>
                             </div>
                         </div>
@@ -3471,22 +3663,22 @@
 
             <!-- Codec Pills -->
             <div class="pill-group">
-                <button class="pill-option @(ProfileManager.CurrentProfile.AudioFormat.Equals("Mp3", StringComparison.OrdinalIgnoreCase) ? "active" : "")" @onclick="@(() => SetFormat("Mp3"))">MP3</button>
-                <button class="pill-option @(ProfileManager.CurrentProfile.AudioFormat.Equals("Aac", StringComparison.OrdinalIgnoreCase) ? "active" : "")" @onclick="@(() => SetFormat("Aac"))">AAC</button>
-                <button class="pill-option @(ProfileManager.CurrentProfile.AudioFormat.Equals("Opus", StringComparison.OrdinalIgnoreCase) ? "active" : "")" @onclick="@(() => SetFormat("Opus"))">Opus</button>
-                <button class="pill-option @(ProfileManager.CurrentProfile.AudioFormat.Equals("Flac", StringComparison.OrdinalIgnoreCase) ? "active" : "")" @onclick="@(() => SetFormat("Flac"))">FLAC</button>
+                <button class="pill-option @(ActiveStationConfig.AudioFormat.Equals("Mp3", StringComparison.OrdinalIgnoreCase) ? "active" : "")" @onclick="@(() => SetFormat("Mp3"))">MP3</button>
+                <button class="pill-option @(ActiveStationConfig.AudioFormat.Equals("Aac", StringComparison.OrdinalIgnoreCase) ? "active" : "")" @onclick="@(() => SetFormat("Aac"))">AAC</button>
+                <button class="pill-option @(ActiveStationConfig.AudioFormat.Equals("Opus", StringComparison.OrdinalIgnoreCase) ? "active" : "")" @onclick="@(() => SetFormat("Opus"))">Opus</button>
+                <button class="pill-option @(ActiveStationConfig.AudioFormat.Equals("Flac", StringComparison.OrdinalIgnoreCase) ? "active" : "")" @onclick="@(() => SetFormat("Flac"))">FLAC</button>
             </div>
 
             <!-- Bitrate Pills per Format -->
             <label class="scrim-label">Bitrate</label>
-            @if (ProfileManager.CurrentProfile.AudioFormat.Equals("Flac", StringComparison.OrdinalIgnoreCase)) {
+            @if (ActiveStationConfig.AudioFormat.Equals("Flac", StringComparison.OrdinalIgnoreCase)) {
                 <div class="pill-group">
                     <span class="pill-option active" style="border-color: #22c55e; color: #22c55e;">Lossless (Auto)</span>
                 </div>
             } else {
                 <div class="pill-group">
-                    @foreach (var br in GetBitratesForFormat(ProfileManager.CurrentProfile.AudioFormat)) {
-                        <button class="pill-option @(ProfileManager.CurrentProfile.Bitrate == br ? "active" : "")" @onclick="@(() => SetBitrate(br))">@(br)k</button>
+                    @foreach (var br in GetBitratesForFormat(ActiveStationConfig.AudioFormat)) {
+                        <button class="pill-option @(ActiveStationConfig.Bitrate == br ? "active" : "")" @onclick="@(() => SetBitrate(br))">@(br)k</button>
                     }
                 </div>
 
@@ -3582,17 +3774,17 @@
                     <div class="media-meta-artist">@CurrentTrackArtist</div>
                     <div class="media-meta-extra">@CurrentTrackExtra</div>
                     <div class="media-reactions-row" style="display: flex; gap: 8px; align-items: center; margin-top: 6px; font-size: 12px; color: #94a3b8; flex-wrap: wrap;">
-                        <span title="Thumbs Up" style="background: rgba(255,255,255,0.06); padding: 2px 8px; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px;">👍 <strong style="color: #38bdf8;">@ReactionService.CurrentCounts.ThumbsUp</strong></span>
-                        <span title="Love" style="background: rgba(255,255,255,0.06); padding: 2px 8px; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px;">❤️ <strong style="color: #f43f5e;">@ReactionService.CurrentCounts.Heart</strong></span>
-                        <span title="Thumbs Down" style="background: rgba(255,255,255,0.06); padding: 2px 8px; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px;">👎 <strong style="color: #94a3b8;">@ReactionService.CurrentCounts.ThumbsDown</strong></span>
+                        <span title="Thumbs Up" style="background: rgba(255,255,255,0.06); padding: 2px 8px; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px;">👍 <strong style="color: #38bdf8;">@ActiveReactionService.CurrentCounts.ThumbsUp</strong></span>
+                        <span title="Love" style="background: rgba(255,255,255,0.06); padding: 2px 8px; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px;">❤️ <strong style="color: #f43f5e;">@ActiveReactionService.CurrentCounts.Heart</strong></span>
+                        <span title="Thumbs Down" style="background: rgba(255,255,255,0.06); padding: 2px 8px; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px;">👎 <strong style="color: #94a3b8;">@ActiveReactionService.CurrentCounts.ThumbsDown</strong></span>
                         <button class="pill-option" style="padding: 1px 8px; font-size: 10px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: #ef4444; border-radius: 10px;" @onclick="ResetCurrentSongReactions" title="Clear reactions for current track">Clear Current</button>
                         <button class="pill-option" style="padding: 1px 8px; font-size: 10px; background: rgba(0, 210, 255, 0.1); border: 1px solid rgba(0, 210, 255, 0.3); color: #00d2ff; border-radius: 10px;" @onclick="ToggleSongReactionsManager" title="View & clear reactions per song">
-                            @(ShowAllSongReactions ? "Hide All Reactions" : $"All Songs ({ReactionService.GetAllSongReactions().Count})")
+                            @(ShowAllSongReactions ? "Hide All Reactions" : $"All Songs ({ActiveReactionService.GetAllSongReactions().Count})")
                         </button>
                         <button class="pill-option" style="padding: 1px 8px; font-size: 10px; background: rgba(168, 85, 247, 0.1); border: 1px solid rgba(168, 85, 247, 0.3); color: #c084fc; border-radius: 10px;" @onclick="ToggleSongHistoryManager" title="View & manage session song history">
-                            @(ShowSongHistory ? "Hide History" : $"History ({HistoryService.GetHistory(100).Count})")
+                            @(ShowSongHistory ? "Hide History" : $"History ({ActiveHistoryService.GetHistory(100).Count})")
                         </button>
-                        @if (HistoryService.GetHistory(100).Count > 0) {
+                        @if (ActiveHistoryService.GetHistory(100).Count > 0) {
                             <button class="pill-option" style="padding: 1px 8px; font-size: 10px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: #ef4444; border-radius: 10px;" @onclick="ClearSessionHistory" title="Clear all session song history">
                                 Clear History
                             </button>
@@ -3604,17 +3796,17 @@
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 11px; font-weight: 700; color: #94a3b8;">
                                 <span>SESSION SONG HISTORY</span>
                                 <div style="display: flex; gap: 8px; align-items: center;">
-                                    <span>@(HistoryService.GetHistory(100).Count) tracks</span>
-                                    @if (HistoryService.GetHistory(100).Count > 0) {
+                                    <span>@(ActiveHistoryService.GetHistory(100).Count) tracks</span>
+                                    @if (ActiveHistoryService.GetHistory(100).Count > 0) {
                                         <button class="pill-option" style="padding: 1px 6px; font-size: 10px; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #ef4444; border-radius: 6px;" @onclick="ClearSessionHistory" title="Clear all session song history">Clear All</button>
                                     }
                                 </div>
                             </div>
-                            @if (HistoryService.GetHistory(100).Count == 0) {
+                            @if (ActiveHistoryService.GetHistory(100).Count == 0) {
                                 <div style="font-size: 11px; color: #64748b; text-align: center; padding: 10px 0;">No songs played yet this session.</div>
                             } else {
-                                @foreach (var item in HistoryService.GetHistory(100)) {
-                                    var songReactions = ReactionService.GetSongReactions(item.Title, item.Artist);
+                                @foreach (var item in ActiveHistoryService.GetHistory(100)) {
+                                    var songReactions = ActiveReactionService.GetSongReactions(item.Title, item.Artist);
                                     <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 6px; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 11px; gap: 8px;">
                                         <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; display: flex; align-items: center; gap: 4px;">
                                             <a href="@($"https://www.google.com/search?q={Uri.EscapeDataString(((item.Title ?? "") + " " + (item.Artist ?? "")).Trim())}")" target="_blank" rel="noopener noreferrer" style="color: #e2e8f0; font-weight: 500; text-decoration: none; cursor: pointer;" title="Search '@item.Title' on Google" onmouseover="this.style.color='#00d2ff'" onmouseout="this.style.color='#e2e8f0'">
@@ -3646,12 +3838,12 @@
                         <div style="margin-top: 10px; background: rgba(0,0,0,0.3); border: 1px solid #232731; border-radius: 8px; padding: 8px; max-height: 180px; overflow-y: auto;">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 11px; font-weight: 700; color: #94a3b8;">
                                 <span>SONG REACTIONS PER TRACK</span>
-                                <span>@(ReactionService.GetAllSongReactions().Count) tracks</span>
+                                <span>@(ActiveReactionService.GetAllSongReactions().Count) tracks</span>
                             </div>
-                            @if (ReactionService.GetAllSongReactions().Count == 0) {
+                            @if (ActiveReactionService.GetAllSongReactions().Count == 0) {
                                 <div style="font-size: 11px; color: #64748b; text-align: center; padding: 10px 0;">No reactions recorded yet.</div>
                             } else {
-                                @foreach (var kvp in ReactionService.GetAllSongReactions()) {
+                                @foreach (var kvp in ActiveReactionService.GetAllSongReactions()) {
                                     var sKey = kvp.Key;
                                     var rec = kvp.Value;
                                     <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 6px; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 11px; gap: 8px;">
@@ -3983,9 +4175,9 @@
                                 <input type="number" min="1" max="100" style="width: 48px; background: #1a1d26; border: 1px solid #2d323e; border-radius: 4px; color: #fff; font-size: 10px; padding: 2px 4px; text-align: center;" value="@ProfileManager.CurrentProfile.SongHistoryLimit" @onchange="OnSongHistoryLimitChanged" title="Custom maximum songs count (1-100)" />
                             </div>
                         </div>
-                        @if (HistoryService.GetHistory(100).Count > 0) {
+                        @if (ActiveHistoryService.GetHistory(100).Count > 0) {
                             <button class="pill-option" style="padding: 2px 8px; font-size: 10px; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #ef4444; border-radius: 6px;" @onclick="ClearSessionHistory" title="Clear all song history from web player and console">
-                                🗑️ Clear History (@(HistoryService.GetHistory(100).Count))
+                                🗑️ Clear History (@(ActiveHistoryService.GetHistory(100).Count))
                             </button>
                         }
                     </div>
@@ -4271,7 +4463,7 @@
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
                     </svg>
                     Live Station Chat
-                    @if (ProfileManager.CurrentProfile.EnableChat) {
+                    @if (ActiveStationConfig.EnableChat) {
                         <span style="display: inline-block; margin-left: 8px; padding: 2px 6px; font-size: 9px; font-weight: 700; color: #10b981; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); border-radius: 4px;">ACTIVE</span>
                     } else {
                         <span style="display: inline-block; margin-left: 8px; padding: 2px 6px; font-size: 9px; font-weight: 700; color: #ef4444; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 4px;">PAUSED</span>
@@ -4295,7 +4487,7 @@
                     <button class="pill-option" style="padding: 4px 10px; font-size: 11px; color: #38bdf8; background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.25);" @onclick="@(() => ShowBlacklistManager = !ShowBlacklistManager)" title="Manage banned/blacklisted nicknames">🚫 Blacklist (@ProfileManager.CurrentProfile.NicknameBlacklist.Count)</button>
                     <button class="pill-option" style="padding: 4px 10px; font-size: 11px; color: #f43f5e; background: rgba(244, 63, 94, 0.1); border: 1px solid rgba(244, 63, 94, 0.25);" @onclick="@(() => ShowBansManager = !ShowBansManager)" title="Manage banned chat users">🔨 Bans (@ProfileManager.CurrentProfile.BannedUsers.Count)</button>
                     <label class="scrim-switch">
-                        <input type="checkbox" checked="@ProfileManager.CurrentProfile.EnableChat" @onchange="ToggleChatEnabled" />
+                        <input type="checkbox" checked="@ActiveStationConfig.EnableChat" @onchange="ToggleChatEnabled" />
                         <span class="scrim-slider"></span>
                     </label>
                 </div>
@@ -4918,12 +5110,12 @@
                     <span style="font-size: 14px;">🎚️</span>
                     <h3 class="scrim-card-title" style="margin: 0;">Pro DJ Mixer & EQ</h3>
                     <span style="font-size: 10px; padding: 1px 6px; border-radius: 6px; background: rgba(0, 210, 255, 0.15); color: #00d2ff; font-weight: 700;">
-                        @(Mixer.DjEq.Is10BandMode ? "10-BAND GRAPHIC" : "3-BAND ISOLATOR")
+                        @(ActiveMixer.DjEq.Is10BandMode ? "10-BAND GRAPHIC" : "3-BAND ISOLATOR")
                     </span>
                 </div>
                 <div style="display: flex; align-items: center; gap: 6px;">
-                    <button class="pill-option @(Mixer.DjEq.Is10BandMode ? "" : "active")" style="padding: 2px 8px; font-size: 10px;" @onclick="@(() => SetDjEqMode(false))">3-Band</button>
-                    <button class="pill-option @(Mixer.DjEq.Is10BandMode ? "active" : "")" style="padding: 2px 8px; font-size: 10px;" @onclick="@(() => SetDjEqMode(true))">10-Band</button>
+                    <button class="pill-option @(ActiveMixer.DjEq.Is10BandMode ? "" : "active")" style="padding: 2px 8px; font-size: 10px;" @onclick="@(() => SetDjEqMode(false))">3-Band</button>
+                    <button class="pill-option @(ActiveMixer.DjEq.Is10BandMode ? "active" : "")" style="padding: 2px 8px; font-size: 10px;" @onclick="@(() => SetDjEqMode(true))">10-Band</button>
                     <button class="scrim-collapse-btn" @onclick="@(() => ToggleCardCollapsed(cardId))" title="@(IsCardCollapsed(cardId) ? "Expand Card" : "Collapse Card")">@(IsCardCollapsed(cardId) ? "+" : "−")</button>
                     <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
                 </div>
@@ -4934,7 +5126,7 @@
                 <div style="display: flex; align-items: center; gap: 6px; flex: 1;">
                     <span style="font-size: 11px; color: #94a3b8; white-space: nowrap;">Preset:</span>
                     <select class="scrim-select" style="padding: 3px 8px; font-size: 11px; height: 28px; flex: 1;"
-                            value="@ProfileManager.CurrentProfile.DjEq.ActivePreset"
+                            value="@ActiveDjEqPreset"
                             @onchange="@((ChangeEventArgs e) => SetDjEqPreset(e.Value?.ToString() ?? "Flat / Bypass"))">
                         @foreach (var pName in DjEqPresets.Keys) {
                             <option value="@pName">@pName</option>
@@ -4942,17 +5134,17 @@
                     </select>
                 </div>
                 <div style="display: flex; gap: 6px;">
-                    <button class="scrim-btn @(Mixer.DjEq.EqBypass ? "scrim-btn-secondary" : "scrim-btn-primary")"
+                    <button class="scrim-btn @(ActiveMixer.DjEq.EqBypass ? "scrim-btn-secondary" : "scrim-btn-primary")"
                             style="padding: 3px 10px; font-size: 10px; font-weight: 700;"
                             @onclick="ToggleDjEqBypass"
                             title="Toggle Equalizer Processing On / Off">
-                        @(Mixer.DjEq.EqBypass ? "EQ BYPASS" : "EQ ON")
+                        @(ActiveMixer.DjEq.EqBypass ? "EQ BYPASS" : "EQ ON")
                     </button>
-                    <button class="scrim-btn @(Mixer.DjEq.SoftLimiterEnabled ? "scrim-btn-primary" : "scrim-btn-secondary")"
-                            style="padding: 3px 10px; font-size: 10px; font-weight: 700; background: @(Mixer.DjEq.SoftLimiterEnabled ? "rgba(16, 185, 129, 0.2)" : ""); border-color: @(Mixer.DjEq.SoftLimiterEnabled ? "#10b981" : ""); color: @(Mixer.DjEq.SoftLimiterEnabled ? "#34d399" : "");"
+                    <button class="scrim-btn @(ActiveMixer.DjEq.SoftLimiterEnabled ? "scrim-btn-primary" : "scrim-btn-secondary")"
+                            style="padding: 3px 10px; font-size: 10px; font-weight: 700; background: @(ActiveMixer.DjEq.SoftLimiterEnabled ? "rgba(16, 185, 129, 0.2)" : ""); border-color: @(ActiveMixer.DjEq.SoftLimiterEnabled ? "#10b981" : ""); color: @(ActiveMixer.DjEq.SoftLimiterEnabled ? "#34d399" : "");"
                             @onclick="ToggleDjSoftLimiter"
                             title="Toggle Analog Saturation Soft-Limiter to prevent digital clipping">
-                        @(Mixer.DjEq.SoftLimiterEnabled ? "LIMITER ON" : "LIMITER OFF")
+                        @(ActiveMixer.DjEq.SoftLimiterEnabled ? "LIMITER ON" : "LIMITER OFF")
                     </button>
                 </div>
             </div>
@@ -4998,10 +5190,10 @@
                             🎵 MUSIC DECK
                         </span>
                         <div style="display: flex; gap: 4px;">
-                            <button class="scrim-btn @(Mixer.DjEq.MusicMuted ? "scrim-btn-danger" : "scrim-btn-secondary")"
+                            <button class="scrim-btn @(ActiveMixer.DjEq.MusicMuted ? "scrim-btn-danger" : "scrim-btn-secondary")"
                                     style="padding: 2px 6px; font-size: 9px; font-weight: 700;"
                                     @onclick="ToggleDjMusicMute">
-                                @(Mixer.DjEq.MusicMuted ? "MUTED" : "MUTE")
+                                @(ActiveMixer.DjEq.MusicMuted ? "MUTED" : "MUTE")
                             </button>
                         </div>
                     </div>
@@ -5010,10 +5202,10 @@
                     <div style="margin-bottom: 6px;">
                         <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
                             <span>Trim / Gain</span>
-                            <span style="color: #cbd5e1; font-family: monospace;">@(Mixer.DjEq.MusicTrimDb >= 0 ? "+" : "")@Mixer.DjEq.MusicTrimDb.ToString("F1") dB</span>
+                            <span style="color: #cbd5e1; font-family: monospace;">@(ActiveMixer.DjEq.MusicTrimDb >= 0 ? "+" : "")@ActiveMixer.DjEq.MusicTrimDb.ToString("F1") dB</span>
                         </div>
                         <input type="range" min="-12" max="12" step="0.5" style="width: 100%; accent-color: #38bdf8;"
-                               value="@Mixer.DjEq.MusicTrimDb"
+                               value="@ActiveMixer.DjEq.MusicTrimDb"
                                @oninput="@((ChangeEventArgs e) => OnMusicTrimChanged(Convert.ToSingle(e.Value)))" />
                     </div>
 
@@ -5022,12 +5214,12 @@
                         <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
                             <span>Pan L/R</span>
                             <div style="display: flex; align-items: center; gap: 4px;">
-                                <span style="color: #cbd5e1; font-family: monospace;">@(Mixer.DjEq.MusicPan == 0 ? "CENTER" : (Mixer.DjEq.MusicPan < 0 ? $"L {Math.Abs(Mixer.DjEq.MusicPan * 100):F0}%" : $"R {Mixer.DjEq.MusicPan * 100:F0}%"))</span>
+                                <span style="color: #cbd5e1; font-family: monospace;">@(ActiveMixer.DjEq.MusicPan == 0 ? "CENTER" : (ActiveMixer.DjEq.MusicPan < 0 ? $"L {Math.Abs(ActiveMixer.DjEq.MusicPan * 100):F0}%" : $"R {ActiveMixer.DjEq.MusicPan * 100:F0}%"))</span>
                                 <button class="pill-option" style="padding: 1px 4px; font-size: 9px;" @onclick="ResetDjPan">C</button>
                             </div>
                         </div>
                         <input type="range" min="-1" max="1" step="0.05" style="width: 100%; accent-color: #38bdf8;"
-                               value="@Mixer.DjEq.MusicPan"
+                               value="@ActiveMixer.DjEq.MusicPan"
                                @oninput="@((ChangeEventArgs e) => OnMusicPanChanged(Convert.ToSingle(e.Value)))" />
                     </div>
 
@@ -5036,14 +5228,14 @@
                         <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
                             <span>Stereo Width</span>
                             <div style="display: flex; align-items: center; gap: 4px;">
-                                <span style="font-size: 9px; padding: 1px 5px; border-radius: 4px; background: @(Mixer.DjEq.MusicStereoWidth < 0.2f ? "rgba(239, 68, 68, 0.15); color: #ef4444;" : (Mixer.DjEq.MusicStereoWidth > 1.2f ? "rgba(168, 85, 247, 0.15); color: #c084fc;" : "rgba(34, 197, 94, 0.15); color: #4ade80;")) font-weight: 700;">
-                                    @(Mixer.DjEq.MusicStereoWidth < 0.2f ? "MONO" : (Mixer.DjEq.MusicStereoWidth > 1.2f ? "WIDE" : "STEREO"))
+                                <span style="font-size: 9px; padding: 1px 5px; border-radius: 4px; background: @(ActiveMixer.DjEq.MusicStereoWidth < 0.2f ? "rgba(239, 68, 68, 0.15); color: #ef4444;" : (ActiveMixer.DjEq.MusicStereoWidth > 1.2f ? "rgba(168, 85, 247, 0.15); color: #c084fc;" : "rgba(34, 197, 94, 0.15); color: #4ade80;")) font-weight: 700;">
+                                    @(ActiveMixer.DjEq.MusicStereoWidth < 0.2f ? "MONO" : (ActiveMixer.DjEq.MusicStereoWidth > 1.2f ? "WIDE" : "STEREO"))
                                 </span>
                                 <button class="pill-option" style="padding: 1px 4px; font-size: 9px;" @onclick="ResetDjStereoWidth">1x</button>
                             </div>
                         </div>
                         <input type="range" min="0" max="2" step="0.05" style="width: 100%; accent-color: #00d2ff;"
-                               value="@Mixer.DjEq.MusicStereoWidth"
+                               value="@ActiveMixer.DjEq.MusicStereoWidth"
                                @oninput="@((ChangeEventArgs e) => OnMusicWidthChanged(Convert.ToSingle(e.Value)))" />
                     </div>
                 </div>
@@ -5054,11 +5246,11 @@
                         <span style="font-size: 11px; font-weight: 700; color: #818cf8; display: flex; align-items: center; gap: 4px;">
                             🎙️ MIC TALKOVER
                         </span>
-                        <button class="scrim-btn @(Mixer.DjEq.MicLowCut ? "scrim-btn-primary" : "scrim-btn-secondary")"
-                                style="padding: 2px 6px; font-size: 9px; font-weight: 700; background: @(Mixer.DjEq.MicLowCut ? "rgba(99, 102, 241, 0.2)" : ""); border-color: @(Mixer.DjEq.MicLowCut ? "#6366f1" : ""); color: @(Mixer.DjEq.MicLowCut ? "#818cf8" : "");"
+                        <button class="scrim-btn @(ActiveMixer.DjEq.MicLowCut ? "scrim-btn-primary" : "scrim-btn-secondary")"
+                                style="padding: 2px 6px; font-size: 9px; font-weight: 700; background: @(ActiveMixer.DjEq.MicLowCut ? "rgba(99, 102, 241, 0.2)" : ""); border-color: @(ActiveMixer.DjEq.MicLowCut ? "#6366f1" : ""); color: @(ActiveMixer.DjEq.MicLowCut ? "#818cf8" : "");"
                                 @onclick="ToggleDjMicLowCut"
                                 title="80Hz High-Pass Rumble Filter removes desk bumps and vocal plosives">
-                            @(Mixer.DjEq.MicLowCut ? "80Hz CUT ON" : "80Hz OFF")
+                            @(ActiveMixer.DjEq.MicLowCut ? "80Hz CUT ON" : "80Hz OFF")
                         </button>
                     </div>
 
@@ -5066,10 +5258,10 @@
                     <div style="margin-bottom: 6px;">
                         <div style="display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
                             <span>Mic Gain</span>
-                            <span style="color: #cbd5e1; font-family: monospace;">@(Mixer.DjEq.MicGainDb >= 0 ? "+" : "")@Mixer.DjEq.MicGainDb.ToString("F1") dB</span>
+                            <span style="color: #cbd5e1; font-family: monospace;">@(ActiveMixer.DjEq.MicGainDb >= 0 ? "+" : "")@ActiveMixer.DjEq.MicGainDb.ToString("F1") dB</span>
                         </div>
                         <input type="range" min="-12" max="12" step="0.5" style="width: 100%; accent-color: #818cf8;"
-                               value="@Mixer.DjEq.MicGainDb"
+                               value="@ActiveMixer.DjEq.MicGainDb"
                                @oninput="@((ChangeEventArgs e) => OnMicGainChanged(Convert.ToSingle(e.Value)))" />
                     </div>
 
@@ -5077,18 +5269,18 @@
                     <div style="margin-bottom: 6px;">
                         <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: #94a3b8; margin-bottom: 2px;">
                             <span>Mic Pan</span>
-                            <span style="color: #cbd5e1; font-family: monospace;">@(Mixer.DjEq.MicPan == 0 ? "CENTER" : (Mixer.DjEq.MicPan < 0 ? $"L {Math.Abs(Mixer.DjEq.MicPan * 100):F0}%" : $"R {Mixer.DjEq.MicPan * 100:F0}%"))</span>
+                            <span style="color: #cbd5e1; font-family: monospace;">@(ActiveMixer.DjEq.MicPan == 0 ? "CENTER" : (ActiveMixer.DjEq.MicPan < 0 ? $"L {Math.Abs(ActiveMixer.DjEq.MicPan * 100):F0}%" : $"R {ActiveMixer.DjEq.MicPan * 100:F0}%"))</span>
                         </div>
                         <input type="range" min="-1" max="1" step="0.05" style="width: 100%; accent-color: #818cf8;"
-                               value="@Mixer.DjEq.MicPan"
+                               value="@ActiveMixer.DjEq.MicPan"
                                @oninput="@((ChangeEventArgs e) => OnMicPanChanged(Convert.ToSingle(e.Value)))" />
                     </div>
 
                     <!-- Mic Quick Action -->
                     <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 10px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.05);">
                         <span style="font-size: 10px; color: #64748b;">Live Talk State:</span>
-                        <span style="font-size: 10px; font-weight: 700; color: @(Mixer.IsMicLive ? "#4ade80" : "#94a3b8");">
-                            @(Mixer.IsMicLive ? "● TALKING (ON)" : "○ MUTED")
+                        <span style="font-size: 10px; font-weight: 700; color: @(ActiveMixer.IsMicLive ? "#4ade80" : "#94a3b8");">
+                            @(ActiveMixer.IsMicLive ? "● TALKING (ON)" : "○ MUTED")
                         </span>
                     </div>
                 </div>
@@ -5104,15 +5296,15 @@
                             <div style="font-size: 11px; font-weight: 700; color: #38bdf8; margin-bottom: 2px;">HIGH</div>
                             <div style="font-size: 9px; color: #64748b; margin-bottom: 4px;">2.5kHz - 20kHz</div>
                             <input type="range" min="-26" max="6" step="0.5" style="width: 100%; accent-color: #38bdf8;"
-                                   value="@Mixer.DjEq.HighGainDb"
+                                   value="@ActiveMixer.DjEq.HighGainDb"
                                    @oninput="@((ChangeEventArgs e) => OnHighGainChanged(Convert.ToSingle(e.Value)))" />
                             <div style="font-size: 11px; font-family: monospace; color: #cbd5e1; margin: 4px 0 6px 0;">
-                                @(Mixer.DjEq.HighKill ? "-inf dB" : $"{(Mixer.DjEq.HighGainDb >= 0 ? "+" : "")}{Mixer.DjEq.HighGainDb:F1} dB")
+                                @(ActiveMixer.DjEq.HighKill ? "-inf dB" : $"{(ActiveMixer.DjEq.HighGainDb >= 0 ? "+" : "")}{ActiveMixer.DjEq.HighGainDb:F1} dB")
                             </div>
-                            <button class="scrim-btn @(Mixer.DjEq.HighKill ? "scrim-btn-danger" : "scrim-btn-secondary")"
-                                    style="width: 100%; padding: 4px 0; font-size: 10px; font-weight: 700; border-radius: 4px; box-shadow: @(Mixer.DjEq.HighKill ? "0 0 10px rgba(239, 68, 68, 0.4)" : "none");"
+                            <button class="scrim-btn @(ActiveMixer.DjEq.HighKill ? "scrim-btn-danger" : "scrim-btn-secondary")"
+                                    style="width: 100%; padding: 4px 0; font-size: 10px; font-weight: 700; border-radius: 4px; box-shadow: @(ActiveMixer.DjEq.HighKill ? "0 0 10px rgba(239, 68, 68, 0.4)" : "none");"
                                     @onclick="ToggleDjHighKill">
-                                @(Mixer.DjEq.HighKill ? "KILL ACTIVE" : "HIGH KILL")
+                                @(ActiveMixer.DjEq.HighKill ? "KILL ACTIVE" : "HIGH KILL")
                             </button>
                         </div>
 
@@ -5121,15 +5313,15 @@
                             <div style="font-size: 11px; font-weight: 700; color: #818cf8; margin-bottom: 2px;">MID</div>
                             <div style="font-size: 9px; color: #64748b; margin-bottom: 4px;">300Hz - 2.5kHz</div>
                             <input type="range" min="-26" max="6" step="0.5" style="width: 100%; accent-color: #818cf8;"
-                                   value="@Mixer.DjEq.MidGainDb"
+                                   value="@ActiveMixer.DjEq.MidGainDb"
                                    @oninput="@((ChangeEventArgs e) => OnMidGainChanged(Convert.ToSingle(e.Value)))" />
                             <div style="font-size: 11px; font-family: monospace; color: #cbd5e1; margin: 4px 0 6px 0;">
-                                @(Mixer.DjEq.MidKill ? "-inf dB" : $"{(Mixer.DjEq.MidGainDb >= 0 ? "+" : "")}{Mixer.DjEq.MidGainDb:F1} dB")
+                                @(ActiveMixer.DjEq.MidKill ? "-inf dB" : $"{(ActiveMixer.DjEq.MidGainDb >= 0 ? "+" : "")}{ActiveMixer.DjEq.MidGainDb:F1} dB")
                             </div>
-                            <button class="scrim-btn @(Mixer.DjEq.MidKill ? "scrim-btn-danger" : "scrim-btn-secondary")"
-                                    style="width: 100%; padding: 4px 0; font-size: 10px; font-weight: 700; border-radius: 4px; box-shadow: @(Mixer.DjEq.MidKill ? "0 0 10px rgba(239, 68, 68, 0.4)" : "none");"
+                            <button class="scrim-btn @(ActiveMixer.DjEq.MidKill ? "scrim-btn-danger" : "scrim-btn-secondary")"
+                                    style="width: 100%; padding: 4px 0; font-size: 10px; font-weight: 700; border-radius: 4px; box-shadow: @(ActiveMixer.DjEq.MidKill ? "0 0 10px rgba(239, 68, 68, 0.4)" : "none");"
                                     @onclick="ToggleDjMidKill">
-                                @(Mixer.DjEq.MidKill ? "KILL ACTIVE" : "MID KILL")
+                                @(ActiveMixer.DjEq.MidKill ? "KILL ACTIVE" : "MID KILL")
                             </button>
                         </div>
 
@@ -5138,15 +5330,15 @@
                             <div style="font-size: 11px; font-weight: 700; color: #f43f5e; margin-bottom: 2px;">LOW</div>
                             <div style="font-size: 9px; color: #64748b; margin-bottom: 4px;">20Hz - 300Hz</div>
                             <input type="range" min="-26" max="6" step="0.5" style="width: 100%; accent-color: #f43f5e;"
-                                   value="@Mixer.DjEq.LowGainDb"
+                                   value="@ActiveMixer.DjEq.LowGainDb"
                                    @oninput="@((ChangeEventArgs e) => OnLowGainChanged(Convert.ToSingle(e.Value)))" />
                             <div style="font-size: 11px; font-family: monospace; color: #cbd5e1; margin: 4px 0 6px 0;">
-                                @(Mixer.DjEq.LowKill ? "-inf dB" : $"{(Mixer.DjEq.LowGainDb >= 0 ? "+" : "")}{Mixer.DjEq.LowGainDb:F1} dB")
+                                @(ActiveMixer.DjEq.LowKill ? "-inf dB" : $"{(ActiveMixer.DjEq.LowGainDb >= 0 ? "+" : "")}{ActiveMixer.DjEq.LowGainDb:F1} dB")
                             </div>
-                            <button class="scrim-btn @(Mixer.DjEq.LowKill ? "scrim-btn-danger" : "scrim-btn-secondary")"
-                                    style="width: 100%; padding: 4px 0; font-size: 10px; font-weight: 700; border-radius: 4px; box-shadow: @(Mixer.DjEq.LowKill ? "0 0 10px rgba(239, 68, 68, 0.4)" : "none");"
+                            <button class="scrim-btn @(ActiveMixer.DjEq.LowKill ? "scrim-btn-danger" : "scrim-btn-secondary")"
+                                    style="width: 100%; padding: 4px 0; font-size: 10px; font-weight: 700; border-radius: 4px; box-shadow: @(ActiveMixer.DjEq.LowKill ? "0 0 10px rgba(239, 68, 68, 0.4)" : "none");"
                                     @onclick="ToggleDjLowKill">
-                                @(Mixer.DjEq.LowKill ? "KILL ACTIVE" : "LOW KILL")
+                                @(ActiveMixer.DjEq.LowKill ? "KILL ACTIVE" : "LOW KILL")
                             </button>
                         </div>
                     </div>
@@ -5156,14 +5348,14 @@
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
                             <span style="font-size: 10px; font-weight: 700; color: #f59e0b; letter-spacing: 0.5px;">DJ SOUND COLOR FILTER</span>
                             <div style="display: flex; align-items: center; gap: 6px;">
-                                <span style="font-size: 10px; color: @(Mixer.DjEq.ColorFilterKnob < -1 ? "#38bdf8" : (Mixer.DjEq.ColorFilterKnob > 1 ? "#f43f5e" : "#64748b")); font-weight: 700;">
-                                    @(Mixer.DjEq.ColorFilterKnob < -1 ? $"LPF ({Mixer.DjEq.ColorFilterKnob:F0}%)" : (Mixer.DjEq.ColorFilterKnob > 1 ? $"HPF (+{Mixer.DjEq.ColorFilterKnob:F0}%)" : "BYPASS"))
+                                <span style="font-size: 10px; color: @(ActiveMixer.DjEq.ColorFilterKnob < -1 ? "#38bdf8" : (ActiveMixer.DjEq.ColorFilterKnob > 1 ? "#f43f5e" : "#64748b")); font-weight: 700;">
+                                    @(ActiveMixer.DjEq.ColorFilterKnob < -1 ? $"LPF ({ActiveMixer.DjEq.ColorFilterKnob:F0}%)" : (ActiveMixer.DjEq.ColorFilterKnob > 1 ? $"HPF (+{ActiveMixer.DjEq.ColorFilterKnob:F0}%)" : "BYPASS"))
                                 </span>
                                 <button class="pill-option" style="padding: 1px 6px; font-size: 9px;" @onclick="ResetDjColorFilter">Reset</button>
                             </div>
                         </div>
                         <input type="range" min="-100" max="100" step="2" style="width: 100%; accent-color: #f59e0b;"
-                               value="@Mixer.DjEq.ColorFilterKnob"
+                               value="@ActiveMixer.DjEq.ColorFilterKnob"
                                @oninput="@((ChangeEventArgs e) => OnColorFilterChanged(Convert.ToSingle(e.Value)))" />
                         <div style="display: flex; justify-content: space-between; font-size: 9px; color: #64748b; margin-top: 2px;">
                             <span>◄ LPF (Cut Highs)</span>
@@ -5182,7 +5374,7 @@
                     <div style="display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px;">
                         @for (int b = 0; b < 10; b++) {
                             int bandIdx = b;
-                            float gain = Mixer.DjEq.Bands10Db[bandIdx];
+                            float gain = ActiveMixer.DjEq.Bands10Db[bandIdx];
                             string label = bandIdx switch {
                                 0 => "31", 1 => "63", 2 => "125", 3 => "250", 4 => "500",
                                 5 => "1k", 6 => "2k", 7 => "4k", 8 => "8k", _ => "16k"
@@ -5207,7 +5399,7 @@
                         🔊 MASTER OUTPUT BUS
                     </span>
                     <span style="font-size: 10px; color: #94a3b8; font-family: monospace;">
-                        @(Mixer.DjEq.MasterGainDb >= 0 ? "+" : "")@Mixer.DjEq.MasterGainDb.ToString("F1") dB
+                        @(ActiveMixer.DjEq.MasterGainDb >= 0 ? "+" : "")@ActiveMixer.DjEq.MasterGainDb.ToString("F1") dB
                     </span>
                 </div>
                 <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 10px;">
@@ -5216,7 +5408,7 @@
                             <span>Master Gain</span>
                         </div>
                         <input type="range" min="-12" max="6" step="0.5" style="width: 100%; accent-color: #00d2ff;"
-                               value="@Mixer.DjEq.MasterGainDb"
+                               value="@ActiveMixer.DjEq.MasterGainDb"
                                @oninput="@((ChangeEventArgs e) => OnMasterGainChanged(Convert.ToSingle(e.Value)))" />
                     </div>
                     <div>
@@ -5225,7 +5417,7 @@
                             <button class="pill-option" style="padding: 1px 4px; font-size: 9px;" @onclick="ResetDjMasterBalance">C</button>
                         </div>
                         <input type="range" min="-1" max="1" step="0.05" style="width: 100%; accent-color: #00d2ff;"
-                               value="@Mixer.DjEq.MasterBalance"
+                               value="@ActiveMixer.DjEq.MasterBalance"
                                @oninput="@((ChangeEventArgs e) => OnMasterBalanceChanged(Convert.ToSingle(e.Value)))" />
                     </div>
                 </div>
@@ -5592,7 +5784,7 @@
             <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px;">
                 <div style="background: #0f121a; border: 1px solid #1f2536; border-radius: 6px; padding: 6px 8px; text-align: center;">
                     <div style="font-size: 9px; color: #94a3b8;">ACTIVE NOW</div>
-                    <div style="font-size: 16px; font-weight: 800; color: #00d2ff;">@Hub.ActiveClientCount</div>
+                    <div style="font-size: 16px; font-weight: 800; color: #00d2ff;">@ActiveHub.ActiveClientCount</div>
                 </div>
                 <div style="background: #0f121a; border: 1px solid #1f2536; border-radius: 6px; padding: 6px 8px; text-align: center;">
                     <div style="font-size: 9px; color: #94a3b8;">PEAK SESSION</div>
@@ -5600,14 +5792,14 @@
                 </div>
                 <div style="background: #0f121a; border: 1px solid #1f2536; border-radius: 6px; padding: 6px 8px; text-align: center;">
                     <div style="font-size: 9px; color: #94a3b8;">FORMAT</div>
-                    <div style="font-size: 12px; font-weight: 800; color: #f59e0b; margin-top: 2px;">MP3 @(ProfileManager.CurrentProfile.Bitrate)k</div>
+                    <div style="font-size: 12px; font-weight: 800; color: #f59e0b; margin-top: 2px;">MP3 @(ActiveStationConfig.Bitrate)k</div>
                 </div>
             </div>
 
             <!-- Active Clients Table -->
             <div style="max-height: 180px; overflow-y: auto; border: 1px solid #1e2433; border-radius: 6px; margin-bottom: 8px;">
                 @{
-                    var clients = Hub.GetActiveClients();
+                    var clients = ActiveHub.GetActiveClients();
                 }
                 @if (clients.Any()) {
                     <table style="width: 100%; border-collapse: collapse; font-size: 10px;">
@@ -5629,7 +5821,7 @@
                                     <td style="padding: 5px 6px; color: #00d2ff;">@(mb.ToString("F1")) MB</td>
                                     <td style="padding: 5px 6px; text-align: right;">
                                         <button class="pill-option" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.3); padding: 1px 6px; font-size: 9px;"
-                                                @onclick="@(() => Hub.DisconnectClient(c.ClientId))" title="Kick / Disconnect Listener">
+                                                @onclick="@(() => ActiveHub.DisconnectClient(c.ClientId))" title="Kick / Disconnect Listener">
                                             Kick
                                         </button>
                                     </td>
@@ -5945,27 +6137,27 @@
                     <span style="font-size: 11px; font-weight: 700; color: #00d2ff; display: flex; align-items: center; gap: 6px;">
                         <span>🎛️ B2B Stage & Intercom</span>
                     </span>
-                    <button class="pill-option @(Mixer.TalkbackActive ? "active" : "")"
-                            style="padding: 3px 10px; font-size: 10px; font-weight: 700; @(Mixer.TalkbackActive ? "background: #8b5cf6; border-color: #8b5cf6; color: white;" : "color: #a78bfa; border-color: rgba(139, 92, 246, 0.4);")"
+                    <button class="pill-option @(ActiveMixer.TalkbackActive ? "active" : "")"
+                            style="padding: 3px 10px; font-size: 10px; font-weight: 700; @(ActiveMixer.TalkbackActive ? "background: #8b5cf6; border-color: #8b5cf6; color: white;" : "color: #a78bfa; border-color: rgba(139, 92, 246, 0.4);")"
                             title="When active, host microphone is muted from the master broadcast so you can talk to guest DJs privately"
-                            @onclick="@(() => Mixer.TalkbackActive = !Mixer.TalkbackActive)">
-                        🎙️ @(Mixer.TalkbackActive ? "TALKBACK ACTIVE (OFF-AIR)" : "TALKBACK (GREEN ROOM)")
+                            @onclick="@(() => ActiveMixer.TalkbackActive = !ActiveMixer.TalkbackActive)">
+                        🎙️ @(ActiveMixer.TalkbackActive ? "TALKBACK ACTIVE (OFF-AIR)" : "TALKBACK (GREEN ROOM)")
                     </button>
                 </div>
                 <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
                     <span style="font-size: 10px; color: #94a3b8; font-weight: 600;">Automated Crossfade:</span>
                     <button class="pill-option" style="padding: 3px 8px; font-size: 10px; background: rgba(0, 210, 255, 0.15); border-color: #00d2ff; color: #00d2ff; font-weight: 700;"
                             title="Smoothly fade host app volume down and fade guest stream up over 8 seconds"
-                            @onclick="@(() => Mixer.StartB2bCrossfade(1.0f, 0.0f, 8000))">
+                            @onclick="@(() => ActiveMixer.StartB2bCrossfade(1.0f, 0.0f, 8000))">
                         ⚡ Hand-Off to Guest (8s)
                     </button>
                     <button class="pill-option" style="padding: 3px 8px; font-size: 10px; background: rgba(16, 185, 129, 0.15); border-color: #10b981; color: #10b981; font-weight: 700;"
                             title="Smoothly fade guest stream down and fade host volume back up over 8 seconds"
-                            @onclick="@(() => Mixer.StartB2bCrossfade(0.0f, 1.0f, 8000))">
+                            @onclick="@(() => ActiveMixer.StartB2bCrossfade(0.0f, 1.0f, 8000))">
                         ⚡ Take Back Decks (8s)
                     </button>
                     <span style="font-size: 9px; color: #64748b; margin-left: auto;">
-                        Host: @((int)(Mixer.AppVolume * 100))% | Guest: @((int)(Mixer.RelayVolume * 100))%
+                        Host: @((int)(ActiveMixer.AppVolume * 100))% | Guest: @((int)(ActiveMixer.RelayVolume * 100))%
                     </span>
                 </div>
             </div>
@@ -6708,7 +6900,7 @@
 
     private void DeleteChatMessage(ChatMessage msg) {
         if (msg == null || string.IsNullOrWhiteSpace(msg.Id)) return;
-        ChatService.RemoveMessage(msg.Id);
+        ActiveChatService.RemoveMessage(msg.Id);
         ConsoleChatMessages.RemoveAll(m => m.Id == msg.Id);
         StateHasChanged();
     }
@@ -6730,7 +6922,7 @@
     private void BanUserFromMessage(ChatMessage msg) {
         if (msg == null || msg.IsHost) return;
         string userId = !string.IsNullOrWhiteSpace(msg.UserId) ? msg.UserId : msg.Sender;
-        ChatService.BanUser(userId, msg.Sender);
+        ActiveChatService.BanUser(userId, msg.Sender);
         if (!ProfileManager.CurrentProfile.BannedUsers.Any(b => b.UserId.Equals(userId, StringComparison.OrdinalIgnoreCase))) {
             ProfileManager.CurrentProfile.BannedUsers.Add(new BannedChatUser {
                 UserId = userId,
@@ -6745,7 +6937,7 @@
 
     private void UnbanUser(string userId) {
         if (string.IsNullOrWhiteSpace(userId)) return;
-        ChatService.UnbanUser(userId);
+        ActiveChatService.UnbanUser(userId);
         ProfileManager.CurrentProfile.BannedUsers.RemoveAll(b => b.UserId.Equals(userId, StringComparison.OrdinalIgnoreCase));
         ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
         StateHasChanged();
@@ -6774,13 +6966,13 @@
     }
 
     private void ClearSessionHistory() {
-        HistoryService.Clear();
+        ActiveHistoryService.Clear();
         StreamServer.BroadcastHistoryUpdate();
         StateHasChanged();
     }
 
     private void RemoveHistoryTrack(string id) {
-        HistoryService.RemoveTrack(id);
+        ActiveHistoryService.RemoveTrack(id);
         StreamServer.BroadcastHistoryUpdate();
         StateHasChanged();
     }
@@ -6812,13 +7004,13 @@
     }
 
     private void ClearSongReactions(string songKey) {
-        ReactionService.ResetSong(songKey);
+        ActiveReactionService.ResetSong(songKey);
         StateHasChanged();
     }
 
     private void ClearSongReactionsForTrack(string? title, string? artist) {
         string key = string.IsNullOrEmpty(artist) ? (title ?? "") : $"{artist} - {title}";
-        ReactionService.ResetSong(key);
+        ActiveReactionService.ResetSong(key);
         StateHasChanged();
     }
 
@@ -6828,7 +7020,7 @@
     }
 
     private void ResetCurrentSongReactions() {
-        ReactionService.Reset();
+        ActiveReactionService.Reset();
         StateHasChanged();
     }
 
@@ -6838,7 +7030,7 @@
         HostChatMessage = "";
         ShowHostEmojiPicker = false;
         string hostName = string.IsNullOrWhiteSpace(ProfileManager.CurrentProfile.HostName) ? "DJ" : ProfileManager.CurrentProfile.HostName;
-        ChatService.AddMessage(hostName, text, isHost: true, color: "#ef4444");
+        ActiveChatService.AddMessage(hostName, text, isHost: true, color: "#ef4444");
         _ = AutoScrollChatAsync();
     }
 
@@ -6858,13 +7050,13 @@
     }
 
     private void ClearChat() {
-        ChatService.Clear();
+        ActiveChatService.Clear();
     }
 
     private void ToggleChatEnabled() {
         ProfileManager.CurrentProfile.EnableChat = !ProfileManager.CurrentProfile.EnableChat;
         ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
-        ChatService.NotifyStatusChanged(ProfileManager.CurrentProfile.EnableChat);
+        ActiveChatService.NotifyStatusChanged(ProfileManager.CurrentProfile.EnableChat);
         StateHasChanged();
     }
 
@@ -6938,20 +7130,32 @@
         } catch { }
     }
 
-    private string GetNormalizedMount() {
-        var mount = ProfileManager.CurrentProfile.StreamMountPoint?.Trim().Trim('/') ?? "";
-        return string.IsNullOrEmpty(mount) ? "stream" : mount;
-    }
-
     private void OnStreamMountPointChanged(ChangeEventArgs e) {
         var val = e.Value?.ToString()?.Trim().Trim('/') ?? "";
-        ProfileManager.CurrentProfile.StreamMountPoint = string.IsNullOrEmpty(val) ? "stream" : val;
+        string finalMount = string.IsNullOrEmpty(val) ? "stream" : val;
+        var active = StationManager.GetActiveStation();
+        var cfg = active?.Config ?? ProfileManager.CurrentProfile.EnsureDefaultStation();
+        cfg.MountPoint = finalMount;
+        if (active != null) {
+            active.ApplyConfig(cfg);
+            if (active.IsPrimary) {
+                ProfileManager.CurrentProfile.StreamMountPoint = finalMount;
+            }
+        }
         ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
         StateHasChanged();
     }
 
     private void SetPresetMount(string mount) {
-        ProfileManager.CurrentProfile.StreamMountPoint = mount;
+        var active = StationManager.GetActiveStation();
+        var cfg = active?.Config ?? ProfileManager.CurrentProfile.EnsureDefaultStation();
+        cfg.MountPoint = mount;
+        if (active != null) {
+            active.ApplyConfig(cfg);
+            if (active.IsPrimary) {
+                ProfileManager.CurrentProfile.StreamMountPoint = mount;
+            }
+        }
         ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
         StateHasChanged();
     }
@@ -7087,25 +7291,29 @@
     }
 
     private void RemoveSongRequest(string id) {
-        RequestController.RemoveRequest(id);
+        ActiveRequestController.RemoveRequest(id);
     }
 
     private void ClearSongRequests() {
-        RequestController.ClearQueue();
+        ActiveRequestController.ClearQueue();
     }
 
     private void MoveSongRequestUp(string id) {
-        RequestController.MoveUp(id);
+        ActiveRequestController.MoveUp(id);
     }
 
     private void MoveSongRequestDown(string id) {
-        RequestController.MoveDown(id);
+        ActiveRequestController.MoveDown(id);
     }
 
     private void ToggleSongRequestsEnabled() {
-        ProfileManager.CurrentProfile.EnableSongRequests = !ProfileManager.CurrentProfile.EnableSongRequests;
-        RequestController.IsEnabled = ProfileManager.CurrentProfile.EnableSongRequests;
-        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        ActiveStationConfig.EnableSongRequests = !ActiveStationConfig.EnableSongRequests;
+        ActiveRequestController.IsEnabled = ActiveStationConfig.EnableSongRequests;
+        var active = StationManager.GetActiveStation();
+        if (active == null || active.IsPrimary) {
+            ProfileManager.CurrentProfile.EnableSongRequests = ActiveStationConfig.EnableSongRequests;
+            ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        }
         StreamServer.BroadcastBrandingUpdate();
         StateHasChanged();
     }
@@ -7329,9 +7537,39 @@
     };
 
     private void SyncDjEqFromProfile() {
-        var cfg = ProfileManager.CurrentProfile.DjEq;
+        var activeId = ActiveStationConfig.Id;
+        DjEqualizerConfig? cfg = null;
+        if (!_stationDjEqs.TryGetValue(activeId, out cfg)) {
+            var pCfg = ProfileManager.CurrentProfile.DjEq;
+            if (pCfg != null) {
+                cfg = new DjEqualizerConfig {
+                    MusicTrimDb = pCfg.MusicTrimDb,
+                    MusicPan = pCfg.MusicPan,
+                    MusicStereoWidth = pCfg.MusicStereoWidth,
+                    MusicMuted = pCfg.MusicMuted,
+                    MicGainDb = pCfg.MicGainDb,
+                    MicPan = pCfg.MicPan,
+                    MicLowCut = pCfg.MicLowCut,
+                    LowGainDb = pCfg.LowGainDb,
+                    MidGainDb = pCfg.MidGainDb,
+                    HighGainDb = pCfg.HighGainDb,
+                    LowKill = pCfg.LowKill,
+                    MidKill = pCfg.MidKill,
+                    HighKill = pCfg.HighKill,
+                    ColorFilterKnob = pCfg.ColorFilterKnob,
+                    Is10BandMode = pCfg.Is10BandMode,
+                    MasterGainDb = pCfg.MasterGainDb,
+                    MasterBalance = pCfg.MasterBalance,
+                    SoftLimiterEnabled = pCfg.SoftLimiterEnabled,
+                    EqBypass = pCfg.EqBypass,
+                    ActivePreset = pCfg.ActivePreset,
+                    Bands10Db = (float[])pCfg.Bands10Db.Clone()
+                };
+                _stationDjEqs[activeId] = cfg;
+            }
+        }
         if (cfg == null) return;
-        var eq = Mixer.DjEq;
+        var eq = ActiveMixer.DjEq;
         eq.MusicTrimDb = cfg.MusicTrimDb;
         eq.MusicPan = cfg.MusicPan;
         eq.MusicStereoWidth = cfg.MusicStereoWidth;
@@ -7358,8 +7596,12 @@
     }
 
     private void SaveDjEqToProfile() {
-        var cfg = ProfileManager.CurrentProfile.DjEq;
-        var eq = Mixer.DjEq;
+        var activeId = ActiveStationConfig.Id;
+        if (!_stationDjEqs.TryGetValue(activeId, out var cfg)) {
+            cfg = new DjEqualizerConfig();
+            _stationDjEqs[activeId] = cfg;
+        }
+        var eq = ActiveMixer.DjEq;
         cfg.MusicTrimDb = eq.MusicTrimDb;
         cfg.MusicPan = eq.MusicPan;
         cfg.MusicStereoWidth = eq.MusicStereoWidth;
@@ -7383,162 +7625,196 @@
             cfg.Bands10Db = new float[10];
         }
         Array.Copy(eq.Bands10Db, cfg.Bands10Db, 10);
-        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+
+        var active = StationManager.GetActiveStation();
+        if (active == null || active.IsPrimary) {
+            var pCfg = ProfileManager.CurrentProfile.DjEq;
+            pCfg.MusicTrimDb = eq.MusicTrimDb;
+            pCfg.MusicPan = eq.MusicPan;
+            pCfg.MusicStereoWidth = eq.MusicStereoWidth;
+            pCfg.MusicMuted = eq.MusicMuted;
+            pCfg.MicGainDb = eq.MicGainDb;
+            pCfg.MicPan = eq.MicPan;
+            pCfg.MicLowCut = eq.MicLowCut;
+            pCfg.LowGainDb = eq.LowGainDb;
+            pCfg.MidGainDb = eq.MidGainDb;
+            pCfg.HighGainDb = eq.HighGainDb;
+            pCfg.LowKill = eq.LowKill;
+            pCfg.MidKill = eq.MidKill;
+            pCfg.HighKill = eq.HighKill;
+            pCfg.ColorFilterKnob = eq.ColorFilterKnob;
+            pCfg.Is10BandMode = eq.Is10BandMode;
+            pCfg.MasterGainDb = eq.MasterGainDb;
+            pCfg.MasterBalance = eq.MasterBalance;
+            pCfg.SoftLimiterEnabled = eq.SoftLimiterEnabled;
+            pCfg.EqBypass = eq.EqBypass;
+            pCfg.ActivePreset = cfg.ActivePreset;
+            if (pCfg.Bands10Db == null || pCfg.Bands10Db.Length < 10) {
+                pCfg.Bands10Db = new float[10];
+            }
+            Array.Copy(eq.Bands10Db, pCfg.Bands10Db, 10);
+            ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        }
     }
 
     private void SetDjEqMode(bool is10Band) {
-        Mixer.DjEq.Is10BandMode = is10Band;
-        Mixer.DjEq.RecalculateFilters();
+        ActiveMixer.DjEq.Is10BandMode = is10Band;
+        ActiveMixer.DjEq.RecalculateFilters();
         SaveDjEqToProfile();
     }
 
     private void SetDjEqPreset(string presetName) {
         if (!DjEqPresets.TryGetValue(presetName, out var preset)) return;
-        ProfileManager.CurrentProfile.DjEq.ActivePreset = presetName;
-        Mixer.DjEq.LowGainDb = preset.Low;
-        Mixer.DjEq.MidGainDb = preset.Mid;
-        Mixer.DjEq.HighGainDb = preset.High;
-        Mixer.DjEq.LowKill = false;
-        Mixer.DjEq.MidKill = false;
-        Mixer.DjEq.HighKill = false;
-        Mixer.DjEq.ColorFilterKnob = 0.0f;
-        Array.Copy(preset.Bands10, Mixer.DjEq.Bands10Db, 10);
-        Mixer.DjEq.RecalculateFilters();
+        var activeId = ActiveStationConfig.Id;
+        if (!_stationDjEqs.TryGetValue(activeId, out var cfg)) {
+            cfg = new DjEqualizerConfig();
+            _stationDjEqs[activeId] = cfg;
+        }
+        cfg.ActivePreset = presetName;
+        ActiveMixer.DjEq.LowGainDb = preset.Low;
+        ActiveMixer.DjEq.MidGainDb = preset.Mid;
+        ActiveMixer.DjEq.HighGainDb = preset.High;
+        ActiveMixer.DjEq.LowKill = false;
+        ActiveMixer.DjEq.MidKill = false;
+        ActiveMixer.DjEq.HighKill = false;
+        ActiveMixer.DjEq.ColorFilterKnob = 0.0f;
+        Array.Copy(preset.Bands10, ActiveMixer.DjEq.Bands10Db, 10);
+        ActiveMixer.DjEq.RecalculateFilters();
         SaveDjEqToProfile();
     }
 
     private void ToggleDjLowKill() {
-        Mixer.DjEq.LowKill = !Mixer.DjEq.LowKill;
-        Mixer.DjEq.RecalculateFilters();
+        ActiveMixer.DjEq.LowKill = !ActiveMixer.DjEq.LowKill;
+        ActiveMixer.DjEq.RecalculateFilters();
         SaveDjEqToProfile();
     }
 
     private void ToggleDjMidKill() {
-        Mixer.DjEq.MidKill = !Mixer.DjEq.MidKill;
-        Mixer.DjEq.RecalculateFilters();
+        ActiveMixer.DjEq.MidKill = !ActiveMixer.DjEq.MidKill;
+        ActiveMixer.DjEq.RecalculateFilters();
         SaveDjEqToProfile();
     }
 
     private void ToggleDjHighKill() {
-        Mixer.DjEq.HighKill = !Mixer.DjEq.HighKill;
-        Mixer.DjEq.RecalculateFilters();
+        ActiveMixer.DjEq.HighKill = !ActiveMixer.DjEq.HighKill;
+        ActiveMixer.DjEq.RecalculateFilters();
         SaveDjEqToProfile();
     }
 
     private void ResetDjColorFilter() {
-        Mixer.DjEq.ColorFilterKnob = 0.0f;
-        Mixer.DjEq.RecalculateFilters();
+        ActiveMixer.DjEq.ColorFilterKnob = 0.0f;
+        ActiveMixer.DjEq.RecalculateFilters();
         SaveDjEqToProfile();
     }
 
     private void ToggleDjEqBypass() {
-        Mixer.DjEq.EqBypass = !Mixer.DjEq.EqBypass;
+        ActiveMixer.DjEq.EqBypass = !ActiveMixer.DjEq.EqBypass;
         SaveDjEqToProfile();
     }
 
     private void ToggleDjSoftLimiter() {
-        Mixer.DjEq.SoftLimiterEnabled = !Mixer.DjEq.SoftLimiterEnabled;
+        ActiveMixer.DjEq.SoftLimiterEnabled = !ActiveMixer.DjEq.SoftLimiterEnabled;
         SaveDjEqToProfile();
     }
 
     private void ToggleDjMusicMute() {
-        Mixer.DjEq.MusicMuted = !Mixer.DjEq.MusicMuted;
+        ActiveMixer.DjEq.MusicMuted = !ActiveMixer.DjEq.MusicMuted;
         SaveDjEqToProfile();
     }
 
     private void ToggleDjMicLowCut() {
-        Mixer.DjEq.MicLowCut = !Mixer.DjEq.MicLowCut;
-        Mixer.DjEq.RecalculateFilters();
+        ActiveMixer.DjEq.MicLowCut = !ActiveMixer.DjEq.MicLowCut;
+        ActiveMixer.DjEq.RecalculateFilters();
         SaveDjEqToProfile();
     }
 
     private void ResetDjPan() {
-        Mixer.DjEq.MusicPan = 0.0f;
+        ActiveMixer.DjEq.MusicPan = 0.0f;
         SaveDjEqToProfile();
     }
 
     private void ResetDjStereoWidth() {
-        Mixer.DjEq.MusicStereoWidth = 1.0f;
+        ActiveMixer.DjEq.MusicStereoWidth = 1.0f;
         SaveDjEqToProfile();
     }
 
     private void ResetDjMasterBalance() {
-        Mixer.DjEq.MasterBalance = 0.0f;
+        ActiveMixer.DjEq.MasterBalance = 0.0f;
         SaveDjEqToProfile();
     }
 
     private void OnMusicTrimChanged(float val) {
-        Mixer.DjEq.MusicTrimDb = val;
+        ActiveMixer.DjEq.MusicTrimDb = val;
         SaveDjEqToProfile();
     }
 
     private void OnMusicPanChanged(float val) {
-        Mixer.DjEq.MusicPan = val;
+        ActiveMixer.DjEq.MusicPan = val;
         SaveDjEqToProfile();
     }
 
     private void OnMusicWidthChanged(float val) {
-        Mixer.DjEq.MusicStereoWidth = val;
+        ActiveMixer.DjEq.MusicStereoWidth = val;
         SaveDjEqToProfile();
     }
 
     private void OnMicGainChanged(float val) {
-        Mixer.DjEq.MicGainDb = val;
+        ActiveMixer.DjEq.MicGainDb = val;
         SaveDjEqToProfile();
     }
 
     private void OnMicPanChanged(float val) {
-        Mixer.DjEq.MicPan = val;
+        ActiveMixer.DjEq.MicPan = val;
         SaveDjEqToProfile();
     }
 
     private void OnHighGainChanged(float val) {
-        Mixer.DjEq.HighGainDb = val;
-        Mixer.DjEq.HighKill = false;
-        Mixer.DjEq.RecalculateFilters();
+        ActiveMixer.DjEq.HighGainDb = val;
+        ActiveMixer.DjEq.HighKill = false;
+        ActiveMixer.DjEq.RecalculateFilters();
         SaveDjEqToProfile();
     }
 
     private void OnMidGainChanged(float val) {
-        Mixer.DjEq.MidGainDb = val;
-        Mixer.DjEq.MidKill = false;
-        Mixer.DjEq.RecalculateFilters();
+        ActiveMixer.DjEq.MidGainDb = val;
+        ActiveMixer.DjEq.MidKill = false;
+        ActiveMixer.DjEq.RecalculateFilters();
         SaveDjEqToProfile();
     }
 
     private void OnLowGainChanged(float val) {
-        Mixer.DjEq.LowGainDb = val;
-        Mixer.DjEq.LowKill = false;
-        Mixer.DjEq.RecalculateFilters();
+        ActiveMixer.DjEq.LowGainDb = val;
+        ActiveMixer.DjEq.LowKill = false;
+        ActiveMixer.DjEq.RecalculateFilters();
         SaveDjEqToProfile();
     }
 
     private void OnColorFilterChanged(float val) {
-        Mixer.DjEq.ColorFilterKnob = val;
-        Mixer.DjEq.RecalculateFilters();
+        ActiveMixer.DjEq.ColorFilterKnob = val;
+        ActiveMixer.DjEq.RecalculateFilters();
         SaveDjEqToProfile();
     }
 
     private void OnBand10Changed(int bandIndex, float val) {
         if (bandIndex >= 0 && bandIndex < 10) {
-            Mixer.DjEq.Bands10Db[bandIndex] = val;
-            Mixer.DjEq.RecalculateFilters();
+            ActiveMixer.DjEq.Bands10Db[bandIndex] = val;
+            ActiveMixer.DjEq.RecalculateFilters();
             SaveDjEqToProfile();
         }
     }
 
     private void OnMasterGainChanged(float val) {
-        Mixer.DjEq.MasterGainDb = val;
+        ActiveMixer.DjEq.MasterGainDb = val;
         SaveDjEqToProfile();
     }
 
     private void OnMasterBalanceChanged(float val) {
-        Mixer.DjEq.MasterBalance = val;
+        ActiveMixer.DjEq.MasterBalance = val;
         SaveDjEqToProfile();
     }
 
     private string GetDjSvgPath() {
-        var pts = Mixer.DjEq.CalculateResponseCurve(48);
+        var pts = ActiveMixer.DjEq.CalculateResponseCurve(48);
         var sb = new System.Text.StringBuilder();
         for (int i = 0; i < pts.Length; i++) {
             float x = (float)i / (pts.Length - 1) * 460f;
