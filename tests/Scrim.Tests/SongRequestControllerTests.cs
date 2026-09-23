@@ -104,5 +104,31 @@ namespace Scrim.Tests {
             Assert.Equal("Second", queue[0].Query);
             Assert.Equal("First", queue[1].Query);
         }
+
+        [Fact]
+        public void SubmitRequest_WhenDisabled_RejectsRequest() {
+            var controller = new SongRequestController();
+            controller.IsEnabled = false;
+
+            bool result = controller.SubmitRequest("Song While Disabled", "Nobody");
+
+            Assert.False(result);
+            Assert.Empty(controller.GetLiveQueue());
+        }
+
+        [Fact]
+        public void SubmitRequest_WhenReEnabled_AcceptsRequest() {
+            var controller = new SongRequestController();
+            controller.IsEnabled = false;
+            controller.SubmitRequest("Rejected Song");
+
+            controller.IsEnabled = true;
+            bool result = controller.SubmitRequest("Accepted Song");
+
+            Assert.True(result);
+            var queue = controller.GetLiveQueue().ToList();
+            Assert.Single(queue);
+            Assert.Equal("Accepted Song", queue[0].Query);
+        }
     }
 }

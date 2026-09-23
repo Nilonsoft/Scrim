@@ -91,6 +91,17 @@
 - **Stream Health & Auto-Fallback**: Live buffer depth telemetry (`(1.2s buffer)`) and instant auto-fallback restoring host volume to 100% if a guest stream drops.
 - **Interactive Web Player Stage Presence**: "Now on the Decks" dual-avatar badge with glowing pulse rings, DJ hand-off toast banners, guest DJ profile popover modal, and real-time `🎉 PARTY` celebration pyro/confetti bursts. See [v1.0.11 Feature Guide](docs/v1.0.11-features-guide.md#1-stream-relaying--multi-dj-party-hub).
 
+### 📻 Native Multi-Station Console & Channel Dial
+- **Broadcast Multiple Stations Concurrently**: Run multiple independent radio stations simultaneously from a single Scrim console instance and single HTTP port (e.g. `:4242`).
+- **Zero Virtual Cables (Process Loopback & Native Ingest)**: Route application audio per station without installing extra virtual audio cables:
+  - Station 1: Spotify via WASAPI Process Loopback (`Spotify.exe`) on `/spotify` or `/stream`
+  - Station 2: Built-in local player automation crates & clockwheels on `/vault`
+  - Station 3: Chrome via WASAPI Process Loopback (`chrome.exe`) on `/chrome`
+- **Multi-Mount Stream & API Routing**: Dynamic HTTP path-based routing (`/<mount>`, `/api/stations`, `/api/branding?station=...`, `/api/events?station=...`) ensures completely isolated listener chats, song requests, song reactions, history, and real-time SSE events.
+- **Console Station Switcher Tab Bar**: Seamlessly switch between station control views in the console with live broadcast indicator dots, per-station ON AIR toggles, and 1-click station creation.
+- **Interactive Web Player Channel Dial**: Listeners can browse and toggle between available broadcast channels directly on the web player front-end with instantaneous stream reconnects and synchronized metadata/chat.
+- **Independent Mobile Web Apps (PWA)**: Each station features its own dynamic Web App Manifest (`/pwa/{mount}`). Listeners can install multiple stations from the same broadcaster as separate, standalone apps on their iOS or Android home screen, each with its own app icon, title, and direct start URL. See [Multi-Station Console Architecture](docs/multi-station-console.md).
+
 ### 🔌 Extensible C# & Python Plugin System
 - **Dual Runtime Support**: Dynamically discover and execute compiled .NET class libraries (`.dll`) and pure Python plugins (`.py` or packaged folders with `plugin.json`).
 - **Crash-Resilient Worker Bridge**: Python plugins run in isolated child processes communicating over bidirectional JSON-RPC, protecting live radio broadcasts from script crashes or hangs.
@@ -134,6 +145,7 @@
 
 Comprehensive guides, specifications, and architecture documents are located in the [`docs/`](docs/) directory:
 
+- 📻 **[Multi-Station Console Architecture & Guide](docs/multi-station-console.md)**: Native multi-station broadcasting from a single console, process loopback (zero virtual cables), station switcher tab bar, web player channel dial, and multi-mount HTTP/SSE API routing.
 - 🌟 **[Release & Feature Guide (v1.0.11)](docs/v1.0.11-features-guide.md)**: Details on Stream Relaying & Multi-DJ Party Hub, Backstage DJ / Green Room Private Chat, Audio Visualizer Reactor Mode Customization, Dedicated Admin Screen, High-DPI UI Scaling, Collapsible Cards, Venue Profile Import/Export, and Overnight Auto-Recovery.
 - 📋 **[Release Notes (v1.0.9)](docs/patch-notes-v1.0.9.md)**: What's new in v1.0.9 (Local Music Playback & Playlist Management Console).
 - 🚀 **[Post-Installation & User Guide](docs/post-install-guide.md)**: Comprehensive end-user handbook—from running the installer, setting up FFmpeg, 1-click virtual audio routing, and going on air to station chat, custom banners, and sharing links.

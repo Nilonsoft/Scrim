@@ -16,9 +16,14 @@ namespace Scrim.Metadata {
         private readonly List<SongRequest> _queue = new();
         private readonly object _lock = new();
 
+        public bool IsEnabled { get; set; } = true;
+
         public event EventHandler? QueueChanged;
 
-        public void SubmitRequest(string query, string dedication = "") {
+        public bool SubmitRequest(string query, string dedication = "") {
+            if (!IsEnabled) {
+                return false;
+            }
             var req = new SongRequest { 
                 Query = query?.Trim() ?? string.Empty,
                 Dedication = dedication?.Trim() ?? string.Empty
@@ -27,6 +32,7 @@ namespace Scrim.Metadata {
                 _queue.Add(req);
             }
             QueueChanged?.Invoke(this, EventArgs.Empty);
+            return true;
         }
 
         public IEnumerable<SongRequest> GetLiveQueue() {

@@ -26,6 +26,9 @@ document.addEventListener('DOMContentLoaded', function () {
     const requestInput = document.getElementById('requestInput');
     const dedicationInput = document.getElementById('dedicationInput');
     const requestSuccess = document.getElementById('requestSuccess');
+    const requestStatusPill = document.getElementById('requestStatusPill');
+    const requestDisabledBanner = document.getElementById('requestDisabledBanner');
+    const submitRequestBtn = document.getElementById('submitRequestBtn');
     const queueList = document.getElementById('queueList');
 
     // Song Reaction Elements
@@ -49,6 +52,45 @@ document.addEventListener('DOMContentLoaded', function () {
     let isConnecting = false;
     let isUserPlaying = false;
     let defaultSubtitle = "Live Broadcast";
+
+    let activeStationMount = '';
+    let stationsList = [];
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const initialStationParam = urlParams.get('station') || urlParams.get('mount') || '';
+    if (initialStationParam) {
+        activeStationMount = initialStationParam.replace(/^\/+/, '');
+    }
+
+    function getStationUrl(endpoint, extraParams) {
+        let base = endpoint;
+        const params = [];
+        if (activeStationMount) {
+            params.push('station=' + encodeURIComponent(activeStationMount));
+        }
+        if (extraParams) {
+            params.push(extraParams);
+        }
+        if (params.length > 0) {
+            base += (base.includes('?') ? '&' : '?') + params.join('&');
+        }
+        return base;
+    }
+
+    function updatePwaManifest(mount, stationName) {
+        const link = document.getElementById('pwaManifestLink') || document.querySelector('link[rel="manifest"]');
+        if (link) {
+            const m = (mount || activeStationMount || '').replace(/^\/+/, '');
+            link.href = m ? `/manifest.webmanifest?station=${encodeURIComponent(m)}` : '/manifest.webmanifest';
+        }
+        const appleTitle = document.getElementById('appleAppTitle');
+        if (appleTitle && stationName) {
+            appleTitle.content = stationName;
+        }
+    }
+    if (activeStationMount) {
+        updatePwaManifest(activeStationMount);
+    }
 
     // Live Clock (User's Local Time)
     function updateLiveClock() {
@@ -651,7 +693,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
-    let currentStreamEndpoint = '/stream';
+    let currentStreamEndpoint = activeStationMount ? ('/' + activeStationMount) : '/stream';
 
     function setPrivateStreamMode(isPrivate) {
         const overlay = document.getElementById('privateStreamOverlay');
@@ -868,6 +910,10 @@ document.addEventListener('DOMContentLoaded', function () {
         updateStationModalContent(branding);
         updatePartyHubBranding(branding);
 
+        if (branding.enableSongRequests !== undefined) {
+            updateSongRequestsEnabled(branding.enableSongRequests);
+        }
+
         if (branding.theme) {
             document.documentElement.setAttribute('data-theme', branding.theme);
         }
@@ -1048,33 +1094,34 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    function handleStatusData(data) {
+        if (!data) return;
+        if (data.streamUrl) {
+            currentStreamEndpoint = data.streamUrl;
+        }
+        if (data.isPrivate !== undefined) {
+            setPrivateStreamMode(data.isPrivate);
+        }
+        if (data.isLive !== undefined) {
+            updateLiveIndicator(data.isLive);
+            if (data.isLive) {
+                checkAutoplay(true);
+            }
+        }
+        if (data.format !== undefined) {
+            updateStreamQuality(data.format, data.bitrate);
+        }
+    }
+
     // Initial branding and status load
-    fetch('/api/branding')
+    fetch(getStationUrl('/api/branding'))
         .then(res => res.json())
         .then(applyBranding)
         .catch(e => console.warn("Could not fetch branding", e));
 
-    fetch('/api/status')
+    fetch(getStationUrl('/api/status'))
         .then(res => res.json())
-        .then(function (data) {
-            if (data) {
-                if (data.streamUrl) {
-                    currentStreamEndpoint = data.streamUrl;
-                }
-                if (data.isPrivate !== undefined) {
-                    setPrivateStreamMode(data.isPrivate);
-                }
-                if (data.isLive !== undefined) {
-                    updateLiveIndicator(data.isLive);
-                    if (data.isLive) {
-                        checkAutoplay(true);
-                    }
-                }
-                if (data.format !== undefined) {
-                    updateStreamQuality(data.format, data.bitrate);
-                }
-            }
-        })
+        .then(handleStatusData)
         .catch(e => console.warn("Could not fetch status", e));
     // Live Song Tracker State
     let currentDurationSec = 0;
@@ -1150,7 +1197,7 @@ document.addEventListener('DOMContentLoaded', function () {
     } catch { }
 
     // Initial Metadata Fetch
-    fetch('/api/metadata')
+    fetch(getStationUrl('/api/metadata'))
         .then(function (r) { return r.json(); })
         .then(function (data) {
             if (data && data.title) {
@@ -1318,8 +1365,14 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // Connect to Server-Sent Events (SSE)
-    try {
-        const evtSource = new EventSource('/api/events');
+    let evtSource = null;
+    function connectEventSource() {
+        if (evtSource) {
+            try { evtSource.close(); } catch (e) {}
+            evtSource = null;
+        }
+        try {
+            evtSource = new EventSource(getStationUrl('/api/events'));
 
         evtSource.onopen = function () {
             console.log('[SSE] Real-time connection established with Scrim app');
@@ -1450,6 +1503,31 @@ document.addEventListener('DOMContentLoaded', function () {
     } catch (e) {
         console.warn("SSE not available", e);
     }
+    }
+    connectEventSource();
+
+    function updateSongRequestsEnabled(enabled) {
+        const isEnabled = (enabled !== false);
+        if (requestStatusPill) {
+            requestStatusPill.textContent = isEnabled ? 'OPEN' : 'PAUSED';
+            requestStatusPill.classList.toggle('chat-paused', !isEnabled);
+        }
+        if (requestDisabledBanner) {
+            requestDisabledBanner.style.display = isEnabled ? 'none' : 'flex';
+        }
+        if (requestInput) {
+            requestInput.disabled = !isEnabled;
+            requestInput.placeholder = isEnabled ? 'Enter Song Title & Artist...' : 'Song requests are currently paused';
+        }
+        if (dedicationInput) {
+            dedicationInput.disabled = !isEnabled;
+        }
+        if (submitRequestBtn) {
+            submitRequestBtn.disabled = !isEnabled;
+            submitRequestBtn.style.opacity = isEnabled ? '' : '0.5';
+            submitRequestBtn.style.cursor = isEnabled ? '' : 'not-allowed';
+        }
+    }
 
     // Song Request Submission
     if (requestForm && requestInput) {
@@ -1460,7 +1538,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
             const dedication = dedicationInput ? dedicationInput.value.trim() : '';
 
-            fetch('/api/requests', {
+            fetch(getStationUrl('/api/requests'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ query: text, dedication: dedication })
@@ -1477,6 +1555,8 @@ document.addEventListener('DOMContentLoaded', function () {
                             requestSuccess.style.display = 'none';
                         }, 4000);
                     }
+                } else if (res.status === 403) {
+                    updateSongRequestsEnabled(false);
                 }
             }).catch(function (err) {
                 console.error("Request failed", err);
@@ -1801,47 +1881,50 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
-    // Fetch initial chat state & recent history
-    fetch('/api/chat?clientId=' + encodeURIComponent(anonClientId))
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
-            if (data) {
-                if (data.isBanned) {
-                    setUserBanned(true);
-                }
-                if (data.enabled !== undefined) {
-                    setChatStatus(data.enabled);
-                }
-                if (Array.isArray(data.blacklist)) {
-                    currentBlacklist = data.blacklist;
-                }
-                if (Array.isArray(data.takenNicknames)) {
-                    currentTakenNicknames = new Set(data.takenNicknames.map(function (n) { return (n || '').trim().toLowerCase(); }));
-                    if (chatNicknameInput) {
-                        const cur = chatNicknameInput.value.trim();
-                        if (cur && currentTakenNicknames.has(cur.toLowerCase())) {
-                            const newNick = generateUniqueNickname();
-                            chatNicknameInput.value = newNick;
-                            try {
-                                localStorage.setItem('scrim_chat_nickname', newNick);
-                            } catch (e) {}
+    function loadChatState() {
+        fetch(getStationUrl('/api/chat', 'clientId=' + encodeURIComponent(anonClientId)))
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data) {
+                    if (data.isBanned) {
+                        setUserBanned(true);
+                    }
+                    if (data.enabled !== undefined) {
+                        setChatStatus(data.enabled);
+                    }
+                    if (Array.isArray(data.blacklist)) {
+                        currentBlacklist = data.blacklist;
+                    }
+                    if (Array.isArray(data.takenNicknames)) {
+                        currentTakenNicknames = new Set(data.takenNicknames.map(function (n) { return (n || '').trim().toLowerCase(); }));
+                        if (chatNicknameInput) {
+                            const cur = chatNicknameInput.value.trim();
+                            if (cur && currentTakenNicknames.has(cur.toLowerCase())) {
+                                const newNick = generateUniqueNickname();
+                                chatNicknameInput.value = newNick;
+                                try {
+                                    localStorage.setItem('scrim_chat_nickname', newNick);
+                                } catch (e) {}
+                            }
                         }
                     }
+                    if (Array.isArray(data.messages)) {
+                        if (chatMessagesContainer) chatMessagesContainer.innerHTML = '';
+                        data.messages.forEach(appendChatMessage);
+                    }
                 }
-                if (Array.isArray(data.messages)) {
-                    data.messages.forEach(appendChatMessage);
-                }
-            }
-        })
-        .catch(function (err) {
-            console.warn("Could not load initial chat", err);
-        });
+            })
+            .catch(function (err) {
+                console.warn("Could not load initial chat", err);
+            });
+    }
+    loadChatState();
 
     function submitChatMessage(sender, text) {
         if (!text) return;
         if (chatSendBtn) chatSendBtn.disabled = true;
 
-        fetch('/api/chat', {
+        fetch(getStationUrl('/api/chat'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ sender: sender, text: text, clientId: anonClientId })
@@ -2050,7 +2133,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function refreshReactionsState() {
-        fetch('/api/reactions?clientId=' + encodeURIComponent(anonClientId)).then(function (res) {
+        fetch(getStationUrl('/api/reactions', 'clientId=' + encodeURIComponent(anonClientId))).then(function (res) {
             if (res.ok) return res.json();
             return null;
         }).then(function (data) {
@@ -2117,7 +2200,7 @@ document.addEventListener('DOMContentLoaded', function () {
             spawnFloatingReaction(type, btnEl);
         }
 
-        fetch('/api/reactions', {
+        fetch(getStationUrl('/api/reactions'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ type: type, clientId: anonClientId })
@@ -2156,7 +2239,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Recently Played History Logic & Initial Fetch
     function fetchSongHistory() {
-        fetch('/api/history').then(function (res) {
+        fetch(getStationUrl('/api/history')).then(function (res) {
             if (res.ok) return res.json();
             return null;
         }).then(function (data) {
@@ -3227,4 +3310,126 @@ document.addEventListener('DOMContentLoaded', function () {
             }).catch(err => console.warn('Celebration note:', err));
         });
     }
+
+    // Multi-Station Console / Channel Dial Management
+    function loadStations() {
+        fetch('/api/stations')
+            .then(res => res.ok ? res.json() : [])
+            .then(stations => {
+                if (!Array.isArray(stations)) return;
+                stationsList = stations;
+                renderStationDial(stations);
+                if (stations.length > 0 && !activeStationMount) {
+                    const first = stations[0];
+                    activeStationMount = (first.mount || 'stream').replace(/^\/+/, '');
+                    renderStationDial(stations);
+                }
+                const activeSt = stations.find(s => (s.mount || '').replace(/^\/+/, '').toLowerCase() === (activeStationMount || '').toLowerCase()) || stations[0];
+                if (activeSt) {
+                    updatePwaManifest(activeStationMount, activeSt.stationName || activeSt.name);
+                }
+            })
+            .catch(() => {});
+    }
+
+    function renderStationDial(stations) {
+        const dial = document.getElementById('stationChannelDial');
+        const pillsContainer = document.getElementById('channelDialPills');
+        if (!dial || !pillsContainer) return;
+
+        if (!stations || stations.length <= 1) {
+            dial.style.display = 'none';
+            return;
+        }
+
+        dial.style.display = 'flex';
+        pillsContainer.innerHTML = '';
+
+        stations.forEach(st => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'channel-pill';
+            const m = (st.mount || 'stream').replace(/^\/+/, '');
+            const isActive = activeStationMount
+                ? (activeStationMount.toLowerCase() === m.toLowerCase())
+                : (m === (currentStreamEndpoint || '').replace(/^\/+/, '').toLowerCase());
+
+            if (isActive) {
+                btn.classList.add('active');
+            }
+
+            const liveDot = document.createElement('span');
+            liveDot.className = 'channel-pill-dot ' + (st.isLive ? 'live' : 'offline');
+
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'channel-pill-name';
+            nameSpan.textContent = st.name || st.stationName || m;
+
+            btn.appendChild(liveDot);
+            btn.appendChild(nameSpan);
+
+            btn.addEventListener('click', () => {
+                switchToStation(st);
+            });
+
+            pillsContainer.appendChild(btn);
+        });
+    }
+
+    function switchToStation(station) {
+        const mount = (station.mount || 'stream').replace(/^\/+/, '');
+        if (activeStationMount && activeStationMount.toLowerCase() === mount.toLowerCase()) return;
+
+        activeStationMount = mount;
+        currentStreamEndpoint = '/' + mount;
+
+        updatePwaManifest(mount, station.stationName || station.name);
+
+        try {
+            const newUrl = new URL(window.location.href);
+            newUrl.searchParams.set('station', mount);
+            window.history.replaceState({}, '', newUrl);
+        } catch (e) {}
+
+        renderStationDial(stationsList);
+
+        if (isPlaying || isUserPlaying) {
+            stopStream();
+            startStream(false);
+        } else {
+            audio.removeAttribute('src');
+        }
+
+        refreshStationData();
+    }
+
+    function refreshStationData() {
+        connectEventSource();
+
+        fetch(getStationUrl('/api/branding'))
+            .then(res => res.json())
+            .then(applyBranding)
+            .catch(() => {});
+
+        fetch(getStationUrl('/api/status'))
+            .then(res => res.json())
+            .then(handleStatusData)
+            .catch(() => {});
+
+        fetch(getStationUrl('/api/metadata'))
+            .then(r => r.json())
+            .then(data => {
+                if (data && data.title) {
+                    updateTrackMetadata(data.title, data.artist, data.album, data.albumArtUrl, data.hasArt, data.duration, data.position, data.isPlaying);
+                }
+            })
+            .catch(() => {});
+
+        loadChatState();
+        refreshReactionsState();
+        fetchSongHistory();
+    }
+
+    // Initialize Stations Dial
+    loadStations();
 });

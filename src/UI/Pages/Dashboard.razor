@@ -14,6 +14,7 @@
 @using System.Net.Http
 @inject IProfileManager ProfileManager
 @inject HttpStreamServer StreamServer
+@inject IMultiStationManager StationManager
 @inject BroadcastHub Hub
 @inject ProcessLoopbackCapture Capture
 @inject MultiFormatTranscoder Transcoder
@@ -41,6 +42,113 @@
 <style>
     :root {
         zoom: @((ProfileManager.CurrentProfile.UiScalePercentage > 0 ? ProfileManager.CurrentProfile.UiScalePercentage / 100.0 : 1.0).ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    .station-switcher-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: #0d1017;
+        border-bottom: 1px solid #1c2230;
+        padding: 6px 16px;
+        gap: 12px;
+        overflow-x: auto;
+    }
+    .station-switcher-pills {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+    .station-tab-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        background: #141923;
+        border: 1px solid #232c3d;
+        border-radius: 8px;
+        padding: 4px 10px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        user-select: none;
+    }
+    .station-tab-pill:hover {
+        background: #19202d;
+        border-color: #323e54;
+    }
+    .station-tab-pill.active {
+        background: rgba(0, 210, 255, 0.08);
+        border-color: #00d2ff;
+        box-shadow: 0 0 12px rgba(0, 210, 255, 0.2);
+    }
+    .station-tab-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+    }
+    .station-tab-dot.live {
+        background: #10b981;
+        box-shadow: 0 0 8px #10b981;
+        animation: pulseLiveDot 2s infinite;
+    }
+    .station-tab-dot.offline {
+        background: #64748b;
+    }
+    .station-tab-name {
+        font-size: 12px;
+        font-weight: 700;
+        color: #f1f5f9;
+    }
+    .station-tab-mount {
+        font-size: 10px;
+        font-family: 'JetBrains Mono', monospace;
+        color: #94a3b8;
+        background: rgba(0, 0, 0, 0.35);
+        padding: 1px 5px;
+        border-radius: 4px;
+    }
+    .station-tab-onair-btn {
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: 0.5px;
+        border: none;
+        border-radius: 4px;
+        padding: 2px 7px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+    }
+    .station-tab-onair-btn.onair {
+        background: #ef4444;
+        color: #ffffff;
+        box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+    }
+    .station-tab-onair-btn.offline {
+        background: #1e2638;
+        color: #94a3b8;
+    }
+    .station-tab-onair-btn.offline:hover {
+        background: #10b981;
+        color: #ffffff;
+    }
+    .station-add-btn {
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px dashed #2d3748;
+        color: #94a3b8;
+        font-size: 11px;
+        font-weight: 600;
+        border-radius: 8px;
+        padding: 5px 12px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+    .station-add-btn:hover {
+        background: rgba(0, 210, 255, 0.1);
+        border-color: #00d2ff;
+        color: #00d2ff;
+    }
+    @@keyframes pulseLiveDot {
+        0%, 100% { transform: scale(1); opacity: 1; }
+        50% { transform: scale(1.2); opacity: 0.7; }
     }
 </style>
 
@@ -154,7 +262,88 @@
     </div>
 </header>
 
+<!-- Multi-Station Console Switcher Bar -->
+<div class="station-switcher-bar">
+    <div class="station-switcher-pills">
+        @foreach (var st in StationManager.GetAllStations()) {
+            bool isActive = st.Config.Id == (StationManager.GetActiveStation()?.Config.Id ?? "");
+            <div class="station-tab-pill @(isActive ? "active" : "")" @onclick="@(() => OnSwitchStation(st.Config.Id))">
+                <span class="station-tab-dot @(st.IsLive ? "live" : "offline")"></span>
+                <span class="station-tab-name">@st.Config.Name</span>
+                <span class="station-tab-mount">/@(st.Config.MountPoint?.Trim('/') ?? "stream")</span>
+                <button class="station-tab-onair-btn @(st.IsLive ? "onair" : "offline")" 
+                        @onclick:stopPropagation="true" 
+                        @onclick="@(() => OnToggleStationLive(st))" 
+                        title="@(st.IsLive ? "Stop this station's broadcast" : "Start this station's broadcast")">
+                    @(st.IsLive ? "ON AIR" : "GO LIVE")
+                </button>
+            </div>
+        }
+        <button class="station-add-btn" @onclick="OnAddNewStation" title="Add a new radio station to this console">
+            ＋ Add Station
+        </button>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px;">
+        <span style="font-size: 11px; color: #8b92a2;">
+            Concurrent: <strong style="color: #10b981;">@StationManager.GetAllStations().Count(s => s.IsLive)</strong>/@StationManager.GetAllStations().Count Live
+        </span>
+    </div>
+</div>
+
 <AdminSettingsModal @bind-IsOpen="ShowAdminSettingsModal" OnScaleChanged="OnUiScaleChanged" />
+
+<!-- Add Station Modal -->
+@if (ShowAddStationModal) {
+    <div class="scrim-modal-backdrop" @onclick="@(() => ShowAddStationModal = false)">
+        <div class="scrim-modal" style="max-width: 520px; width: 90%;" @onclick:stopPropagation="true">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h3 style="margin: 0; font-size: 16px; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 8px;">
+                    📻 Add New Station
+                </h3>
+                <button class="scrim-dots-btn" @onclick="@(() => ShowAddStationModal = false)">✕</button>
+            </div>
+
+            <p style="font-size: 12px; color: #8b92a2; margin-top: 0; margin-bottom: 16px; line-height: 1.4;">
+                Create an independent radio station with its own stream mount point, audio source (e.g. Spotify, Chrome, Built-in Player), branding, chat, and listener front-end.
+            </p>
+
+            <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 18px;">
+                <div>
+                    <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">Station Display Name</label>
+                    <input class="scrim-input" style="width: 100%; box-sizing: border-box;" @bind="NewStationName" placeholder="e.g. Spotify Lo-Fi Stream" />
+                </div>
+                <div>
+                    <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">Stream Mount Point (URL Path)</label>
+                    <div style="display: flex; align-items: center; gap: 4px;">
+                        <span style="font-size: 12px; color: #64748b; font-family: monospace;">/</span>
+                        <input class="scrim-input" style="flex: 1;" @bind="NewStationMount" placeholder="e.g. spotify" />
+                    </div>
+                    <span style="font-size: 10px; color: #64748b; margin-top: 3px; display: block;">Listeners will tune into: http://localhost:@(ProfileManager.CurrentProfile.Port)/@(string.IsNullOrWhiteSpace(NewStationMount) ? "channel" : NewStationMount.Trim().Trim('/'))</span>
+                </div>
+                <div>
+                    <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">Audio Source (Zero Virtual Cables)</label>
+                    <select class="scrim-select" style="width: 100%; box-sizing: border-box;" @bind="NewStationSource">
+                        <option value="@AudioSourceType.ProcessLoopback">App Loopback (Spotify, Chrome, Browser, Media Player)</option>
+                        <option value="@AudioSourceType.BuiltInPlayer">Built-in Local Player (Clockwheel &amp; Automation Crate)</option>
+                        <option value="@AudioSourceType.AudioDevice">Audio Hardware Input / Mic</option>
+                        <option value="@AudioSourceType.SystemMix">Master System Mix</option>
+                    </select>
+                </div>
+                @if (NewStationSource == AudioSourceType.ProcessLoopback) {
+                    <div>
+                        <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">Target Application / Process</label>
+                        <input class="scrim-input" style="width: 100%; box-sizing: border-box;" @bind="NewStationProcess" placeholder="e.g. Spotify.exe or chrome.exe" />
+                    </div>
+                }
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 8px;">
+                <button class="scrim-btn-secondary" @onclick="@(() => ShowAddStationModal = false)">Cancel</button>
+                <button class="scrim-btn-primary" @onclick="ConfirmAddStation">Create Station</button>
+            </div>
+        </div>
+    </div>
+}
 
 <!-- Profile Management Modal -->
 @if (ShowProfileModal) {
@@ -894,6 +1083,7 @@
 
         // Load persisted card layout from current profile (card-playlist removed by default)
         var p = ProfileManager.CurrentProfile;
+        RequestController.IsEnabled = p.EnableSongRequests;
         if (p.LeftColumnCards?.Any() == true) {
             LeftColumn = new List<string>(p.LeftColumnCards);
         } else {
@@ -946,6 +1136,8 @@
         Mixer.RelayAudioStream = RelayService.RelayAudioStream;
         _greenRoomMessages = StreamServer.GetGreenRoomMessages().ToList();
         StreamServer.GreenRoomMessagePosted += OnGreenRoomMessagePosted;
+        StationManager.StationsChanged += OnStationManagerChanged;
+        StationManager.StationBroadcastingStateChanged += OnStationBroadcastingChanged;
 
         if (!string.IsNullOrWhiteSpace(MetadataService.CurrentMetadata.Title)) {
             CurrentTrackTitle = MetadataService.CurrentMetadata.Title;
@@ -1344,15 +1536,104 @@
     }
 
     private void ToggleBroadcast() {
-        if (IsLive) {
-            StopBroadcast();
+        var active = StationManager.GetActiveStation();
+        if (active != null) {
+            OnToggleStationLive(active);
         } else {
-            if (!FFmpegService.IsInstalled) {
-                ShowFFmpegModal = true;
-                return;
+            if (IsLive) {
+                StopBroadcast();
+            } else {
+                if (!FFmpegService.IsInstalled) {
+                    ShowFFmpegModal = true;
+                    return;
+                }
+                StartBroadcast();
             }
-            StartBroadcast();
         }
+    }
+
+    private void OnToggleStationLive(StationPipeline st) {
+        if (!FFmpegService.IsInstalled) {
+            ShowFFmpegModal = true;
+            return;
+        }
+
+        try {
+            StreamServer.Start(ProfileManager.CurrentProfile.Port);
+        } catch { }
+
+        if (st.IsLive) {
+            StationManager.StopStation(st.Config.Id);
+            if (st.Config.Id == (StationManager.GetActiveStation()?.Config.Id ?? "")) {
+                IsLive = false;
+            }
+        } else {
+            StationManager.StartStation(st.Config.Id, MicService, LocalPlayer);
+            if (st.Config.Id == (StationManager.GetActiveStation()?.Config.Id ?? "")) {
+                IsLive = true;
+            }
+        }
+        StateHasChanged();
+    }
+
+    private void OnSwitchStation(string stationId) {
+        StationManager.SetActiveStation(stationId);
+        var active = StationManager.GetActiveStation();
+        if (active != null) {
+            IsLive = active.IsLive;
+        }
+        StateHasChanged();
+    }
+
+    private bool ShowAddStationModal = false;
+    private string NewStationName = "";
+    private string NewStationMount = "";
+    private AudioSourceType NewStationSource = AudioSourceType.ProcessLoopback;
+    private string NewStationProcess = "Spotify.exe";
+
+    private void OnAddNewStation() {
+        int nextNum = StationManager.GetAllStations().Count + 1;
+        NewStationName = $"Station {nextNum}";
+        NewStationMount = $"channel{nextNum}";
+        NewStationSource = AudioSourceType.ProcessLoopback;
+        NewStationProcess = "Spotify.exe";
+        ShowAddStationModal = true;
+    }
+
+    private void ConfirmAddStation() {
+        if (string.IsNullOrWhiteSpace(NewStationName)) return;
+        string mount = string.IsNullOrWhiteSpace(NewStationMount) ? $"channel{StationManager.GetAllStations().Count + 1}" : NewStationMount.Trim().Trim('/');
+
+        var newConfig = new StationConfig {
+            Id = Guid.NewGuid().ToString("N"),
+            Name = NewStationName.Trim(),
+            StationName = NewStationName.Trim(),
+            MountPoint = mount,
+            SourceType = NewStationSource,
+            TargetProcessName = NewStationProcess.Trim(),
+            Bitrate = ProfileManager.CurrentProfile.Bitrate,
+            AudioFormat = ProfileManager.CurrentProfile.AudioFormat,
+            WebTheme = ProfileManager.CurrentProfile.WebTheme,
+            AccentColor = ProfileManager.CurrentProfile.AccentColor
+        };
+
+        StationManager.AddStation(newConfig);
+        StationManager.SetActiveStation(newConfig.Id);
+        ShowAddStationModal = false;
+        StateHasChanged();
+    }
+
+    private void OnStationManagerChanged() {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void OnStationBroadcastingChanged(StationPipeline st, bool isBroadcasting) {
+        InvokeAsync(() => {
+            if (st.Config.Id == (StationManager.GetActiveStation()?.Config.Id ?? "")) {
+                IsLive = isBroadcasting;
+            }
+            StateHasChanged();
+        });
     }
 
     private void OnHubBroadcastingStateChanged(object? sender, bool isBroadcasting) {
@@ -2330,6 +2611,8 @@
         RelayService.ActiveRelayDisconnected -= OnActiveRelayDisconnected;
         RelayService.RemoteGreenRoomMessageReceived -= OnRemoteGreenRoomMessageReceived;
         StreamServer.GreenRoomMessagePosted -= OnGreenRoomMessagePosted;
+        StationManager.StationsChanged -= OnStationManagerChanged;
+        StationManager.StationBroadcastingStateChanged -= OnStationBroadcastingChanged;
         _dotNetRef?.Dispose();
         _refreshTimer?.Dispose();
         _vuTimer?.Dispose();
@@ -2410,6 +2693,19 @@
                     <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
                 </div>
             </div>
+
+            @{
+                var activeSt = StationManager.GetActiveStation();
+            }
+            @if (activeSt != null) {
+                <div style="margin-bottom: 12px; background: rgba(0, 210, 255, 0.06); border: 1px solid rgba(0, 210, 255, 0.25); border-radius: 8px; padding: 8px 10px; display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <div style="font-size: 11px; font-weight: 700; color: #00d2ff;">Active Station: @activeSt.Config.Name</div>
+                        <div style="font-size: 10px; color: #94a3b8;">Mount: /@(activeSt.Config.MountPoint?.Trim('/') ?? "stream") • Audio Source: @activeSt.Config.SourceType</div>
+                    </div>
+                    <span class="station-tab-dot @(activeSt.IsLive ? "live" : "offline")"></span>
+                </div>
+            }
             
             <div style="margin-bottom: 14px;">
                 <label class="scrim-label">Application Window</label>
@@ -2954,6 +3250,12 @@
                     </span>
                 </div>
                 <div style="display: flex; align-items: center; gap: 6px;">
+                    <button class="pill-option @(ProfileManager.CurrentProfile.EnableSongRequests ? "active" : "")" 
+                            style="padding: 2px 8px; font-size: 10px;"
+                            @onclick="ToggleSongRequestsEnabled" 
+                            title="Turn Song Requests On / Off">
+                        @(ProfileManager.CurrentProfile.EnableSongRequests ? "ON" : "OFF")
+                    </button>
                     @if (liveQueue.Any()) {
                         <button class="pill-option" style="padding: 2px 8px; font-size: 10px; color: #f87171; border-color: rgba(239, 68, 68, 0.35);" 
                                 @onclick="ClearSongRequests" 
@@ -2965,6 +3267,12 @@
                     <button class="scrim-dots-btn" @onclick="@(() => RemoveCard(cardId))" title="Remove Card">✕</button>
                 </div>
             </div>
+            @if (!ProfileManager.CurrentProfile.EnableSongRequests) {
+                <div style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.28); border-radius: 6px; padding: 6px 10px; margin-bottom: 8px; font-size: 10.5px; color: #fca5a5; display: flex; justify-content: space-between; align-items: center;">
+                    <span>⏸️ Song requests are currently <strong>PAUSED</strong> for web listeners.</span>
+                    <button class="pill-option" style="padding: 1px 6px; font-size: 9.5px; border-color: rgba(239, 68, 68, 0.4); color: #fca5a5;" @onclick="ToggleSongRequestsEnabled">Resume</button>
+                </div>
+            }
             @if (!liveQueue.Any()) {
                 <div style="color: #6c7384; font-size: 13px; text-align: center; padding: 24px 0;">No listener requests pending.</div>
             } else {
@@ -3415,6 +3723,15 @@
                            style="accent-color: var(--accent-blue, #00d2ff); width: 15px; height: 15px; cursor: pointer;" />
                     <label for="dynamicBackdropCheck" style="font-size: 11.5px; color: var(--text-muted, #94a3b8); cursor: pointer; user-select: none; margin: 0;">
                         Enable Dynamic Ambient Backdrop (extracts colors from album art; uncheck to prioritize your Website Theme)
+                    </label>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px; margin-top: 8px;">
+                    <input type="checkbox" id="enableSongRequestsCheck"
+                           checked="@ProfileManager.CurrentProfile.EnableSongRequests"
+                           @onchange="ToggleSongRequestsEnabled"
+                           style="accent-color: var(--accent-blue, #00d2ff); width: 15px; height: 15px; cursor: pointer;" />
+                    <label for="enableSongRequestsCheck" style="font-size: 11.5px; color: var(--text-muted, #94a3b8); cursor: pointer; user-select: none; margin: 0;">
+                        Allow Listener Song Requests (accept song requests and dedications from website listeners)
                     </label>
                 </div>
             </div>
@@ -6643,6 +6960,14 @@
 
     private void MoveSongRequestDown(string id) {
         RequestController.MoveDown(id);
+    }
+
+    private void ToggleSongRequestsEnabled() {
+        ProfileManager.CurrentProfile.EnableSongRequests = !ProfileManager.CurrentProfile.EnableSongRequests;
+        RequestController.IsEnabled = ProfileManager.CurrentProfile.EnableSongRequests;
+        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
+        StreamServer.BroadcastBrandingUpdate();
+        StateHasChanged();
     }
 
     // ==========================================

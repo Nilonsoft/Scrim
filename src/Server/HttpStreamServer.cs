@@ -22,6 +22,7 @@ namespace Scrim.Server {
         private readonly ISongReactionService _reactionService;
         private readonly ISongHistoryService _historyService;
         private readonly Scrim.Audio.StreamRelayService? _relayService;
+        private readonly IMultiStationManager? _stationManager;
 
         public event Action? HistorySettingsChanged;
         public event Action? BrandingSettingsChanged;
@@ -42,7 +43,7 @@ namespace Scrim.Server {
         private TcpListener? _bridgeListener;
         private CancellationTokenSource? _cts;
 
-        public HttpStreamServer(BroadcastHub hub, IMetadataService metadataService, SongRequestController requestController, IProfileManager profileManager, INetworkDiscoveryService networkDiscovery, IThemeService? themeService = null, ILiveChatService? chatService = null, ISongReactionService? reactionService = null, ISongHistoryService? historyService = null, Scrim.Audio.StreamRelayService? relayService = null) {
+        public HttpStreamServer(BroadcastHub hub, IMetadataService metadataService, SongRequestController requestController, IProfileManager profileManager, INetworkDiscoveryService networkDiscovery, IThemeService? themeService = null, ILiveChatService? chatService = null, ISongReactionService? reactionService = null, ISongHistoryService? historyService = null, Scrim.Audio.StreamRelayService? relayService = null, IMultiStationManager? stationManager = null) {
             _hub = hub;
             _metadataService = metadataService;
             _requestController = requestController;
@@ -54,9 +55,14 @@ namespace Scrim.Server {
             _reactionService = reactionService ?? new SongReactionService(metadataService);
             _historyService = historyService ?? new SongHistoryService(metadataService);
             _relayService = relayService;
+            _stationManager = stationManager;
             if (_relayService != null) {
                 _relayService.StreamStatusUpdated += (_) => BroadcastBrandingUpdate();
                 _relayService.StreamsChanged += BroadcastBrandingUpdate;
+            }
+            if (_stationManager != null) {
+                _stationManager.StationsChanged += BroadcastBrandingUpdate;
+                _stationManager.StationBroadcastingStateChanged += (_, _) => BroadcastBrandingUpdate();
             }
         }
 
@@ -407,18 +413,22 @@ namespace Scrim.Server {
                 HandleM3uRequest(context);
             } else if (path == "/listen.pls" || path == "/playlist.pls" || path == "/stream.pls" || string.Equals(path, $"/{GetNormalizedMountPoint()}.pls", StringComparison.OrdinalIgnoreCase)) {
                 HandlePlsRequest(context);
-            } else if (path == "/api/events") {
+            } else if (path == "/api/stations") {
+                HandleStationsRequest(context);
+            } else if (path == "/manifest.webmanifest" || path == "/manifest.json" || path == "/assets/manifest.webmanifest" || IsStationApiRoute(path, "manifest.webmanifest")) {
+                HandleManifestRequest(context);
+            } else if (path == "/api/events" || IsStationApiRoute(path, "events")) {
                 _ = HandleSseClient(context, token);
             } else if (path == "/api/network") {
                 HandleNetworkRequest(context);
-            } else if (path == "/api/albumart") {
+            } else if (path == "/api/albumart" || IsStationApiRoute(path, "albumart")) {
                 if (isRestricted) {
                     context.Response.StatusCode = 403;
                     context.Response.Close();
                 } else {
                     HandleAlbumArtRequest(context);
                 }
-            } else if (path == "/api/metadata") {
+            } else if (path == "/api/metadata" || IsStationApiRoute(path, "metadata")) {
                 if (isRestricted) {
                     context.Response.StatusCode = 403;
                     context.Response.ContentType = "application/json";
@@ -429,27 +439,27 @@ namespace Scrim.Server {
                 } else {
                     HandleMetadataRequest(context);
                 }
-            } else if (path == "/api/branding") {
+            } else if (path == "/api/branding" || IsStationApiRoute(path, "branding")) {
                 HandleBrandingRequest(context);
-            } else if (path == "/api/banner") {
+            } else if (path == "/api/banner" || IsStationApiRoute(path, "banner")) {
                 HandleBannerRequest(context);
-            } else if (path == "/api/logo") {
+            } else if (path == "/api/logo" || IsStationApiRoute(path, "logo")) {
                 HandleLogoRequest(context);
-            } else if (path == "/api/requests" && context.Request.HttpMethod == "POST") {
+            } else if ((path == "/api/requests" || IsStationApiRoute(path, "requests")) && context.Request.HttpMethod == "POST") {
                 if (isRestricted) {
                     context.Response.StatusCode = 403;
                     context.Response.Close();
                 } else {
                     HandleSongRequest(context);
                 }
-            } else if (path == "/api/chat" && context.Request.HttpMethod == "POST") {
+            } else if ((path == "/api/chat" || IsStationApiRoute(path, "chat")) && context.Request.HttpMethod == "POST") {
                 if (isRestricted) {
                     context.Response.StatusCode = 403;
                     context.Response.Close();
                 } else {
                     HandleChatPostRequest(context);
                 }
-            } else if (path == "/api/chat" && context.Request.HttpMethod == "GET") {
+            } else if ((path == "/api/chat" || IsStationApiRoute(path, "chat")) && context.Request.HttpMethod == "GET") {
                 if (isRestricted) {
                     context.Response.ContentType = "application/json";
                     context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
@@ -459,20 +469,20 @@ namespace Scrim.Server {
                 } else {
                     HandleChatGetRequest(context);
                 }
-            } else if (path == "/api/reactions/clear" && context.Request.HttpMethod == "POST") {
+            } else if ((path == "/api/reactions/clear" || IsStationApiRoute(path, "reactions/clear")) && context.Request.HttpMethod == "POST") {
                 HandleReactionClearRequest(context);
-            } else if (path == "/api/reactions" && context.Request.HttpMethod == "POST") {
+            } else if ((path == "/api/reactions" || IsStationApiRoute(path, "reactions")) && context.Request.HttpMethod == "POST") {
                 if (isRestricted) {
                     context.Response.StatusCode = 403;
                     context.Response.Close();
                 } else {
                     HandleReactionPostRequest(context);
                 }
-            } else if (path == "/api/reactions" && context.Request.HttpMethod == "GET") {
+            } else if ((path == "/api/reactions" || IsStationApiRoute(path, "reactions")) && context.Request.HttpMethod == "GET") {
                 HandleReactionGetRequest(context);
-            } else if (path == "/api/history/clear" && context.Request.HttpMethod == "POST") {
+            } else if ((path == "/api/history/clear" || IsStationApiRoute(path, "history/clear")) && context.Request.HttpMethod == "POST") {
                 HandleHistoryClearRequest(context);
-            } else if (path == "/api/history" && context.Request.HttpMethod == "GET") {
+            } else if ((path == "/api/history" || IsStationApiRoute(path, "history")) && context.Request.HttpMethod == "GET") {
                 if (isRestricted) {
                     context.Response.ContentType = "application/json";
                     context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
@@ -504,6 +514,184 @@ namespace Scrim.Server {
             }
         }
 
+        public StationPipeline? ResolveStationPipeline(HttpListenerContext context) {
+            if (_stationManager == null) return null;
+
+            string? queryStation = context.Request.QueryString["station"] ?? context.Request.QueryString["mount"];
+            if (!string.IsNullOrWhiteSpace(queryStation)) {
+                return _stationManager.GetStationByMount(queryStation) ?? _stationManager.GetStationById(queryStation);
+            }
+
+            string path = context.Request.Url?.AbsolutePath ?? "/";
+            var parts = path.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 2) {
+                if (parts[0].Equals("api", StringComparison.OrdinalIgnoreCase)) {
+                    string candidate = parts[1];
+                    var pipeline = _stationManager.GetStationByMount(candidate) ?? _stationManager.GetStationById(candidate);
+                    if (pipeline != null) return pipeline;
+                } else {
+                    string candidate = parts[0];
+                    var pipeline = _stationManager.GetStationByMount(candidate) ?? _stationManager.GetStationById(candidate);
+                    if (pipeline != null) return pipeline;
+                }
+            } else if (parts.Length == 1 && !parts[0].Equals("api", StringComparison.OrdinalIgnoreCase)) {
+                string candidate = parts[0];
+                var pipeline = _stationManager.GetStationByMount(candidate) ?? _stationManager.GetStationById(candidate);
+                if (pipeline != null) return pipeline;
+            }
+
+            return _stationManager.GetActiveStation();
+        }
+
+        private static bool IsStationApiRoute(string path, string endpoint) {
+            if (string.IsNullOrWhiteSpace(path)) return false;
+            var parts = path.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 3 && parts[0].Equals("api", StringComparison.OrdinalIgnoreCase)) {
+                string candidate = parts[1];
+                if (candidate.Equals("greenroom", StringComparison.OrdinalIgnoreCase) ||
+                    candidate.Equals("poll", StringComparison.OrdinalIgnoreCase) ||
+                    candidate.Equals("party", StringComparison.OrdinalIgnoreCase)) {
+                    return false;
+                }
+                string sub = string.Join("/", parts.Skip(2));
+                return sub.Equals(endpoint, StringComparison.OrdinalIgnoreCase);
+            }
+            return false;
+        }
+
+        private void HandleStationsRequest(HttpListenerContext context) {
+            try {
+                var response = context.Response;
+                response.ContentType = "application/json; charset=utf-8";
+                response.Headers.Add("Access-Control-Allow-Origin", "*");
+
+                var stations = _stationManager != null
+                    ? _stationManager.GetAllStations()
+                    : new System.Collections.Generic.List<StationPipeline>();
+
+                var items = stations.Select(s => {
+                    string m = s.Config.MountPoint?.Trim().Trim('/') ?? "stream";
+                    return $"{{\"id\":\"{EscapeJson(s.Config.Id)}\",\"name\":\"{EscapeJson(s.Config.Name)}\",\"stationName\":\"{EscapeJson(s.Config.StationName)}\",\"mount\":\"{EscapeJson(m)}\",\"streamUrl\":\"/{EscapeJson(m)}\",\"isLive\":{(s.IsLive ? "true" : "false")},\"listeners\":{s.Hub.ActiveClientCount},\"genre\":\"{EscapeJson(s.Config.GenreTag)}\",\"theme\":\"{EscapeJson(s.Config.WebTheme)}\",\"accentColor\":\"{EscapeJson(s.Config.AccentColor)}\",\"sourceType\":\"{s.Config.SourceType}\"}}";
+                });
+
+                string json = $"[{string.Join(",", items)}]";
+                byte[] bytes = System.Text.Encoding.UTF8.GetBytes(json);
+                response.ContentLength64 = bytes.Length;
+                response.OutputStream.Write(bytes, 0, bytes.Length);
+            } catch {
+                context.Response.StatusCode = 500;
+            } finally {
+                context.Response.Close();
+            }
+        }
+
+        private void HandleManifestRequest(HttpListenerContext context) {
+            try {
+                var response = context.Response;
+                response.ContentType = "application/manifest+json; charset=utf-8";
+                response.Headers.Add("Access-Control-Allow-Origin", "*");
+                response.Headers.Add("Cache-Control", "no-cache, must-revalidate");
+
+                var station = ResolveStationPipeline(context);
+                var profile = _profileManager.CurrentProfile;
+                var stConfig = station?.Config;
+
+                string stationName = !string.IsNullOrWhiteSpace(stConfig?.StationName) ? stConfig.StationName : (!string.IsNullOrWhiteSpace(profile.StationName) ? profile.StationName : "Scrim Radio");
+                string shortName = !string.IsNullOrWhiteSpace(stConfig?.Name) ? stConfig.Name : stationName;
+                string mount = (stConfig?.MountPoint ?? GetNormalizedMountPoint()).Trim().Trim('/');
+                string desc = !string.IsNullOrWhiteSpace(stConfig?.StationTagline) ? stConfig.StationTagline : (!string.IsNullOrWhiteSpace(profile.BroadcasterBio) ? profile.BroadcasterBio : "High-fidelity live audio broadcasting and interactive web player");
+                string themeColor = !string.IsNullOrWhiteSpace(stConfig?.AccentColor) ? stConfig.AccentColor : (!string.IsNullOrWhiteSpace(profile.AccentColor) ? profile.AccentColor : "#00d2ff");
+
+                bool isDefaultMount = string.Equals(mount, "stream", StringComparison.OrdinalIgnoreCase) || (profile.Stations.Count > 0 && profile.Stations[0].Id == stConfig?.Id);
+                string startUrl = isDefaultMount ? "/" : $"/?station={Uri.EscapeDataString(mount)}";
+                string appId = $"/pwa/{mount}";
+
+                string logoUrl = !string.IsNullOrWhiteSpace(stConfig?.LogoUrl) ? stConfig.LogoUrl : GetEffectiveLogoUrl();
+                string iconJson;
+                if (!string.IsNullOrWhiteSpace(logoUrl) && !logoUrl.Contains("icon.svg")) {
+                    iconJson = $@"
+    {{
+      ""src"": ""{EscapeJson(logoUrl)}"",
+      ""sizes"": ""any"",
+      ""type"": ""image/png"",
+      ""purpose"": ""any maskable""
+    }},
+    {{
+      ""src"": ""/assets/icon.svg"",
+      ""sizes"": ""any"",
+      ""type"": ""image/svg+xml"",
+      ""purpose"": ""any""
+    }},
+    {{
+      ""src"": ""/assets/icon-192.png"",
+      ""sizes"": ""192x192"",
+      ""type"": ""image/png"",
+      ""purpose"": ""any""
+    }},
+    {{
+      ""src"": ""/assets/icon-512.png"",
+      ""sizes"": ""512x512"",
+      ""type"": ""image/png"",
+      ""purpose"": ""any""
+    }}";
+                } else {
+                    iconJson = @"
+    {
+      ""src"": ""/assets/icon.svg"",
+      ""sizes"": ""any"",
+      ""type"": ""image/svg+xml"",
+      ""purpose"": ""any""
+    },
+    {
+      ""src"": ""/assets/icon.svg"",
+      ""sizes"": ""any"",
+      ""type"": ""image/svg+xml"",
+      ""purpose"": ""maskable""
+    },
+    {
+      ""src"": ""/assets/icon-192.png"",
+      ""sizes"": ""192x192"",
+      ""type"": ""image/png"",
+      ""purpose"": ""any""
+    },
+    {
+      ""src"": ""/assets/icon-512.png"",
+      ""sizes"": ""512x512"",
+      ""type"": ""image/png"",
+      ""purpose"": ""any""
+    }";
+                }
+
+                string manifest = $@"{{
+  ""id"": ""{EscapeJson(appId)}"",
+  ""name"": ""{EscapeJson(stationName)}"",
+  ""short_name"": ""{EscapeJson(shortName)}"",
+  ""description"": ""{EscapeJson(desc)}"",
+  ""start_url"": ""{EscapeJson(startUrl)}"",
+  ""scope"": ""/"",
+  ""display"": ""standalone"",
+  ""orientation"": ""any"",
+  ""background_color"": ""#0d0f12"",
+  ""theme_color"": ""{EscapeJson(themeColor)}"",
+  ""categories"": [
+    ""music"",
+    ""entertainment"",
+    ""audio""
+  ],
+  ""icons"": [{iconJson}
+  ]
+}}";
+
+                byte[] bytes = System.Text.Encoding.UTF8.GetBytes(manifest);
+                response.ContentLength64 = bytes.Length;
+                response.OutputStream.Write(bytes, 0, bytes.Length);
+            } catch {
+                context.Response.StatusCode = 500;
+            } finally {
+                context.Response.Close();
+            }
+        }
+
         private string GetNormalizedMountPoint() {
             string raw = _profileManager.CurrentProfile.StreamMountPoint?.Trim().TrimStart('/') ?? "stream";
             if (string.IsNullOrEmpty(raw)) raw = "stream";
@@ -513,9 +701,22 @@ namespace Scrim.Server {
         private bool IsStreamPath(string path) {
             string mount = GetNormalizedMountPoint();
             string p = (path ?? "").Trim().ToLowerInvariant();
-            return p == $"/{mount}" || p == $"/{mount}.mp3" ||
-                   p == "/stream" || p == "/stream.mp3" ||
-                   p == "/live" || p == "/listen";
+            if (p == $"/{mount}" || p == $"/{mount}.mp3" ||
+                p == "/stream" || p == "/stream.mp3" ||
+                p == "/live" || p == "/listen") {
+                return true;
+            }
+
+            if (_stationManager != null) {
+                foreach (var station in _stationManager.GetAllStations()) {
+                    string sMount = (station.Config.MountPoint ?? "").Trim().Trim('/').ToLowerInvariant();
+                    if (!string.IsNullOrEmpty(sMount) && (p == $"/{sMount}" || p == $"/{sMount}.mp3")) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         private bool IsLocalNetworkClient(HttpListenerContext context) {
@@ -626,6 +827,11 @@ namespace Scrim.Server {
         }
 
         private async Task HandleStreamClient(HttpListenerContext context, CancellationToken token) {
+            var station = ResolveStationPipeline(context);
+            var hub = station?.Hub ?? _hub;
+            var currentProfile = _profileManager.CurrentProfile;
+            var stationConfig = station?.Config;
+
             var response = context.Response;
             response.Headers.Add("Access-Control-Allow-Origin", "*");
             response.Headers.Add("Cache-Control", "no-cache, no-store, must-revalidate");
@@ -633,19 +839,23 @@ namespace Scrim.Server {
             response.Headers.Add("Expires", "0");
             response.Headers.Add("Accept-Ranges", "none");
             response.Headers.Add("X-Powered-By", "Scrim");
-            var currentProfile = _profileManager.CurrentProfile;
-            response.Headers.Add("icy-name", currentProfile.StationName ?? "Scrim Broadcast Station");
-            response.Headers.Add("icy-genre", "Live Stream");
-            response.Headers.Add("icy-br", currentProfile.Bitrate.ToString());
-            if (!string.IsNullOrWhiteSpace(currentProfile.HostName)) {
-                response.Headers.Add("X-Scrim-Host", currentProfile.HostName);
+
+            string stationName = stationConfig?.StationName ?? currentProfile.StationName ?? "Scrim Broadcast Station";
+            int bitrate = stationConfig?.Bitrate ?? currentProfile.Bitrate;
+            string hostName = stationConfig?.HostName ?? currentProfile.HostName;
+
+            response.Headers.Add("icy-name", stationName);
+            response.Headers.Add("icy-genre", stationConfig?.GenreTag ?? "Live Stream");
+            response.Headers.Add("icy-br", bitrate.ToString());
+            if (!string.IsNullOrWhiteSpace(hostName)) {
+                response.Headers.Add("X-Scrim-Host", hostName);
             }
-            string effectiveLogo = GetEffectiveLogoUrl();
+            string effectiveLogo = !string.IsNullOrWhiteSpace(stationConfig?.LogoUrl) ? stationConfig.LogoUrl : GetEffectiveLogoUrl();
             if (!string.IsNullOrWhiteSpace(effectiveLogo)) {
                 response.Headers.Add("X-Scrim-Avatar", effectiveLogo);
             }
 
-            if (!_hub.IsBroadcasting) {
+            if (!hub.IsBroadcasting) {
                 response.StatusCode = 503;
                 response.ContentType = "application/json";
                 byte[] offlineBytes = System.Text.Encoding.UTF8.GetBytes("{\"error\":\"Station is offline\",\"isLive\":false}");
@@ -655,7 +865,7 @@ namespace Scrim.Server {
                 return;
             }
 
-            string format = _profileManager.CurrentProfile.AudioFormat?.ToLowerInvariant() ?? "mp3";
+            string format = (stationConfig?.AudioFormat ?? currentProfile.AudioFormat)?.ToLowerInvariant() ?? "mp3";
             response.ContentType = format switch {
                 "opus" => "audio/ogg; codecs=opus",
                 "aac" => "audio/aac",
@@ -666,9 +876,9 @@ namespace Scrim.Server {
 
             string clientIp = context.Request.RemoteEndPoint?.Address.ToString() ?? "127.0.0.1";
             string clientUa = context.Request.UserAgent ?? "Web / Audio Player";
-            string mount = context.Request.Url?.AbsolutePath.TrimStart('/') ?? "stream";
+            string mount = context.Request.Url?.AbsolutePath.TrimStart('/') ?? (stationConfig?.MountPoint ?? "stream");
             using var clientCts = CancellationTokenSource.CreateLinkedTokenSource(token);
-            var client = _hub.RegisterClient(clientIp, clientUa, mount, clientCts);
+            var client = hub.RegisterClient(clientIp, clientUa, mount, clientCts);
             try {
                 using var stream = response.OutputStream;
                 while (!clientCts.Token.IsCancellationRequested) {
@@ -678,7 +888,7 @@ namespace Scrim.Server {
                 }
             } catch {
             } finally {
-                _hub.UnregisterClient(client.ClientId);
+                hub.UnregisterClient(client.ClientId);
                 response.Close();
             }
         }
@@ -689,6 +899,14 @@ namespace Scrim.Server {
             response.Headers.Add("Access-Control-Allow-Origin", "*");
             response.Headers.Add("Cache-Control", "no-cache");
             response.Headers.Add("Connection", "keep-alive");
+
+            var station = ResolveStationPipeline(context);
+            var chatSvc = station?.ChatService ?? _chatService;
+            var reactionSvc = station?.ReactionService ?? _reactionService;
+            var historySvc = station?.HistoryService ?? _historyService;
+            var hub = station?.Hub ?? _hub;
+            var reqCtrl = station?.RequestController ?? _requestController;
+            var stationConfig = station?.Config;
 
             var writeLock = new SemaphoreSlim(1, 1);
             var immediateChannel = System.Threading.Channels.Channel.CreateUnbounded<string>();
@@ -726,27 +944,27 @@ namespace Scrim.Server {
             Action<string, ReactionCounts> onReaction = (type, counts) => {
                 string reactionJson = $"{{\"type\":\"reaction\",\"reaction\":\"{EscapeJson(type)}\",\"counts\":{{\"thumbsUp\":{counts.ThumbsUp},\"thumbsDown\":{counts.ThumbsDown},\"heart\":{counts.Heart}}}}}";
                 immediateChannel.Writer.TryWrite($"data: {reactionJson}\n\n");
-                var currentHistory = _historyService.GetHistory(_profileManager.CurrentProfile.SongHistoryLimit);
-                string historyJson = FormatHistoryJson(currentHistory);
+                var currentHistory = historySvc.GetHistory(_profileManager.CurrentProfile.SongHistoryLimit);
+                string historyJson = FormatHistoryJson(currentHistory, reactionSvc);
                 immediateChannel.Writer.TryWrite($"data: {{\"type\":\"history_update\",\"history\":{historyJson}}}\n\n");
             };
 
             Action<ReactionCounts> onResetReactions = (counts) => {
                 string resetJson = $"{{\"type\":\"reaction_reset\",\"counts\":{{\"thumbsUp\":{counts.ThumbsUp},\"thumbsDown\":{counts.ThumbsDown},\"heart\":{counts.Heart}}}}}";
                 immediateChannel.Writer.TryWrite($"data: {resetJson}\n\n");
-                var currentHistory = _historyService.GetHistory(_profileManager.CurrentProfile.SongHistoryLimit);
-                string historyJson = FormatHistoryJson(currentHistory);
+                var currentHistory = historySvc.GetHistory(_profileManager.CurrentProfile.SongHistoryLimit);
+                string historyJson = FormatHistoryJson(currentHistory, reactionSvc);
                 immediateChannel.Writer.TryWrite($"data: {{\"type\":\"history_update\",\"history\":{historyJson}}}\n\n");
             };
 
             Action<IReadOnlyList<SongHistoryItem>> onHistoryChanged = (items) => {
-                string historyJson = FormatHistoryJson(items.Take(_profileManager.CurrentProfile.SongHistoryLimit).ToList());
+                string historyJson = FormatHistoryJson(items.Take(_profileManager.CurrentProfile.SongHistoryLimit).ToList(), reactionSvc);
                 immediateChannel.Writer.TryWrite($"data: {{\"type\":\"history_update\",\"history\":{historyJson}}}\n\n");
             };
 
             Action onHistorySettings = () => {
-                var currentHistory = _historyService.GetHistory(_profileManager.CurrentProfile.SongHistoryLimit);
-                string historyJson = FormatHistoryJson(currentHistory);
+                var currentHistory = historySvc.GetHistory(_profileManager.CurrentProfile.SongHistoryLimit);
+                string historyJson = FormatHistoryJson(currentHistory, reactionSvc);
                 immediateChannel.Writer.TryWrite($"data: {{\"type\":\"history_update\",\"history\":{historyJson}}}\n\n");
             };
 
@@ -773,38 +991,47 @@ namespace Scrim.Server {
 
             string BuildStatsJson(bool isLive) {
                 var profile = _profileManager.CurrentProfile;
-                string formatStr = profile.AudioFormat?.ToUpperInvariant() ?? "MP3";
-                int bitrateVal = profile.Bitrate;
-                string streamMount = GetNormalizedMountPoint();
-                return $"{{\"type\":\"stats\",\"listeners\":{_hub.ActiveClientCount},\"isLive\":{(isLive ? "true" : "false")},\"format\":\"{EscapeJson(formatStr)}\",\"bitrate\":{bitrateVal},\"streamUrl\":\"/{streamMount}\",\"isPrivate\":false}}";
+                string formatStr = (stationConfig?.AudioFormat ?? profile.AudioFormat)?.ToUpperInvariant() ?? "MP3";
+                int bitrateVal = stationConfig?.Bitrate ?? profile.Bitrate;
+                string streamMount = stationConfig?.MountPoint?.Trim().Trim('/') ?? GetNormalizedMountPoint();
+                return $"{{\"type\":\"stats\",\"listeners\":{hub.ActiveClientCount},\"isLive\":{(isLive ? "true" : "false")},\"format\":\"{EscapeJson(formatStr)}\",\"bitrate\":{bitrateVal},\"streamUrl\":\"/{streamMount}\",\"isPrivate\":false}}";
             }
 
             string BuildQueueJson() {
-                var requests = _requestController.GetLiveQueue().Select(r => $"{{\"query\":\"{EscapeJson(r.Query)}\",\"dedication\":\"{EscapeJson(r.Dedication)}\",\"status\":\"{EscapeJson(r.Status)}\"}}");
+                var requests = reqCtrl.GetLiveQueue().Select(r => $"{{\"query\":\"{EscapeJson(r.Query)}\",\"dedication\":\"{EscapeJson(r.Dedication)}\",\"status\":\"{EscapeJson(r.Status)}\"}}");
                 return $"{{\"type\":\"queue\",\"requests\":[{string.Join(",", requests)}]}}";
             }
 
             string BuildBrandingJson() {
                 var profile = _profileManager.CurrentProfile;
                 var navLinksArray = string.Join(",", profile.CustomNavLinks.Select(l => $"{{\"label\":\"{EscapeJson(l.Label)}\",\"url\":\"{EscapeJson(l.Url)}\"}}"));
-                string themeStr = profile.WebTheme ?? "dark";
+                string themeStr = stationConfig?.WebTheme ?? profile.WebTheme ?? "dark";
                 string customThemeJson = GetCustomThemeJson(themeStr);
-                string streamMount = GetNormalizedMountPoint();
+                string streamMount = stationConfig?.MountPoint?.Trim().Trim('/') ?? GetNormalizedMountPoint();
                 string bannerUrl = GetEffectiveBannerUrl();
                 string logoUrl = GetEffectiveLogoUrl();
 
+                string stationName = stationConfig?.StationName ?? profile.StationName;
+                string pageTitle = stationConfig?.PageTitle ?? profile.PageTitle;
+                string showTitle = stationConfig?.ShowTitle ?? profile.ShowTitle;
+                string hostName = stationConfig?.HostName ?? profile.HostName;
+                string genreTag = stationConfig?.GenreTag ?? profile.GenreTag;
+                string tagline = stationConfig?.StationTagline ?? profile.StationTagline;
+                string accentColor = stationConfig?.AccentColor ?? profile.AccentColor;
+                bool enableSongRequests = stationConfig?.EnableSongRequests ?? profile.EnableSongRequests;
+
                 var activeRelay = _relayService?.ActivePassthroughStream;
-                string effectiveHost = activeRelay != null && !string.IsNullOrWhiteSpace(activeRelay.EffectiveDjName) ? activeRelay.EffectiveDjName : profile.HostName;
+                string effectiveHost = activeRelay != null && !string.IsNullOrWhiteSpace(activeRelay.EffectiveDjName) ? activeRelay.EffectiveDjName : hostName;
                 string effectiveLogo = activeRelay != null && !string.IsNullOrWhiteSpace(activeRelay.EffectiveAvatarUrl) ? activeRelay.EffectiveAvatarUrl : logoUrl;
 
                 string partyHubJson = activeRelay != null
-                    ? $",\"isPartyHub\":true,\"guestDj\":{{\"name\":\"{EscapeJson(activeRelay.EffectiveDjName)}\",\"avatarUrl\":\"{EscapeJson(activeRelay.EffectiveAvatarUrl)}\",\"bio\":\"{EscapeJson(activeRelay.OriginBio)}\",\"discord\":\"{EscapeJson(activeRelay.OriginDiscord)}\",\"twitch\":\"{EscapeJson(activeRelay.OriginTwitch)}\",\"twitter\":\"{EscapeJson(activeRelay.OriginTwitter)}\"}},\"hostDj\":{{\"name\":\"{EscapeJson(profile.HostName)}\",\"avatarUrl\":\"{EscapeJson(logoUrl)}\"}}"
-                    : $",\"isPartyHub\":false,\"hostDj\":{{\"name\":\"{EscapeJson(profile.HostName)}\",\"avatarUrl\":\"{EscapeJson(logoUrl)}\"}}";
+                    ? $",\"isPartyHub\":true,\"guestDj\":{{\"name\":\"{EscapeJson(activeRelay.EffectiveDjName)}\",\"avatarUrl\":\"{EscapeJson(activeRelay.EffectiveAvatarUrl)}\",\"bio\":\"{EscapeJson(activeRelay.OriginBio)}\",\"discord\":\"{EscapeJson(activeRelay.OriginDiscord)}\",\"twitch\":\"{EscapeJson(activeRelay.OriginTwitch)}\",\"twitter\":\"{EscapeJson(activeRelay.OriginTwitter)}\"}},\"hostDj\":{{\"name\":\"{EscapeJson(hostName)}\",\"avatarUrl\":\"{EscapeJson(logoUrl)}\"}}"
+                    : $",\"isPartyHub\":false,\"hostDj\":{{\"name\":\"{EscapeJson(hostName)}\",\"avatarUrl\":\"{EscapeJson(logoUrl)}\"}}";
 
                 string reactorsJson = BuildVisualizerReactorsJson();
                 string defaultVisMode = !string.IsNullOrWhiteSpace(profile.DefaultVisualizerMode) ? profile.DefaultVisualizerMode : "bars";
 
-                return $"{{\"type\":\"branding\",\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(effectiveHost)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(themeStr)}\",\"customThemeVariables\":{customThemeJson},\"enableDynamicBackdrop\":{(profile.EnableDynamicBackdrop ? "true" : "false")},\"broadcasterBio\":\"{EscapeJson(profile.BroadcasterBio)}\",\"socialDiscord\":\"{EscapeJson(profile.SocialDiscord)}\",\"socialTwitch\":\"{EscapeJson(profile.SocialTwitch)}\",\"socialTwitter\":\"{EscapeJson(profile.SocialTwitter)}\",\"scheduleDescription\":\"{EscapeJson(profile.ScheduleDescription)}\",\"logoUrl\":\"{EscapeJson(effectiveLogo)}\",\"bannerUrl\":\"{EscapeJson(bannerUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}],\"streamUrl\":\"/{streamMount}\",\"isPrivate\":false,\"restrictToLocal\":{(profile.RestrictToLocalNetwork ? "true" : "false")}{partyHubJson},\"visualizerReactors\":{reactorsJson},\"defaultVisualizerMode\":\"{EscapeJson(defaultVisMode)}\"}}";
+                return $"{{\"type\":\"branding\",\"stationName\":\"{EscapeJson(stationName)}\",\"pageTitle\":\"{EscapeJson(pageTitle)}\",\"showTitle\":\"{EscapeJson(showTitle)}\",\"hostName\":\"{EscapeJson(effectiveHost)}\",\"genreTag\":\"{EscapeJson(genreTag)}\",\"tagline\":\"{EscapeJson(tagline)}\",\"accentColor\":\"{EscapeJson(accentColor)}\",\"theme\":\"{EscapeJson(themeStr)}\",\"customThemeVariables\":{customThemeJson},\"enableDynamicBackdrop\":{(profile.EnableDynamicBackdrop ? "true" : "false")},\"enableSongRequests\":{(enableSongRequests ? "true" : "false")},\"broadcasterBio\":\"{EscapeJson(profile.BroadcasterBio)}\",\"socialDiscord\":\"{EscapeJson(profile.SocialDiscord)}\",\"socialTwitch\":\"{EscapeJson(profile.SocialTwitch)}\",\"socialTwitter\":\"{EscapeJson(profile.SocialTwitter)}\",\"scheduleDescription\":\"{EscapeJson(profile.ScheduleDescription)}\",\"logoUrl\":\"{EscapeJson(effectiveLogo)}\",\"bannerUrl\":\"{EscapeJson(bannerUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}],\"streamUrl\":\"/{streamMount}\",\"isPrivate\":false,\"restrictToLocal\":{(profile.RestrictToLocalNetwork ? "true" : "false")}{partyHubJson},\"visualizerReactors\":{reactorsJson},\"defaultVisualizerMode\":\"{EscapeJson(defaultVisMode)}\"}}";
             }
 
             EventHandler<MediaMetadata> onMetadata = (_, meta) => {
@@ -815,18 +1042,18 @@ namespace Scrim.Server {
                 immediateChannel.Writer.TryWrite($"data: {BuildStatsJson(isLive)}\n\n");
             };
 
-            _chatService.MessagePosted += onMessage;
-            _chatService.MessageRemoved += onMessageRemoved;
-            _chatService.ChatCleared += onClear;
-            _chatService.ChatStatusChanged += onStatus;
-            _chatService.NicknameAssigned += onAssign;
-            _chatService.UserBanned += onBanned;
-            _chatService.UserUnbanned += onUnbanned;
-            _reactionService.ReactionReceived += onReaction;
-            _reactionService.CountsReset += onResetReactions;
-            _historyService.HistoryChanged += onHistoryChanged;
+            chatSvc.MessagePosted += onMessage;
+            chatSvc.MessageRemoved += onMessageRemoved;
+            chatSvc.ChatCleared += onClear;
+            chatSvc.ChatStatusChanged += onStatus;
+            chatSvc.NicknameAssigned += onAssign;
+            chatSvc.UserBanned += onBanned;
+            chatSvc.UserUnbanned += onUnbanned;
+            reactionSvc.ReactionReceived += onReaction;
+            reactionSvc.CountsReset += onResetReactions;
+            historySvc.HistoryChanged += onHistoryChanged;
             _metadataService.MetadataChanged += onMetadata;
-            _hub.BroadcastingStateChanged += onBroadcastChanged;
+            hub.BroadcastingStateChanged += onBroadcastChanged;
             HistorySettingsChanged += onHistorySettings;
             BrandingSettingsChanged += onBrandingSettings;
 
@@ -860,21 +1087,22 @@ namespace Scrim.Server {
                 }
 
                 // Initial Reaction State Push
-                var initialCounts = _reactionService.CurrentCounts;
+                var initialCounts = reactionSvc.CurrentCounts;
                 await SendEvent($"data: {{\"type\":\"reaction_init\",\"counts\":{{\"thumbsUp\":{initialCounts.ThumbsUp},\"thumbsDown\":{initialCounts.ThumbsDown},\"heart\":{initialCounts.Heart}}}}}\n\n");
 
                 // Initial Song History Push
-                var initialHistory = _historyService.GetHistory(_profileManager.CurrentProfile.SongHistoryLimit);
-                await SendEvent($"data: {{\"type\":\"history_init\",\"history\":{FormatHistoryJson(initialHistory)}}}\n\n");
+                var initialHistory = historySvc.GetHistory(_profileManager.CurrentProfile.SongHistoryLimit);
+                await SendEvent($"data: {{\"type\":\"history_init\",\"history\":{FormatHistoryJson(initialHistory, reactionSvc)}}}\n\n");
 
                 // Initial Chat State Push
-                var recentChat = _chatService.GetRecentMessages().Select(m =>
+                bool isChatEnabled = stationConfig?.EnableChat ?? _profileManager.CurrentProfile.EnableChat;
+                var recentChat = chatSvc.GetRecentMessages().Select(m =>
                     $"{{\"id\":\"{EscapeJson(m.Id)}\",\"sender\":\"{EscapeJson(m.Sender)}\",\"text\":\"{EscapeJson(m.Text)}\",\"timestamp\":\"{m.Timestamp:o}\",\"isHost\":{(m.IsHost ? "true" : "false")},\"color\":\"{EscapeJson(m.Color)}\"}}"
                 );
-                await SendEvent($"data: {{\"type\":\"chat_init\",\"enabled\":{(_profileManager.CurrentProfile.EnableChat ? "true" : "false")},\"messages\":[{string.Join(",", recentChat)}]}}\n\n");
+                await SendEvent($"data: {{\"type\":\"chat_init\",\"enabled\":{(isChatEnabled ? "true" : "false")},\"messages\":[{string.Join(",", recentChat)}]}}\n\n");
 
                 // Initial Instant Stats, Metadata, Queue, and Branding Push
-                await SendEvent($"data: {BuildStatsJson(_hub.IsBroadcasting)}\n\n");
+                await SendEvent($"data: {BuildStatsJson(hub.IsBroadcasting)}\n\n");
                 await SendEvent($"data: {BuildMetadataJson(_metadataService.CurrentMetadata)}\n\n");
                 await SendEvent($"data: {BuildQueueJson()}\n\n");
                 await SendEvent($"data: {BuildBrandingJson()}\n\n");
@@ -897,7 +1125,7 @@ namespace Scrim.Server {
                         while (!token.IsCancellationRequested) {
                             await Task.Delay(2000, token);
                             await SendEvent($"data: {BuildMetadataJson(_metadataService.CurrentMetadata)}\n\n");
-                            await SendEvent($"data: {BuildStatsJson(_hub.IsBroadcasting)}\n\n");
+                            await SendEvent($"data: {BuildStatsJson(hub.IsBroadcasting)}\n\n");
                             await SendEvent($"data: {BuildQueueJson()}\n\n");
                             await SendEvent($"data: {BuildBrandingJson()}\n\n");
                         }
@@ -907,18 +1135,18 @@ namespace Scrim.Server {
                 await Task.WhenAny(immediateTask, periodicTask);
             } catch {
             } finally {
-                _chatService.MessagePosted -= onMessage;
-                _chatService.MessageRemoved -= onMessageRemoved;
-                _chatService.ChatCleared -= onClear;
-                _chatService.ChatStatusChanged -= onStatus;
-                _chatService.NicknameAssigned -= onAssign;
-                _chatService.UserBanned -= onBanned;
-                _chatService.UserUnbanned -= onUnbanned;
-                _reactionService.ReactionReceived -= onReaction;
-                _reactionService.CountsReset -= onResetReactions;
-                _historyService.HistoryChanged -= onHistoryChanged;
+                chatSvc.MessagePosted -= onMessage;
+                chatSvc.MessageRemoved -= onMessageRemoved;
+                chatSvc.ChatCleared -= onClear;
+                chatSvc.ChatStatusChanged -= onStatus;
+                chatSvc.NicknameAssigned -= onAssign;
+                chatSvc.UserBanned -= onBanned;
+                chatSvc.UserUnbanned -= onUnbanned;
+                reactionSvc.ReactionReceived -= onReaction;
+                reactionSvc.CountsReset -= onResetReactions;
+                historySvc.HistoryChanged -= onHistoryChanged;
                 _metadataService.MetadataChanged -= onMetadata;
-                _hub.BroadcastingStateChanged -= onBroadcastChanged;
+                hub.BroadcastingStateChanged -= onBroadcastChanged;
                 HistorySettingsChanged -= onHistorySettings;
                 BrandingSettingsChanged -= onBrandingSettings;
                 PollChanged -= onPoll;
@@ -936,21 +1164,23 @@ namespace Scrim.Server {
                 response.Headers.Add("Access-Control-Allow-Origin", "*");
                 string rawClientId = context.Request.QueryString["clientId"] ?? "";
                 string userHash = ComputeUserHash(context, rawClientId);
-                bool isBanned = _chatService.IsUserBanned(userHash);
-                bool isEnabled = _profileManager.CurrentProfile.EnableChat;
+                var station = ResolveStationPipeline(context);
+                var chatSvc = station?.ChatService ?? _chatService;
+                bool isBanned = chatSvc.IsUserBanned(userHash);
+                bool isEnabled = station?.Config.EnableChat ?? _profileManager.CurrentProfile.EnableChat;
                 var blacklist = _profileManager.CurrentProfile.NicknameBlacklist;
                 string blacklistJson = string.Join(",", blacklist.Select(b => $"\"{EscapeJson(b)}\""));
 
-                string hostName = _profileManager.CurrentProfile.HostName;
+                string hostName = station?.Config.HostName ?? _profileManager.CurrentProfile.HostName;
                 if (!string.IsNullOrWhiteSpace(hostName)) {
-                    _chatService.ReserveHostNickname(hostName);
+                    chatSvc.ReserveHostNickname(hostName);
                 }
 
                 // Return taken nicknames for other users so the client can ensure uniqueness
-                var taken = _chatService.GetClaimedNicknames(excludeUserId: userHash);
+                var taken = chatSvc.GetClaimedNicknames(excludeUserId: userHash);
                 string takenJson = string.Join(",", taken.Select(n => $"\"{EscapeJson(n)}\""));
 
-                var messages = _chatService.GetRecentMessages().Select(m => 
+                var messages = chatSvc.GetRecentMessages().Select(m => 
                     $"{{\"id\":\"{EscapeJson(m.Id)}\",\"sender\":\"{EscapeJson(m.Sender)}\",\"text\":\"{EscapeJson(m.Text)}\",\"timestamp\":\"{m.Timestamp:o}\",\"isHost\":{(m.IsHost ? "true" : "false")},\"color\":\"{EscapeJson(m.Color)}\"}}"
                 );
                 string json = $"{{\"enabled\":{(isEnabled ? "true" : "false")},\"isBanned\":{(isBanned ? "true" : "false")},\"blacklist\":[{blacklistJson}],\"takenNicknames\":[{takenJson}],\"messages\":[{string.Join(",", messages)}]}}";
@@ -966,7 +1196,10 @@ namespace Scrim.Server {
 
         private void HandleChatPostRequest(HttpListenerContext context) {
             try {
-                if (!_profileManager.CurrentProfile.EnableChat) {
+                var station = ResolveStationPipeline(context);
+                var chatSvc = station?.ChatService ?? _chatService;
+                bool isEnabled = station?.Config.EnableChat ?? _profileManager.CurrentProfile.EnableChat;
+                if (!isEnabled) {
                     context.Response.StatusCode = 403;
                     byte[] err = System.Text.Encoding.UTF8.GetBytes("{\"error\":\"Chat is currently disabled\"}");
                     context.Response.ContentType = "application/json; charset=utf-8";
@@ -1011,7 +1244,7 @@ namespace Scrim.Server {
 
                 string userHash = ComputeUserHash(context, rawClientId);
 
-                if (_chatService.IsUserBanned(userHash)) {
+                if (chatSvc.IsUserBanned(userHash)) {
                     context.Response.StatusCode = 403;
                     byte[] err = System.Text.Encoding.UTF8.GetBytes("{\"error\":\"You have been banned from sending messages in this chat.\",\"isBanned\":true}");
                     context.Response.ContentType = "application/json; charset=utf-8";
@@ -1020,7 +1253,7 @@ namespace Scrim.Server {
                     return;
                 }
 
-                if (!_chatService.IsNicknameAllowed(sender, _profileManager.CurrentProfile.NicknameBlacklist)) {
+                if (!chatSvc.IsNicknameAllowed(sender, _profileManager.CurrentProfile.NicknameBlacklist)) {
                     context.Response.StatusCode = 400;
                     byte[] err = System.Text.Encoding.UTF8.GetBytes("{\"error\":\"This nickname is not permitted on this station\"}");
                     context.Response.ContentType = "application/json; charset=utf-8";
@@ -1029,12 +1262,12 @@ namespace Scrim.Server {
                     return;
                 }
 
-                string hostName = _profileManager.CurrentProfile.HostName;
+                string hostName = station?.Config.HostName ?? _profileManager.CurrentProfile.HostName;
                 if (!string.IsNullOrWhiteSpace(hostName)) {
-                    _chatService.ReserveHostNickname(hostName);
+                    chatSvc.ReserveHostNickname(hostName);
                 }
 
-                if (!_chatService.TryClaimNickname(sender, userHash, isHost: false, out string claimError)) {
+                if (!chatSvc.TryClaimNickname(sender, userHash, isHost: false, out string claimError)) {
                     context.Response.StatusCode = 400;
                     byte[] err = System.Text.Encoding.UTF8.GetBytes($"{{\"error\":\"{EscapeJson(claimError)}\",\"nameTaken\":true}}");
                     context.Response.ContentType = "application/json; charset=utf-8";
@@ -1045,7 +1278,7 @@ namespace Scrim.Server {
 
                 ChatMessage? msg = null;
                 if (!string.IsNullOrWhiteSpace(text)) {
-                    msg = _chatService.AddMessage(sender, text, isHost: false, userId: userHash);
+                    msg = chatSvc.AddMessage(sender, text, isHost: false, userId: userHash);
                 }
 
                 context.Response.ContentType = "application/json; charset=utf-8";
@@ -1083,8 +1316,11 @@ namespace Scrim.Server {
                 string rawClientId = context.Request.QueryString["clientId"] ?? "";
                 string userHash = ComputeUserHash(context, rawClientId);
 
-                var counts = _reactionService.CurrentCounts;
-                string? userReaction = _reactionService.GetUserReaction(userHash);
+                var station = ResolveStationPipeline(context);
+                var reactionSvc = station?.ReactionService ?? _reactionService;
+
+                var counts = reactionSvc.CurrentCounts;
+                string? userReaction = reactionSvc.GetUserReaction(userHash);
                 string userReactionJson = userReaction != null ? $"\"{EscapeJson(userReaction)}\"" : "null";
                 string json = $"{{\"thumbsUp\":{counts.ThumbsUp},\"thumbsDown\":{counts.ThumbsDown},\"heart\":{counts.Heart},\"userReaction\":{userReactionJson}}}";
                 byte[] buffer = System.Text.Encoding.UTF8.GetBytes(json);
@@ -1108,7 +1344,10 @@ namespace Scrim.Server {
                 string rawClientId = clientMatch.Success ? clientMatch.Groups[1].Value : (context.Request.QueryString["clientId"] ?? "");
                 string userHash = ComputeUserHash(context, rawClientId);
 
-                var counts = _reactionService.AddOrSwitchReaction(userHash, reactionType, out string? activeReaction);
+                var station = ResolveStationPipeline(context);
+                var reactionSvc = station?.ReactionService ?? _reactionService;
+
+                var counts = reactionSvc.AddOrSwitchReaction(userHash, reactionType, out string? activeReaction);
 
                 context.Response.ContentType = "application/json; charset=utf-8";
                 context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
@@ -1130,10 +1369,14 @@ namespace Scrim.Server {
                 string body = reader.ReadToEnd();
                 var keyMatch = System.Text.RegularExpressions.Regex.Match(body, "\"songKey\"\\s*:\\s*\"(.*?)\"");
                 string songKey = keyMatch.Success ? keyMatch.Groups[1].Value : (context.Request.QueryString["songKey"] ?? "");
+
+                var station = ResolveStationPipeline(context);
+                var reactionSvc = station?.ReactionService ?? _reactionService;
+
                 if (!string.IsNullOrWhiteSpace(songKey)) {
-                    _reactionService.ResetSong(songKey);
+                    reactionSvc.ResetSong(songKey);
                 } else {
-                    _reactionService.Reset();
+                    reactionSvc.Reset();
                 }
                 context.Response.ContentType = "application/json; charset=utf-8";
                 context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
@@ -1156,8 +1399,12 @@ namespace Scrim.Server {
                 if (int.TryParse(context.Request.QueryString["limit"], out int qLimit) && qLimit > 0) {
                     limit = qLimit;
                 }
-                var items = _historyService.GetHistory(limit);
-                string json = FormatHistoryJson(items);
+                var station = ResolveStationPipeline(context);
+                var historySvc = station?.HistoryService ?? _historyService;
+                var reactionSvc = station?.ReactionService ?? _reactionService;
+
+                var items = historySvc.GetHistory(limit);
+                string json = FormatHistoryJson(items, reactionSvc);
                 byte[] buffer = System.Text.Encoding.UTF8.GetBytes(json);
                 response.ContentLength64 = buffer.Length;
                 response.OutputStream.Write(buffer, 0, buffer.Length);
@@ -1170,7 +1417,9 @@ namespace Scrim.Server {
 
         private void HandleHistoryClearRequest(HttpListenerContext context) {
             try {
-                _historyService.Clear();
+                var station = ResolveStationPipeline(context);
+                var historySvc = station?.HistoryService ?? _historyService;
+                historySvc.Clear();
                 context.Response.ContentType = "application/json; charset=utf-8";
                 context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
                 context.Response.StatusCode = 200;
@@ -1183,11 +1432,12 @@ namespace Scrim.Server {
             }
         }
 
-        private string FormatHistoryJson(IReadOnlyList<SongHistoryItem> items) {
+        private string FormatHistoryJson(IReadOnlyList<SongHistoryItem> items, ISongReactionService? reactionService = null) {
+            var reactionSvc = reactionService ?? _reactionService;
             var elements = items.Select(item => {
                 string artUrl = !string.IsNullOrEmpty(item.AlbumArtUrl) ? item.AlbumArtUrl : "";
                 bool hasArt = !string.IsNullOrEmpty(artUrl) || (item.AlbumArt != null && item.AlbumArt.Length > 0);
-                var counts = _reactionService.GetSongReactions(item.Title, item.Artist);
+                var counts = reactionSvc.GetSongReactions(item.Title, item.Artist);
                 return $"{{\"id\":\"{item.Id}\",\"title\":\"{EscapeJson(item.Title)}\",\"artist\":\"{EscapeJson(item.Artist)}\",\"album\":\"{EscapeJson(item.Album)}\",\"playedAt\":\"{EscapeJson(item.PlayedAtFormatted)}\",\"hasArt\":{(hasArt ? "true" : "false")},\"albumArtUrl\":\"{EscapeJson(artUrl)}\",\"thumbsUp\":{counts.ThumbsUp},\"thumbsDown\":{counts.ThumbsDown},\"heart\":{counts.Heart}}}";
             });
             return "[" + string.Join(",", elements) + "]";
@@ -1294,26 +1544,38 @@ namespace Scrim.Server {
         private void HandleBrandingRequest(HttpListenerContext context) {
             try {
                 var profile = _profileManager.CurrentProfile;
+                var station = ResolveStationPipeline(context);
+                var stationConfig = station?.Config;
+
                 var navLinksArray = string.Join(",", profile.CustomNavLinks.Select(l => $"{{\"label\":\"{EscapeJson(l.Label)}\",\"url\":\"{EscapeJson(l.Url)}\"}}"));
-                string themeStr = profile.WebTheme ?? "dark";
+                string themeStr = stationConfig?.WebTheme ?? profile.WebTheme ?? "dark";
                 string customThemeJson = GetCustomThemeJson(themeStr);
                 bool isRestricted = profile.RestrictToLocalNetwork && !IsLocalNetworkClient(context);
-                string streamMount = GetNormalizedMountPoint();
+                string streamMount = stationConfig?.MountPoint?.Trim().Trim('/') ?? GetNormalizedMountPoint();
                 string bannerUrl = GetEffectiveBannerUrl();
                 string logoUrl = GetEffectiveLogoUrl();
 
+                string stationName = stationConfig?.StationName ?? profile.StationName;
+                string pageTitle = stationConfig?.PageTitle ?? profile.PageTitle;
+                string showTitle = stationConfig?.ShowTitle ?? profile.ShowTitle;
+                string hostName = stationConfig?.HostName ?? profile.HostName;
+                string genreTag = stationConfig?.GenreTag ?? profile.GenreTag;
+                string tagline = stationConfig?.StationTagline ?? profile.StationTagline;
+                string accentColor = stationConfig?.AccentColor ?? profile.AccentColor;
+                bool enableSongRequests = stationConfig?.EnableSongRequests ?? profile.EnableSongRequests;
+
                 var activeRelay = _relayService?.ActivePassthroughStream;
-                string effectiveHost = activeRelay != null && !string.IsNullOrWhiteSpace(activeRelay.EffectiveDjName) ? activeRelay.EffectiveDjName : profile.HostName;
+                string effectiveHost = activeRelay != null && !string.IsNullOrWhiteSpace(activeRelay.EffectiveDjName) ? activeRelay.EffectiveDjName : hostName;
                 string effectiveLogo = activeRelay != null && !string.IsNullOrWhiteSpace(activeRelay.EffectiveAvatarUrl) ? activeRelay.EffectiveAvatarUrl : logoUrl;
 
                 string partyHubJson = activeRelay != null
-                    ? $",\"isPartyHub\":true,\"guestDj\":{{\"name\":\"{EscapeJson(activeRelay.EffectiveDjName)}\",\"avatarUrl\":\"{EscapeJson(activeRelay.EffectiveAvatarUrl)}\",\"bio\":\"{EscapeJson(activeRelay.OriginBio)}\",\"discord\":\"{EscapeJson(activeRelay.OriginDiscord)}\",\"twitch\":\"{EscapeJson(activeRelay.OriginTwitch)}\",\"twitter\":\"{EscapeJson(activeRelay.OriginTwitter)}\"}},\"hostDj\":{{\"name\":\"{EscapeJson(profile.HostName)}\",\"avatarUrl\":\"{EscapeJson(logoUrl)}\"}}"
-                    : $",\"isPartyHub\":false,\"hostDj\":{{\"name\":\"{EscapeJson(profile.HostName)}\",\"avatarUrl\":\"{EscapeJson(logoUrl)}\"}}";
+                    ? $",\"isPartyHub\":true,\"guestDj\":{{\"name\":\"{EscapeJson(activeRelay.EffectiveDjName)}\",\"avatarUrl\":\"{EscapeJson(activeRelay.EffectiveAvatarUrl)}\",\"bio\":\"{EscapeJson(activeRelay.OriginBio)}\",\"discord\":\"{EscapeJson(activeRelay.OriginDiscord)}\",\"twitch\":\"{EscapeJson(activeRelay.OriginTwitch)}\",\"twitter\":\"{EscapeJson(activeRelay.OriginTwitter)}\"}},\"hostDj\":{{\"name\":\"{EscapeJson(hostName)}\",\"avatarUrl\":\"{EscapeJson(logoUrl)}\"}}"
+                    : $",\"isPartyHub\":false,\"hostDj\":{{\"name\":\"{EscapeJson(hostName)}\",\"avatarUrl\":\"{EscapeJson(logoUrl)}\"}}";
 
                 string reactorsJson = BuildVisualizerReactorsJson();
                 string defaultVisMode = !string.IsNullOrWhiteSpace(profile.DefaultVisualizerMode) ? profile.DefaultVisualizerMode : "bars";
 
-                string json = $"{{\"stationName\":\"{EscapeJson(profile.StationName)}\",\"pageTitle\":\"{EscapeJson(profile.PageTitle)}\",\"showTitle\":\"{EscapeJson(profile.ShowTitle)}\",\"hostName\":\"{EscapeJson(effectiveHost)}\",\"genreTag\":\"{EscapeJson(profile.GenreTag)}\",\"tagline\":\"{EscapeJson(profile.StationTagline)}\",\"accentColor\":\"{EscapeJson(profile.AccentColor)}\",\"theme\":\"{EscapeJson(themeStr)}\",\"customThemeVariables\":{customThemeJson},\"enableDynamicBackdrop\":{(profile.EnableDynamicBackdrop ? "true" : "false")},\"broadcasterBio\":\"{EscapeJson(profile.BroadcasterBio)}\",\"socialDiscord\":\"{EscapeJson(profile.SocialDiscord)}\",\"socialTwitch\":\"{EscapeJson(profile.SocialTwitch)}\",\"socialTwitter\":\"{EscapeJson(profile.SocialTwitter)}\",\"scheduleDescription\":\"{EscapeJson(profile.ScheduleDescription)}\",\"logoUrl\":\"{EscapeJson(effectiveLogo)}\",\"bannerUrl\":\"{EscapeJson(bannerUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}],\"streamUrl\":\"/{streamMount}\",\"isPrivate\":{(isRestricted ? "true" : "false")},\"restrictToLocal\":{(profile.RestrictToLocalNetwork ? "true" : "false")}{partyHubJson},\"visualizerReactors\":{reactorsJson},\"defaultVisualizerMode\":\"{EscapeJson(defaultVisMode)}\"}}";
+                string json = $"{{\"stationName\":\"{EscapeJson(stationName)}\",\"pageTitle\":\"{EscapeJson(pageTitle)}\",\"showTitle\":\"{EscapeJson(showTitle)}\",\"hostName\":\"{EscapeJson(effectiveHost)}\",\"genreTag\":\"{EscapeJson(genreTag)}\",\"tagline\":\"{EscapeJson(tagline)}\",\"accentColor\":\"{EscapeJson(accentColor)}\",\"theme\":\"{EscapeJson(themeStr)}\",\"customThemeVariables\":{customThemeJson},\"enableDynamicBackdrop\":{(profile.EnableDynamicBackdrop ? "true" : "false")},\"enableSongRequests\":{(enableSongRequests ? "true" : "false")},\"broadcasterBio\":\"{EscapeJson(profile.BroadcasterBio)}\",\"socialDiscord\":\"{EscapeJson(profile.SocialDiscord)}\",\"socialTwitch\":\"{EscapeJson(profile.SocialTwitch)}\",\"socialTwitter\":\"{EscapeJson(profile.SocialTwitter)}\",\"scheduleDescription\":\"{EscapeJson(profile.ScheduleDescription)}\",\"logoUrl\":\"{EscapeJson(effectiveLogo)}\",\"bannerUrl\":\"{EscapeJson(bannerUrl)}\",\"navLinks\":\"{EscapeJson(profile.NavLinks)}\",\"customNavLinks\":[{navLinksArray}],\"streamUrl\":\"/{streamMount}\",\"isPrivate\":{(isRestricted ? "true" : "false")},\"restrictToLocal\":{(profile.RestrictToLocalNetwork ? "true" : "false")}{partyHubJson},\"visualizerReactors\":{reactorsJson},\"defaultVisualizerMode\":\"{EscapeJson(defaultVisMode)}\"}}";
                 byte[] buffer = System.Text.Encoding.UTF8.GetBytes(json);
                 context.Response.ContentType = "application/json";
                 context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
@@ -2031,6 +2293,18 @@ namespace Scrim.Server {
 
         private void HandleSongRequest(HttpListenerContext context) {
             try {
+                context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
+                var station = ResolveStationPipeline(context);
+                bool isRequestsEnabled = station?.Config.EnableSongRequests ?? _profileManager.CurrentProfile.EnableSongRequests;
+
+                if (!isRequestsEnabled) {
+                    context.Response.StatusCode = 403;
+                    context.Response.ContentType = "application/json";
+                    byte[] errBytes = System.Text.Encoding.UTF8.GetBytes("{\"error\":\"Song requests are currently paused by the station host.\",\"enabled\":false}");
+                    context.Response.OutputStream.Write(errBytes, 0, errBytes.Length);
+                    return;
+                }
+
                 using var reader = new StreamReader(context.Request.InputStream, System.Text.Encoding.UTF8);
                 string body = reader.ReadToEnd();
                 var queryMatch = System.Text.RegularExpressions.Regex.Match(body, "\"query\"\\s*:\\s*\"(.*?)\"");
@@ -2043,9 +2317,9 @@ namespace Scrim.Server {
                 dedication = System.Text.RegularExpressions.Regex.Unescape(dedication);
 
                 if (!string.IsNullOrWhiteSpace(query)) {
-                    _requestController.SubmitRequest(query, dedication);
+                    var reqCtrl = station?.RequestController ?? _requestController;
+                    reqCtrl.SubmitRequest(query, dedication);
                 }
-                context.Response.Headers.Add("Access-Control-Allow-Origin", "*");
                 context.Response.StatusCode = 200;
             } catch {
                 context.Response.StatusCode = 400;

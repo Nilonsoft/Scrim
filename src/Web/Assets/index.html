@@ -4,17 +4,83 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title id="webTitle">Global Indie Radio - Live Broadcast</title>
-    <link rel="manifest" href="/manifest.webmanifest">
+    <link id="pwaManifestLink" rel="manifest" href="/manifest.webmanifest">
     <link rel="icon" type="image/svg+xml" href="/assets/icon.svg">
     <link rel="apple-touch-icon" href="/assets/icon-192.png">
     <meta name="theme-color" content="#0d0f12">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="Scrim">
+    <meta id="appleAppTitle" name="apple-mobile-web-app-title" content="Scrim">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/assets/player.css">
+    <style>
+        .station-channel-dial {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-right: 12px;
+            background: rgba(0, 0, 0, 0.35);
+            border: 1px solid var(--card-border, #1e293b);
+            padding: 3px 8px;
+            border-radius: 999px;
+            backdrop-filter: blur(8px);
+        }
+        .channel-dial-label {
+            font-size: 9px;
+            font-weight: 800;
+            letter-spacing: 0.8px;
+            color: var(--text-dim, #64748b);
+            text-transform: uppercase;
+        }
+        .channel-dial-pills {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .channel-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-bright, #f1f5f9);
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .channel-pill:hover {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(255, 255, 255, 0.25);
+        }
+        .channel-pill.active {
+            background: var(--accent-color, #00d2ff);
+            color: var(--accent-contrast, #050b14);
+            border-color: var(--accent-color, #00d2ff);
+            box-shadow: 0 0 12px var(--accent-glow-subtle, rgba(0, 210, 255, 0.4));
+        }
+        .channel-pill-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #94a3b8;
+        }
+        .channel-pill-dot.live {
+            background: #10b981;
+            box-shadow: 0 0 6px #10b981;
+        }
+        .channel-pill.active .channel-pill-dot.live {
+            background: #ffffff;
+            box-shadow: 0 0 6px #ffffff;
+        }
+        .channel-pill-dot.offline {
+            background: #64748b;
+        }
+    </style>
 </head>
 <body>
     <!-- Dynamic Ambient Backdrop (Driven by album art dominant colors when enabled by owner) -->
@@ -52,6 +118,10 @@
         </div>
 
         <div class="header-right">
+            <div class="station-channel-dial" id="stationChannelDial" style="display: none;">
+                <span class="channel-dial-label">CHANNELS</span>
+                <div class="channel-dial-pills" id="channelDialPills"></div>
+            </div>
             <nav class="nav-links" id="navLinksContainer"></nav>
             <div class="header-icons">
                 <button class="icon-btn tv-mode-btn" id="tvModeBtn" title="Party / TV Full-Screen Mode" aria-label="Toggle TV Mode">
@@ -295,12 +365,18 @@
             </div>
 
             <!-- REQUEST A SONG -->
-            <div class="sidebar-card">
-                <h3 class="sidebar-title">REQUEST A SONG</h3>
-                <form id="requestForm" class="request-form">
+            <div class="sidebar-card" id="songRequestCard">
+                <div class="chat-card-header">
+                    <h3 class="sidebar-title" style="margin-bottom: 0;">REQUEST A SONG</h3>
+                    <span class="chat-status-pill" id="requestStatusPill">OPEN</span>
+                </div>
+                <div class="chat-disabled-banner" id="requestDisabledBanner" style="display: none; margin-top: 8px;">
+                    Song requests are currently paused by the station host
+                </div>
+                <form id="requestForm" class="request-form" style="margin-top: 8px;">
                     <input type="text" id="requestInput" class="request-input" placeholder="Enter Song Title & Artist..." required autocomplete="off">
                     <input type="text" id="dedicationInput" class="request-input request-dedication-input" placeholder="Dedicate to someone (e.g. Maria, Mom, Crew)..." autocomplete="off" maxlength="60">
-                    <button type="submit" class="submit-request-btn">SUBMIT REQUEST</button>
+                    <button type="submit" class="submit-request-btn" id="submitRequestBtn">SUBMIT REQUEST</button>
                 </form>
                 <div id="requestSuccess" class="request-success-msg" style="display: none;">Request & dedication submitted to DJ!</div>
             </div>

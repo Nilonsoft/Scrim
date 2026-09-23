@@ -33,6 +33,9 @@ namespace Scrim.Configuration {
 
         // Song History Configuration
         public bool EnableSongHistory { get; set; } = true;
+
+        // Song Request Configuration
+        public bool EnableSongRequests { get; set; } = true;
         public int SongHistoryLimit { get; set; } = 10;
 
         // Web Player Branding Customization
@@ -99,6 +102,96 @@ namespace Scrim.Configuration {
         public DeadAirConfig DeadAir { get; set; } = new();
         public RotationRulesConfig RotationRules { get; set; } = new();
         public MultiEncoderConfig MultiEncoder { get; set; } = new();
+
+        // Multi-Station Architecture
+        public System.Collections.Generic.List<StationConfig> Stations { get; set; } = new();
+        public string ActiveStationId { get; set; } = "";
+
+        public StationConfig EnsureDefaultStation() {
+            if (Stations == null) {
+                Stations = new System.Collections.Generic.List<StationConfig>();
+            }
+            if (Stations.Count == 0) {
+                var defaultStation = new StationConfig {
+                    Id = "default-station",
+                    Name = string.IsNullOrWhiteSpace(StationName) ? "Main Broadcast" : StationName,
+                    MountPoint = string.IsNullOrWhiteSpace(StreamMountPoint) ? "stream" : StreamMountPoint.Trim().TrimStart('/'),
+                    SourceType = TargetProcessId != 0 ? AudioSourceType.ProcessLoopback : AudioSourceType.SystemMix,
+                    TargetProcessId = TargetProcessId,
+                    TargetProcessName = TargetProcessName,
+                    CaptureDeviceId = CaptureDeviceId,
+                    CaptureDeviceName = CaptureDeviceName,
+                    AppStreamVolume = AppStreamVolume,
+                    StationName = StationName,
+                    PageTitle = PageTitle,
+                    ShowTitle = ShowTitle,
+                    HostName = HostName,
+                    StationTagline = StationTagline,
+                    GenreTag = GenreTag,
+                    AccentColor = AccentColor,
+                    WebTheme = WebTheme,
+                    LogoUrl = LogoUrl,
+                    BannerUrl = BannerUrl,
+                    BroadcasterBio = BroadcasterBio,
+                    ScheduleDescription = ScheduleDescription,
+                    EnableChat = EnableChat,
+                    EnableSongRequests = EnableSongRequests,
+                    EnableSongHistory = EnableSongHistory,
+                    SongHistoryLimit = SongHistoryLimit,
+                    AudioFormat = AudioFormat,
+                    Bitrate = Bitrate
+                };
+                Stations.Add(defaultStation);
+                ActiveStationId = defaultStation.Id;
+            }
+            if (string.IsNullOrEmpty(ActiveStationId) || !Stations.Exists(s => s.Id == ActiveStationId)) {
+                ActiveStationId = Stations[0].Id;
+            }
+            return Stations.Find(s => s.Id == ActiveStationId) ?? Stations[0];
+        }
+    }
+
+    public enum AudioSourceType {
+        ProcessLoopback,
+        BuiltInPlayer,
+        AudioDevice,
+        SystemMix
+    }
+
+    public class StationConfig {
+        public string Id { get; set; } = Guid.NewGuid().ToString("N");
+        public string Name { get; set; } = "Main Station";
+        public string MountPoint { get; set; } = "stream";
+
+        // Audio Input & Routing
+        public AudioSourceType SourceType { get; set; } = AudioSourceType.ProcessLoopback;
+        public int TargetProcessId { get; set; }
+        public string TargetProcessName { get; set; } = "";
+        public string CaptureDeviceId { get; set; } = "";
+        public string CaptureDeviceName { get; set; } = "";
+        public int AppStreamVolume { get; set; } = 100;
+
+        // Branding & Web Presentation
+        public string StationName { get; set; } = "GLOBAL INDIE RADIO";
+        public string PageTitle { get; set; } = "Global Indie Radio - Live Broadcast";
+        public string ShowTitle { get; set; } = "Late Night Indie Drive";
+        public string HostName { get; set; } = "Sarah J.";
+        public string StationTagline { get; set; } = "Indie Rock & Modern Anthems";
+        public string GenreTag { get; set; } = "Indie Alternative";
+        public string AccentColor { get; set; } = "#ef4444";
+        public string WebTheme { get; set; } = "dark";
+        public string LogoUrl { get; set; } = "";
+        public string BannerUrl { get; set; } = "";
+        public string BroadcasterBio { get; set; } = "";
+        public string ScheduleDescription { get; set; } = "";
+
+        // Station Feature Toggles
+        public bool EnableChat { get; set; } = true;
+        public bool EnableSongRequests { get; set; } = true;
+        public bool EnableSongHistory { get; set; } = true;
+        public int SongHistoryLimit { get; set; } = 10;
+        public string AudioFormat { get; set; } = "Mp3";
+        public int Bitrate { get; set; } = 128;
     }
 
     public class DualDeckConfig {

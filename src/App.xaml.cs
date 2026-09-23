@@ -109,6 +109,7 @@ namespace Scrim {
             // Server & Metadata
             services.AddSingleton<INetworkDiscoveryService, NetworkDiscoveryService>();
             services.AddSingleton<BroadcastHub>();
+            services.AddSingleton<IMultiStationManager, MultiStationManager>();
             services.AddSingleton<HttpStreamServer>();
             services.AddSingleton<IMetadataService, WindowsMediaMetadataService>();
             services.AddSingleton<SongRequestController>();
