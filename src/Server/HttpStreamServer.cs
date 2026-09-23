@@ -506,7 +506,7 @@ namespace Scrim.Server {
                 HandleGreenRoomAuth(context);
             } else if (path == "/greenroom" || path == "/greenroom/") {
                 HandleGreenRoomWebPortal(context);
-            } else if (path == "/api/status") {
+            } else if (path == "/api/status" || IsStationApiRoute(path, "status")) {
                 HandleStatusRequest(context);
             } else {
                 // Serve Web Player assets: /, /index.html, /player.css, /player.js, /assets/*, etc.
@@ -813,13 +813,16 @@ namespace Scrim.Server {
             var response = context.Response;
             response.ContentType = "application/json";
             response.Headers.Add("Access-Control-Allow-Origin", "*");
-            bool isLive = _hub.IsBroadcasting;
+            var station = ResolveStationPipeline(context);
+            var hub = station?.Hub ?? _hub;
+            bool isLive = hub.IsBroadcasting;
             var profile = _profileManager.CurrentProfile;
-            string format = profile.AudioFormat?.ToUpperInvariant() ?? "MP3";
-            int bitrate = profile.Bitrate;
+            var stationConfig = station?.Config;
+            string format = (stationConfig?.AudioFormat ?? profile.AudioFormat)?.ToUpperInvariant() ?? "MP3";
+            int bitrate = stationConfig?.Bitrate ?? profile.Bitrate;
             bool isRestricted = profile.RestrictToLocalNetwork && !IsLocalNetworkClient(context);
-            string streamMount = GetNormalizedMountPoint();
-            string json = $"{{\"isLive\":{(isLive ? "true" : "false")},\"listeners\":{_hub.ActiveClientCount},\"format\":\"{EscapeJson(format)}\",\"bitrate\":{bitrate},\"streamUrl\":\"/{streamMount}\",\"isPrivate\":{(isRestricted ? "true" : "false")},\"restrictToLocal\":{(profile.RestrictToLocalNetwork ? "true" : "false")},\"useHttps\":{(profile.UseHttps ? "true" : "false")},\"useReverseProxy\":{(profile.UseReverseProxy ? "true" : "false")}}}";
+            string streamMount = stationConfig?.MountPoint?.Trim().Trim('/') ?? GetNormalizedMountPoint();
+            string json = $"{{\"isLive\":{(isLive ? "true" : "false")},\"listeners\":{hub.ActiveClientCount},\"format\":\"{EscapeJson(format)}\",\"bitrate\":{bitrate},\"streamUrl\":\"/{streamMount}\",\"isPrivate\":{(isRestricted ? "true" : "false")},\"restrictToLocal\":{(profile.RestrictToLocalNetwork ? "true" : "false")},\"useHttps\":{(profile.UseHttps ? "true" : "false")},\"useReverseProxy\":{(profile.UseReverseProxy ? "true" : "false")}}}";
             byte[] buffer = System.Text.Encoding.UTF8.GetBytes(json);
             response.ContentLength64 = buffer.Length;
             response.OutputStream.Write(buffer, 0, buffer.Length);

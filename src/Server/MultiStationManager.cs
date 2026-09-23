@@ -28,15 +28,17 @@ namespace Scrim.Server {
         private readonly object _lock = new();
         private readonly IProfileManager _profileManager;
         private readonly IMetadataService? _defaultMetadataService;
+        private readonly BroadcastHub? _primaryHub;
         private readonly ConcurrentDictionary<string, StationPipeline> _pipelines = new(StringComparer.OrdinalIgnoreCase);
         private string _activeStationId = "";
 
         public event Action? StationsChanged;
         public event Action<StationPipeline, bool>? StationBroadcastingStateChanged;
 
-        public MultiStationManager(IProfileManager profileManager, IMetadataService? defaultMetadataService = null) {
+        public MultiStationManager(IProfileManager profileManager, IMetadataService? defaultMetadataService = null, BroadcastHub? primaryHub = null) {
             _profileManager = profileManager ?? throw new ArgumentNullException(nameof(profileManager));
             _defaultMetadataService = defaultMetadataService;
+            _primaryHub = primaryHub;
 
             SyncFromProfile(_profileManager.CurrentProfile);
         }
@@ -58,11 +60,13 @@ namespace Scrim.Server {
                 }
 
                 // Add or update stations
+                bool isFirst = true;
                 foreach (var stationConfig in profile.Stations) {
+                    bool isPrimary = isFirst || string.Equals(stationConfig.Id, defaultStation.Id, StringComparison.OrdinalIgnoreCase);
                     if (_pipelines.TryGetValue(stationConfig.Id, out var existingPipeline)) {
                         existingPipeline.ApplyConfig(stationConfig);
                     } else {
-                        var pipeline = new StationPipeline(stationConfig, _defaultMetadataService);
+                        var pipeline = new StationPipeline(stationConfig, _defaultMetadataService, isPrimary ? _primaryHub : null);
                         pipeline.BroadcastingStateChanged += (sender, isLive) => {
                             if (sender is StationPipeline p) {
                                 StationBroadcastingStateChanged?.Invoke(p, isLive);
@@ -70,6 +74,7 @@ namespace Scrim.Server {
                         };
                         _pipelines.TryAdd(stationConfig.Id, pipeline);
                     }
+                    isFirst = false;
                 }
 
                 if (string.IsNullOrEmpty(_activeStationId) || !_pipelines.ContainsKey(_activeStationId)) {

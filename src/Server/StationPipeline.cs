@@ -23,13 +23,16 @@ namespace Scrim.Server {
         public ISongHistoryService HistoryService { get; }
         public IMetadataService? MetadataService { get; private set; }
 
-        public bool IsLive { get; private set; } = false;
+        public bool IsPrimary { get; }
+        private bool _isLive = false;
+        public bool IsLive => IsPrimary ? Hub.IsBroadcasting : _isLive;
         public event EventHandler<bool>? BroadcastingStateChanged;
         public event Action? StationUpdated;
 
-        public StationPipeline(StationConfig config, IMetadataService? metadataService = null) {
+        public StationPipeline(StationConfig config, IMetadataService? metadataService = null, BroadcastHub? primaryHub = null) {
             Config = config ?? throw new ArgumentNullException(nameof(config));
-            Hub = new BroadcastHub();
+            IsPrimary = (primaryHub != null);
+            Hub = primaryHub ?? new BroadcastHub();
             Mixer = new AudioDuckingMixer();
             Transcoder = new MultiFormatTranscoder();
             RequestController = new SongRequestController { IsEnabled = config.EnableSongRequests };
@@ -40,6 +43,12 @@ namespace Scrim.Server {
             HistoryService = new SongHistoryService(MetadataService);
 
             Mixer.AppVolume = (float)config.AppStreamVolume / 100.0f;
+
+            if (IsPrimary) {
+                Hub.BroadcastingStateChanged += (sender, isLive) => {
+                    BroadcastingStateChanged?.Invoke(this, isLive);
+                };
+            }
         }
 
         public void ApplyConfig(StationConfig newConfig) {
@@ -63,6 +72,9 @@ namespace Scrim.Server {
         public void StartBroadcast(MicrophoneCaptureService? sharedMic = null, LocalMusicPlayerService? localPlayer = null) {
             lock (_stateLock) {
                 if (IsLive) return;
+                if (IsPrimary) {
+                    return;
+                }
 
                 _broadcastCts = new CancellationTokenSource();
                 var token = _broadcastCts.Token;
@@ -102,7 +114,7 @@ namespace Scrim.Server {
                     Transcoder.StartTranscoding(Mixer.MixedStream);
 
                     Hub.StartBroadcasting(Transcoder.OutputStream);
-                    IsLive = true;
+                    _isLive = true;
                     BroadcastingStateChanged?.Invoke(this, true);
                 } catch (Exception) {
                     StopBroadcast();
@@ -113,9 +125,12 @@ namespace Scrim.Server {
 
         public void StopBroadcast() {
             lock (_stateLock) {
-                if (!IsLive && !Hub.IsBroadcasting) return;
+                if (IsPrimary) {
+                    return;
+                }
+                if (!_isLive && !Hub.IsBroadcasting) return;
 
-                IsLive = false;
+                _isLive = false;
                 try {
                     _broadcastCts?.Cancel();
                     _broadcastCts?.Dispose();

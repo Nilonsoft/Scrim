@@ -1537,10 +1537,10 @@
 
     private void ToggleBroadcast() {
         var active = StationManager.GetActiveStation();
-        if (active != null) {
+        if (active != null && !active.IsPrimary) {
             OnToggleStationLive(active);
         } else {
-            if (IsLive) {
+            if (IsLive || (active != null && active.IsLive)) {
                 StopBroadcast();
             } else {
                 if (!FFmpegService.IsInstalled) {
@@ -1561,6 +1561,16 @@
         try {
             StreamServer.Start(ProfileManager.CurrentProfile.Port);
         } catch { }
+
+        if (st.IsPrimary) {
+            if (IsLive || st.IsLive) {
+                StopBroadcast();
+            } else {
+                StartBroadcast();
+            }
+            StateHasChanged();
+            return;
+        }
 
         if (st.IsLive) {
             StationManager.StopStation(st.Config.Id);
