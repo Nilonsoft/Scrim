@@ -652,16 +652,57 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     let reconnectTimeout = null;
+    let reconnectAttempts = 0;
 
-    function scheduleStreamReconnect() {
-        if (reconnectTimeout || userExplicitlyStopped || !isUserPlaying) return;
+    function scheduleStreamReconnect(delayMs) {
+        if (userExplicitlyStopped || !isUserPlaying) return;
+        if (reconnectTimeout) {
+            clearTimeout(reconnectTimeout);
+            reconnectTimeout = null;
+        }
+
+        const delay = (delayMs !== undefined)
+            ? delayMs
+            : Math.min(1500 * Math.pow(1.5, Math.min(reconnectAttempts, 5)), 6000);
+
         reconnectTimeout = setTimeout(function () {
             reconnectTimeout = null;
-            if (!userExplicitlyStopped && isUserPlaying) {
-                console.log("[Audio] Attempting automatic stream reconnect...");
-                startStream(true);
-            }
-        }, 1500);
+            if (userExplicitlyStopped || !isUserPlaying) return;
+
+            // Probe server status first to avoid unhandled media decode aborts on 503 or refused socket
+            fetch(getStationUrl('/api/status'), { cache: 'no-store' })
+                .then(function (res) {
+                    if (!res.ok) throw new Error("HTTP " + res.status);
+                    return res.json();
+                })
+                .then(function (data) {
+                    if (userExplicitlyStopped || !isUserPlaying) return;
+                    handleStatusData(data);
+                    if (data.isLive !== false) {
+                        console.log("[Audio] Station is live, reconnecting stream...");
+                        reconnectAttempts = 0;
+                        startStream(true);
+                    } else {
+                        console.log("[Audio] Server online, waiting for broadcaster transmission...");
+                        isConnecting = true;
+                        isPlaying = false;
+                        updatePlayButtonUI();
+                        const subtitleEl = document.getElementById('showSubtitle');
+                        if (subtitleEl) subtitleEl.textContent = "Station Standby — Waiting for broadcaster...";
+                        scheduleStreamReconnect(2500);
+                    }
+                })
+                .catch(function (err) {
+                    console.log("[Audio] Server rebooting or unreachable, retrying...", err);
+                    reconnectAttempts++;
+                    isConnecting = true;
+                    isPlaying = false;
+                    updatePlayButtonUI();
+                    const subtitleEl = document.getElementById('showSubtitle');
+                    if (subtitleEl) subtitleEl.textContent = "Server restarting — auto-reconnecting...";
+                    scheduleStreamReconnect();
+                });
+        }, delay);
     }
 
     function checkAutoplay(isLive) {
@@ -684,6 +725,11 @@ document.addEventListener('DOMContentLoaded', function () {
         isUserPlaying = false;
         isPlaying = false;
         isConnecting = false;
+        reconnectAttempts = 0;
+        if (reconnectTimeout) {
+            clearTimeout(reconnectTimeout);
+            reconnectTimeout = null;
+        }
         updatePlayButtonUI();
 
         if (audio) {
@@ -734,6 +780,11 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (isUserPlaying) {
                     isPlaying = true;
                     isConnecting = false;
+                    reconnectAttempts = 0;
+                    if (reconnectTimeout) {
+                        clearTimeout(reconnectTimeout);
+                        reconnectTimeout = null;
+                    }
                     updatePlayButtonUI();
                     if (subtitleEl) {
                         subtitleEl.textContent = defaultSubtitle;
@@ -741,33 +792,32 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
             }).catch(function (err) {
                 console.warn("Playback could not start:", err);
-                if (isUserPlaying) {
-                    if (err.name === 'NotAllowedError') {
-                        isUserPlaying = false;
-                        isPlaying = false;
-                        isConnecting = false;
-                        updatePlayButtonUI();
-                        audio.removeAttribute('src');
-                        if (subtitleEl) {
-                            subtitleEl.textContent = "Click anywhere to listen live";
-                        }
-                        document.addEventListener('pointerdown', unlockAutoplay, true);
-                        document.addEventListener('click', unlockAutoplay, true);
-                        document.addEventListener('keydown', unlockAutoplay, true);
-                        document.addEventListener('touchstart', unlockAutoplay, true);
-                        return;
-                    }
-
-                    isUserPlaying = false;
+                if (userExplicitlyStopped) {
+                    return;
+                }
+                if (err.name === 'NotAllowedError') {
                     isPlaying = false;
                     isConnecting = false;
-                    pendingLiveAutoStart = true;
                     updatePlayButtonUI();
                     audio.removeAttribute('src');
                     if (subtitleEl) {
-                        subtitleEl.textContent = "Station Offline — Broadcaster has not started transmission";
+                        subtitleEl.textContent = "Click anywhere to listen live";
                     }
+                    document.addEventListener('pointerdown', unlockAutoplay, true);
+                    document.addEventListener('click', unlockAutoplay, true);
+                    document.addEventListener('keydown', unlockAutoplay, true);
+                    document.addEventListener('touchstart', unlockAutoplay, true);
+                    return;
                 }
+
+                // Temporary server reboot, 503, or decoding glitch: keep user playing intent and auto-retry
+                isPlaying = false;
+                isConnecting = true;
+                updatePlayButtonUI();
+                if (subtitleEl) {
+                    subtitleEl.textContent = "Broadcaster offline / rebooting — auto-reconnecting...";
+                }
+                scheduleStreamReconnect();
             });
         }
     }
@@ -784,6 +834,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
             } else {
                 userExplicitlyStopped = false;
+                reconnectAttempts = 0;
                 startStream(false);
             }
         });
@@ -796,6 +847,7 @@ document.addEventListener('DOMContentLoaded', function () {
             if (isUserPlaying) {
                 isPlaying = true;
                 isConnecting = false;
+                reconnectAttempts = 0;
                 updatePlayButtonUI();
                 const subtitleEl = document.getElementById('showSubtitle');
                 if (subtitleEl) subtitleEl.textContent = defaultSubtitle;
@@ -837,32 +889,24 @@ document.addEventListener('DOMContentLoaded', function () {
 
         audio.addEventListener('stalled', function () {
             if (isUserPlaying && !userExplicitlyStopped && !isPlaying) {
-                scheduleStreamReconnect();
+                scheduleStreamReconnect(2000);
             }
         });
 
         audio.addEventListener('error', function (e) {
             // Ignore error events triggered when user intentionally stopped or src is cleared
-            if (!isUserPlaying || !audio.getAttribute('src')) {
+            if (userExplicitlyStopped || !isUserPlaying || !audio.getAttribute('src')) {
                 return;
             }
             console.warn("Audio element stream error or station offline:", e);
-            if (!userExplicitlyStopped) {
-                isPlaying = false;
-                isConnecting = true;
-                updatePlayButtonUI();
-                const subtitleEl = document.getElementById('showSubtitle');
-                if (subtitleEl) {
-                    subtitleEl.textContent = "Broadcast interrupted — waiting for DJ to resume...";
-                }
-                scheduleStreamReconnect();
-            } else {
-                isUserPlaying = false;
-                isPlaying = false;
-                isConnecting = false;
-                updatePlayButtonUI();
-                audio.removeAttribute('src');
+            isPlaying = false;
+            isConnecting = true;
+            updatePlayButtonUI();
+            const subtitleEl = document.getElementById('showSubtitle');
+            if (subtitleEl) {
+                subtitleEl.textContent = "Broadcast interrupted — waiting for DJ to resume...";
             }
+            scheduleStreamReconnect();
         });
     }
 
@@ -1366,63 +1410,89 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Connect to Server-Sent Events (SSE)
     let evtSource = null;
+    let sseReconnectTimer = null;
     function connectEventSource() {
         if (evtSource) {
             try { evtSource.close(); } catch (e) {}
             evtSource = null;
         }
+        if (sseReconnectTimer) {
+            clearTimeout(sseReconnectTimer);
+            sseReconnectTimer = null;
+        }
         try {
             evtSource = new EventSource(getStationUrl('/api/events'));
 
-        evtSource.onopen = function () {
-            console.log('[SSE] Real-time connection established with Scrim app');
-        };
-
-        evtSource.onerror = function (e) {
-            console.warn('[SSE] Event stream connection paused, auto-reconnecting...', e);
-        };
-
-        evtSource.onmessage = function (event) {
-            try {
-                const data = JSON.parse(event.data);
-
-                if (data.type === 'private_stream' || data.isPrivate) {
-                    setPrivateStreamMode(true);
+            evtSource.onopen = function () {
+                console.log('[SSE] Real-time connection established with Scrim app');
+                if (sseReconnectTimer) {
+                    clearTimeout(sseReconnectTimer);
+                    sseReconnectTimer = null;
                 }
-
-                if (data.streamUrl) {
-                    currentStreamEndpoint = data.streamUrl;
+                // Server is confirmed online: if user wanted audio, trigger rapid stream reconnect
+                if (isUserPlaying && (!isPlaying || audio.paused)) {
+                    scheduleStreamReconnect(150);
                 }
+            };
 
-                if (data.type === 'metadata') {
-                    updateTrackMetadata(data.title, data.artist, data.album, data.albumArtUrl, data.hasArt, data.duration, data.position, data.isPlaying);
+            evtSource.onerror = function (e) {
+                console.warn('[SSE] Event stream connection paused, scheduling auto-reconnect...', e);
+                try {
+                    if (evtSource) evtSource.close();
+                } catch (err) {}
+                evtSource = null;
+                if (!sseReconnectTimer) {
+                    sseReconnectTimer = setTimeout(connectEventSource, 3000);
                 }
+            };
 
-                if (data.type === 'branding') {
-                    applyBranding(data);
-                }
+            evtSource.onmessage = function (event) {
+                try {
+                    const data = JSON.parse(event.data);
 
-                if (data.type === 'stats') {
-                    if (listenerCount) listenerCount.textContent = data.listeners || '1';
-                    if (data.isLive !== undefined) {
-                        updateLiveIndicator(data.isLive);
-                        if (data.isLive) {
-                            if (pendingLiveAutoStart && !userExplicitlyStopped) {
-                                pendingLiveAutoStart = false;
-                                startStream(false);
-                            } else if (!isPlaying || !audio.src) {
-                                checkAutoplay(true);
+                    if (data.type === 'private_stream' || data.isPrivate) {
+                        setPrivateStreamMode(true);
+                    }
+
+                    if (data.streamUrl) {
+                        currentStreamEndpoint = data.streamUrl;
+                    }
+
+                    if (data.type === 'metadata') {
+                        updateTrackMetadata(data.title, data.artist, data.album, data.albumArtUrl, data.hasArt, data.duration, data.position, data.isPlaying);
+                    }
+
+                    if (data.type === 'branding') {
+                        applyBranding(data);
+                    }
+
+                    if (data.type === 'stats') {
+                        if (listenerCount) listenerCount.textContent = data.listeners || '1';
+                        if (data.isLive !== undefined) {
+                            updateLiveIndicator(data.isLive);
+                            if (data.isLive) {
+                                if (isUserPlaying && !userExplicitlyStopped && (!isPlaying || audio.paused)) {
+                                    if (reconnectTimeout) {
+                                        clearTimeout(reconnectTimeout);
+                                        reconnectTimeout = null;
+                                    }
+                                    startStream(true);
+                                } else if (pendingLiveAutoStart && !userExplicitlyStopped) {
+                                    pendingLiveAutoStart = false;
+                                    startStream(false);
+                                } else if (!isPlaying || !audio.src) {
+                                    checkAutoplay(true);
+                                }
                             }
                         }
+                        if (data.format !== undefined) {
+                            updateStreamQuality(data.format, data.bitrate);
+                        }
                     }
-                    if (data.format !== undefined) {
-                        updateStreamQuality(data.format, data.bitrate);
-                    }
-                }
 
-                if (data.type === 'queue' && data.requests) {
-                    updateQueue(data.requests);
-                }
+                    if (data.type === 'queue' && data.requests) {
+                        updateQueue(data.requests);
+                    }
 
                 if (data.type === 'poll_update' && data.poll) {
                     renderLivePoll(data.poll);
@@ -3322,10 +3392,12 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (stations.length > 0 && !activeStationMount) {
                     const first = stations[0];
                     activeStationMount = (first.mount || 'stream').replace(/^\/+/, '');
+                    currentStreamEndpoint = '/' + activeStationMount;
                     renderStationDial(stations);
                 }
                 const activeSt = stations.find(s => (s.mount || '').replace(/^\/+/, '').toLowerCase() === (activeStationMount || '').toLowerCase()) || stations[0];
                 if (activeSt) {
+                    currentStreamEndpoint = '/' + (activeSt.mount || activeStationMount || 'stream').replace(/^\/+/, '');
                     updatePwaManifest(activeStationMount, activeSt.stationName || activeSt.name);
                 }
             })

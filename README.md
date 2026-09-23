@@ -146,6 +146,7 @@
 Comprehensive guides, specifications, and architecture documents are located in the [`docs/`](docs/) directory:
 
 - 📻 **[Multi-Station Console Architecture & Guide](docs/multi-station-console.md)**: Native multi-station broadcasting from a single console, process loopback (zero virtual cables), station switcher tab bar, web player channel dial, and multi-mount HTTP/SSE API routing.
+- 📋 **[Release Notes (v1.1.0)](docs/patch-notes-v1.1.0.md)**: What's new in v1.1.0 (Seamless Auto-Reconnect & Stream Resilience, Native Multi-Station Console, Process Loopback, and Station-Scoped PWAs).
 - 🌟 **[Release & Feature Guide (v1.0.11)](docs/v1.0.11-features-guide.md)**: Details on Stream Relaying & Multi-DJ Party Hub, Backstage DJ / Green Room Private Chat, Audio Visualizer Reactor Mode Customization, Dedicated Admin Screen, High-DPI UI Scaling, Collapsible Cards, Venue Profile Import/Export, and Overnight Auto-Recovery.
 - 📋 **[Release Notes (v1.0.9)](docs/patch-notes-v1.0.9.md)**: What's new in v1.0.9 (Local Music Playback & Playlist Management Console).
 - 🚀 **[Post-Installation & User Guide](docs/post-install-guide.md)**: Comprehensive end-user handbook—from running the installer, setting up FFmpeg, 1-click virtual audio routing, and going on air to station chat, custom banners, and sharing links.
@@ -168,7 +169,7 @@ Scrim includes automated WiX Toolset v5 scripts to generate a standalone Windows
 pwsh -NoProfile -File ./build-installer.ps1
 ```
 
-The resulting installer (`bin/ScrimSetup-v1.0.9.msi`) bundles all dependencies, driver payloads, and offline documentation (`docs/` and `README.md`) for 1-click per-user installation (`%LOCALAPPDATA%\Programs\Scrim`) without requiring administrator elevation, complete with desktop and Start Menu shortcuts and in-place upgrade support.
+The resulting installer (`bin/ScrimSetup-v1.1.0.msi`) bundles all dependencies, driver payloads, and offline documentation (`docs/` and `README.md`) for 1-click per-user installation (`%LOCALAPPDATA%\Programs\Scrim`) without requiring administrator elevation, complete with desktop and Start Menu shortcuts and in-place upgrade support.
 
 ---
 
