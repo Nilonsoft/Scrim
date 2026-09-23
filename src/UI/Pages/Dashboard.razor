@@ -14,7 +14,6 @@
 @using System.Net.Http
 @inject IProfileManager ProfileManager
 @inject HttpStreamServer StreamServer
-@inject IMultiStationManager StationManager
 @inject BroadcastHub Hub
 @inject ProcessLoopbackCapture Capture
 @inject MultiFormatTranscoder Transcoder
@@ -262,134 +261,7 @@
     </div>
 </header>
 
-<!-- Multi-Station Console Switcher Bar -->
-<div class="station-switcher-bar">
-    <div class="station-switcher-pills">
-        @foreach (var st in StationManager.GetAllStations()) {
-            bool isActive = st.Config.Id == (StationManager.GetActiveStation()?.Config.Id ?? "");
-            <div class="station-tab-pill @(isActive ? "active" : "")" @onclick="@(() => OnSwitchStation(st.Config.Id))">
-                <span class="station-tab-dot @(st.IsLive ? "live" : "offline")"></span>
-                <span class="station-tab-name">@st.Config.Name</span>
-                <span class="station-tab-mount">/@(st.Config.MountPoint?.Trim('/') ?? "stream")</span>
-                <button class="station-tab-onair-btn @(st.IsLive ? "onair" : "offline")" 
-                        @onclick:stopPropagation="true" 
-                        @onclick="@(() => OnToggleStationLive(st))" 
-                        title="@(st.IsLive ? "Stop this station's broadcast" : "Start this station's broadcast")">
-                    @(st.IsLive ? "ON AIR" : "GO LIVE")
-                </button>
-            </div>
-        }
-        <button class="station-add-btn" @onclick="OnAddNewStation" title="Add a new radio station to this console">
-            ＋ Add Station
-        </button>
-    </div>
-    <div style="display: flex; align-items: center; gap: 10px;">
-        <span style="font-size: 11px; color: #8b92a2;">
-            Concurrent: <strong style="color: #10b981;">@StationManager.GetAllStations().Count(s => s.IsLive)</strong>/@StationManager.GetAllStations().Count Live
-        </span>
-    </div>
-</div>
-
 <AdminSettingsModal @bind-IsOpen="ShowAdminSettingsModal" OnScaleChanged="OnUiScaleChanged" />
-
-<!-- Add Station Modal -->
-@if (ShowAddStationModal) {
-    <div class="scrim-modal-backdrop" @onclick="@(() => ShowAddStationModal = false)">
-        <div class="scrim-modal" style="max-width: 520px; width: 90%;" @onclick:stopPropagation="true">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                <h3 style="margin: 0; font-size: 16px; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 8px;">
-                    📻 Add New Station
-                </h3>
-                <button class="scrim-dots-btn" @onclick="@(() => ShowAddStationModal = false)">✕</button>
-            </div>
-
-            <p style="font-size: 12px; color: #8b92a2; margin-top: 0; margin-bottom: 16px; line-height: 1.4;">
-                Create an independent radio station with its own stream mount point, audio source (e.g. Spotify, Chrome, Built-in Player), branding, chat, and listener front-end.
-            </p>
-
-            <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 18px;">
-                <div>
-                    <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">Station Display Name</label>
-                    <input class="scrim-input" style="width: 100%; box-sizing: border-box;" @bind="NewStationName" placeholder="e.g. Spotify Lo-Fi Stream" />
-                </div>
-                <div>
-                    <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">Stream Mount Point (URL Path)</label>
-                    <div style="display: flex; align-items: center; gap: 4px;">
-                        <span style="font-size: 12px; color: #64748b; font-family: monospace;">/</span>
-                        <input class="scrim-input" style="flex: 1;" @bind="NewStationMount" placeholder="e.g. spotify" />
-                    </div>
-                    <span style="font-size: 10px; color: #64748b; margin-top: 3px; display: block;">Listeners will tune into: http://localhost:@(ProfileManager.CurrentProfile.Port)/@(string.IsNullOrWhiteSpace(NewStationMount) ? "channel" : NewStationMount.Trim().Trim('/'))</span>
-                </div>
-                <div>
-                    <label style="font-size: 11px; font-weight: 600; color: #94a3b8; display: block; margin-bottom: 4px;">Audio Source (Zero Virtual Cables)</label>
-                    <select class="scrim-select" style="width: 100%; box-sizing: border-box;" @bind="NewStationSource">
-                        <option value="@AudioSourceType.ProcessLoopback">App Loopback (Spotify, Chrome, Browser, Media Player)</option>
-                        <option value="@AudioSourceType.BuiltInPlayer">Built-in Local Player (Clockwheel &amp; Automation Crate)</option>
-                        <option value="@AudioSourceType.AudioDevice">Audio Hardware Input / Mic</option>
-                        <option value="@AudioSourceType.SystemMix">Master System Mix</option>
-                        <option value="@AudioSourceType.IcecastIngest">🎧 External DJ Ingest (Icecast / BUTT / OBS / Mixxx)</option>
-                    </select>
-                </div>
-                @if (NewStationSource == AudioSourceType.IcecastIngest) {
-                    <div style="background: rgba(0, 210, 255, 0.04); border: 1px solid rgba(0, 210, 255, 0.2); border-radius: 8px; padding: 10px 12px;">
-                        <label style="font-size: 11px; font-weight: 600; color: #00d2ff; display: block; margin-bottom: 4px;">Guest DJ Ingest Password</label>
-                        <div style="display: flex; gap: 6px; margin-bottom: 8px;">
-                            <input class="scrim-input" style="flex: 1;" @bind="NewStationIngestPassword" placeholder="e.g. scrimpass" />
-                            <button type="button" class="scrim-btn-secondary" style="font-size: 11px; padding: 4px 10px;" @onclick="GenerateRandomIngestPassword" title="Generate Random Password">🎲 Generate</button>
-                        </div>
-                        <div style="font-size: 10px; color: #94a3b8; line-height: 1.6;">
-                            <strong style="color: #cbd5e1;">Icecast 2 Connection Details for Guest DJ:</strong><br />
-                            • <strong>Server / Host:</strong> <span style="font-family: monospace; color: #38bdf8;">@(GetIngestServerHost())</span><br />
-                            • <strong>Port:</strong> <span style="font-family: monospace; color: #38bdf8;">@(ProfileManager.CurrentProfile.Port)</span><br />
-                            • <strong>Mount Point:</strong> <span style="font-family: monospace; color: #38bdf8;">/@(string.IsNullOrWhiteSpace(NewStationMount) ? "channel" : NewStationMount.Trim().Trim('/'))</span><br />
-                            • <strong>Username:</strong> <span style="font-family: monospace; color: #38bdf8;">source</span><br />
-                            • <strong>Password:</strong> <span style="font-family: monospace; color: #38bdf8;">@NewStationIngestPassword</span><br />
-                            • <strong>Compatible DJ Software:</strong> BUTT, Mixxx, OBS Studio, Traktor, SAM Broadcaster, VirtualDJ
-                        </div>
-                    </div>
-                }
-                @if (NewStationSource == AudioSourceType.ProcessLoopback) {
-                    <div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                            <label style="font-size: 11px; font-weight: 600; color: #94a3b8;">Target Application / Audio Source</label>
-                            <button type="button" class="btn btn-sm btn-link p-0 text-decoration-none" style="font-size: 10px; color: #00d2ff; background: none; border: none; cursor: pointer;" @onclick="ForceRefreshWindows" title="Re-scan open applications and audio sessions">🔄 Refresh Apps</button>
-                        </div>
-                        <select class="scrim-select" style="width: 100%; box-sizing: border-box;" @bind="NewStationProcessId" @bind:after="OnNewStationProcessChanged">
-                            <option value="0">-- Select an Application --</option>
-                            @if (Windows.Any(w => w.IsPlayingAudio)) {
-                                <optgroup label="🔊 Currently Playing Audio">
-                                    @foreach (var w in Windows.Where(w => w.IsPlayingAudio)) {
-                                        <option value="@w.ProcessId">🔊 @w.ProcessName - @w.Title</option>
-                                    }
-                                </optgroup>
-                            }
-                            <optgroup label="Available Applications">
-                                @foreach (var w in Windows.Where(w => !w.IsPlayingAudio)) {
-                                    <option value="@w.ProcessId">@(!string.IsNullOrEmpty(w.ProcessName) && !w.Title.StartsWith(w.ProcessName, StringComparison.OrdinalIgnoreCase) ? $"{w.ProcessName} - {w.Title}" : w.Title)</option>
-                                }
-                            </optgroup>
-                        </select>
-                        <span style="font-size: 10px; color: #64748b; margin-top: 3px; display: block;">Select the app to capture (e.g. Spotify, Chrome, VLC). Scrim will isolate its audio and stream it on this station.</span>
-                    </div>
-                }
-                <div style="padding-top: 4px;">
-                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;">
-                        <input type="checkbox" @bind="NewStationShowOnMainPage" style="accent-color: #00d2ff; width: 14px; height: 14px;" />
-                        <span style="font-size: 11px; font-weight: 600; color: #cbd5e1;">Link on Main Page (Channel Dial)</span>
-                    </label>
-                    <span style="font-size: 10px; color: #64748b; margin-top: 2px; margin-left: 22px; display: block;">
-                        Unchecked by default. Leave unchecked to keep this station unlisted from the main web player dial. Listeners can still tune in directly via its direct URL or dedicated PWA.
-                    </span>
-                </div>
-            </div>
-
-            <div style="display: flex; justify-content: flex-end; gap: 8px;">
-                <button class="scrim-btn-secondary" @onclick="@(() => ShowAddStationModal = false)">Cancel</button>
-                <button class="scrim-btn-primary" @onclick="ConfirmAddStation">Create Station</button>
-            </div>
-        </div>
-    </div>
-}
 
 <!-- Profile Management Modal -->
 @if (ShowProfileModal) {
@@ -1040,9 +912,7 @@
         if (p.RightColumnCards?.Any() == true) RightColumn = new List<string>(p.RightColumnCards);
         if (p.CollapsedCards != null) CollapsedCards = new HashSet<string>(p.CollapsedCards);
 
-        _stationLayouts.Clear();
-        _stationDjEqs.Clear();
-        LoadStationState(StationManager.GetActiveStation());
+        SyncDjEqFromProfile();
         _ = ReinitDragDropAsync();
         StateHasChanged();
     }
@@ -1066,8 +936,8 @@
     private string? OriginalDefaultDeviceId;
     private string? OriginalDefaultDeviceName;
     private bool IsVirtualDeviceActive => 
-        !string.IsNullOrEmpty(ProfileManager.CurrentProfile.CaptureDeviceId) &&
-        (ProfileManager.CurrentProfile.CaptureDeviceId == VbCableDeviceId || ProfileManager.CurrentProfile.CaptureDeviceId == DetectedVirtualDeviceId);
+        !string.IsNullOrEmpty(ActiveStationConfig.CaptureDeviceId) &&
+        (ActiveStationConfig.CaptureDeviceId == VbCableDeviceId || ActiveStationConfig.CaptureDeviceId == DetectedVirtualDeviceId);
     private bool IsSelectedMicVirtualCable {
         get {
             if (string.IsNullOrEmpty(SelectedDeviceId)) return false;
@@ -1153,16 +1023,7 @@
             CollapsedCards = new HashSet<string>(p.CollapsedCards);
         }
 
-        var activeSt = StationManager.GetActiveStation();
-        if (activeSt != null) {
-            _stationLayouts[activeSt.Config.Id] = new StationLayoutState {
-                Left = new List<string>(LeftColumn),
-                Center = new List<string>(CenterColumn),
-                Right = new List<string>(RightColumn),
-                Collapsed = CollapsedCards.ToList()
-            };
-            LoadStationState(activeSt);
-        }
+
 
         // Subscribe to live Windows system media changes
         MetadataService.MetadataChanged += OnMetadataReceived;
@@ -1194,8 +1055,7 @@
         ActiveMixer.RelayAudioStream = RelayService.RelayAudioStream;
         _greenRoomMessages = StreamServer.GetGreenRoomMessages().ToList();
         StreamServer.GreenRoomMessagePosted += OnGreenRoomMessagePosted;
-        StationManager.StationsChanged += OnStationManagerChanged;
-        StationManager.StationBroadcastingStateChanged += OnStationBroadcastingChanged;
+
 
         if (!string.IsNullOrWhiteSpace(MetadataService.CurrentMetadata.Title)) {
             CurrentTrackTitle = MetadataService.CurrentMetadata.Title;
@@ -1395,7 +1255,8 @@
     }
 
     private void OnCaptureDeviceChanged() {
-        ProfileManager.CurrentProfile.CaptureDeviceName = RenderDevices.FirstOrDefault(d => d.Id == ProfileManager.CurrentProfile.CaptureDeviceId).Name ?? "";
+        var dev = RenderDevices.FirstOrDefault(d => d.Id == ProfileManager.CurrentProfile.CaptureDeviceId);
+        ProfileManager.CurrentProfile.CaptureDeviceName = dev.Name ?? "";
         ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
         MicService.SetVirtualOutputDevice(null);
         EnsureAudioMonitoring(SelectedProcessId);
@@ -1532,21 +1393,11 @@
     }
 
     private void SaveCardLayout() {
-        var activeId = ActiveStationConfig.Id;
-        _stationLayouts[activeId] = new StationLayoutState {
-            Left = new List<string>(LeftColumn),
-            Center = new List<string>(CenterColumn),
-            Right = new List<string>(RightColumn),
-            Collapsed = CollapsedCards.ToList()
-        };
-        var active = StationManager.GetActiveStation();
-        if (active == null || active.IsPrimary) {
-            ProfileManager.CurrentProfile.LeftColumnCards = new List<string>(LeftColumn);
-            ProfileManager.CurrentProfile.CenterColumnCards = new List<string>(CenterColumn);
-            ProfileManager.CurrentProfile.RightColumnCards = new List<string>(RightColumn);
-            ProfileManager.CurrentProfile.CollapsedCards = CollapsedCards.ToList();
-            ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
-        }
+        ProfileManager.CurrentProfile.LeftColumnCards = new List<string>(LeftColumn);
+        ProfileManager.CurrentProfile.CenterColumnCards = new List<string>(CenterColumn);
+        ProfileManager.CurrentProfile.RightColumnCards = new List<string>(RightColumn);
+        ProfileManager.CurrentProfile.CollapsedCards = CollapsedCards.ToList();
+        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
         StateHasChanged();
     }
 
@@ -1604,93 +1455,35 @@
     }
 
     private void ToggleBroadcast() {
-        var active = StationManager.GetActiveStation();
-        if (active != null && !active.IsPrimary) {
-            OnToggleStationLive(active);
+        if (IsLive) {
+            StopBroadcast();
         } else {
-            if (IsLive || (active != null && active.IsLive)) {
-                StopBroadcast();
-            } else {
-                if (!FFmpegService.IsInstalled) {
-                    ShowFFmpegModal = true;
-                    return;
-                }
-                StartBroadcast();
+            if (!FFmpegService.IsInstalled) {
+                ShowFFmpegModal = true;
+                return;
             }
+            StartBroadcast();
         }
     }
 
-    private void OnToggleStationLive(StationPipeline st) {
-        if (!FFmpegService.IsInstalled) {
-            ShowFFmpegModal = true;
-            return;
-        }
+    private StationConfig ActiveStationConfig => ProfileManager.CurrentProfile.EnsureDefaultStation();
+    private AudioDuckingMixer ActiveMixer => Mixer;
+    private BroadcastHub ActiveHub => Hub;
+    private MultiFormatTranscoder ActiveTranscoder => Transcoder;
+    private SongRequestController ActiveRequestController => RequestController;
+    private ILiveChatService ActiveChatService => ChatService;
+    private ISongReactionService ActiveReactionService => ReactionService;
+    private ISongHistoryService ActiveHistoryService => HistoryService;
+    private IMetadataService ActiveMetadataService => MetadataService;
 
-        try {
-            StreamServer.Start(ProfileManager.CurrentProfile.Port);
-        } catch { }
-
-        if (st.IsPrimary) {
-            if (IsLive || st.IsLive) {
-                StopBroadcast();
-            } else {
-                StartBroadcast();
-            }
-            StateHasChanged();
-            return;
-        }
-
-        if (st.IsLive) {
-            StationManager.StopStation(st.Config.Id);
-            if (st.Config.Id == (StationManager.GetActiveStation()?.Config.Id ?? "")) {
-                IsLive = false;
-            }
-        } else {
-            StationManager.StartStation(st.Config.Id, MicService, LocalPlayer);
-            if (st.Config.Id == (StationManager.GetActiveStation()?.Config.Id ?? "")) {
-                IsLive = true;
-            }
-        }
-        StateHasChanged();
-    }
-
-    private StationConfig ActiveStationConfig => StationManager.GetActiveStation()?.Config ?? ProfileManager.CurrentProfile.EnsureDefaultStation();
-    private StationPipeline? ActivePipeline => StationManager.GetActiveStation();
-    private AudioDuckingMixer ActiveMixer => ActivePipeline?.Mixer ?? Mixer;
-    private BroadcastHub ActiveHub => ActivePipeline?.Hub ?? Hub;
-    private MultiFormatTranscoder ActiveTranscoder => ActivePipeline?.Transcoder ?? Transcoder;
-    private SongRequestController ActiveRequestController => ActivePipeline?.RequestController ?? RequestController;
-    private ILiveChatService ActiveChatService => ActivePipeline?.ChatService ?? ChatService;
-    private ISongReactionService ActiveReactionService => ActivePipeline?.ReactionService ?? ReactionService;
-    private ISongHistoryService ActiveHistoryService => ActivePipeline?.HistoryService ?? HistoryService;
-    private IMetadataService? ActiveMetadataService => ActivePipeline?.MetadataService ?? MetadataService;
-
-    private class StationLayoutState {
-        public List<string> Left { get; set; } = new();
-        public List<string> Center { get; set; } = new();
-        public List<string> Right { get; set; } = new();
-        public List<string> Collapsed { get; set; } = new();
-    }
-
-    private readonly Dictionary<string, StationLayoutState> _stationLayouts = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, DjEqualizerConfig> _stationDjEqs = new(StringComparer.OrdinalIgnoreCase);
-    private string ActiveDjEqPreset => _stationDjEqs.TryGetValue(ActiveStationConfig.Id, out var cfg) && !string.IsNullOrEmpty(cfg.ActivePreset)
-        ? cfg.ActivePreset
-        : ProfileManager.CurrentProfile.DjEq?.ActivePreset ?? "Flat / Bypass";
+    private string ActiveDjEqPreset => ProfileManager.CurrentProfile.DjEq?.ActivePreset ?? "Flat / Bypass";
 
     private string GetNormalizedMount() {
-        var active = StationManager.GetActiveStation();
-        var mount = active?.Config.MountPoint ?? ProfileManager.CurrentProfile.StreamMountPoint;
+        var mount = ProfileManager.CurrentProfile.StreamMountPoint;
         return string.IsNullOrWhiteSpace(mount) ? "stream" : mount.Trim().Trim('/');
     }
 
     private string GetStationWebUrl(string baseUrl) {
-        if (string.IsNullOrWhiteSpace(baseUrl)) return baseUrl;
-        var active = StationManager.GetActiveStation();
-        if (active != null && !active.IsPrimary) {
-            string mount = GetNormalizedMount();
-            return $"{baseUrl.TrimEnd('/')}/?station={Uri.EscapeDataString(mount)}";
-        }
         return baseUrl;
     }
 
@@ -1698,234 +1491,6 @@
         if (string.IsNullOrWhiteSpace(baseUrl)) return baseUrl;
         string mount = GetNormalizedMount();
         return $"{baseUrl.TrimEnd('/')}/{mount}";
-    }
-
-    private void SyncStationToProfile(StationConfig stConfig) {
-        var active = StationManager.GetActiveStation();
-        if (active != null) {
-            active.ApplyConfig(stConfig);
-            if (active.IsPrimary) {
-                var p = ProfileManager.CurrentProfile;
-                p.StationName = stConfig.StationName;
-                p.PageTitle = stConfig.PageTitle;
-                p.ShowTitle = stConfig.ShowTitle;
-                p.HostName = stConfig.HostName;
-                p.StationTagline = stConfig.StationTagline;
-                p.GenreTag = stConfig.GenreTag;
-                p.AccentColor = stConfig.AccentColor;
-                p.WebTheme = stConfig.WebTheme;
-                p.LogoUrl = stConfig.LogoUrl;
-                p.BannerUrl = stConfig.BannerUrl;
-                p.BroadcasterBio = stConfig.BroadcasterBio;
-                p.ScheduleDescription = stConfig.ScheduleDescription;
-                p.EnableChat = stConfig.EnableChat;
-                p.EnableSongRequests = stConfig.EnableSongRequests;
-                p.EnableSongHistory = stConfig.EnableSongHistory;
-                p.SongHistoryLimit = stConfig.SongHistoryLimit;
-                p.AudioFormat = stConfig.AudioFormat;
-                p.Bitrate = stConfig.Bitrate;
-                p.TargetProcessId = stConfig.TargetProcessId;
-                p.TargetProcessName = stConfig.TargetProcessName;
-                p.CaptureDeviceId = stConfig.CaptureDeviceId;
-                p.AppStreamVolume = stConfig.AppStreamVolume;
-            }
-        }
-        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
-    }
-
-    private void LoadStationState(StationPipeline? active) {
-        if (active == null) return;
-        var cfg = active.Config;
-
-        if (_stationLayouts.TryGetValue(cfg.Id, out var savedLayout)) {
-            LeftColumn = new List<string>(savedLayout.Left);
-            CenterColumn = new List<string>(savedLayout.Center);
-            RightColumn = new List<string>(savedLayout.Right);
-            CollapsedCards = new HashSet<string>(savedLayout.Collapsed);
-        } else {
-            if (active.IsPrimary) {
-                var p = ProfileManager.CurrentProfile;
-                LeftColumn = p.LeftColumnCards?.Any() == true ? new List<string>(p.LeftColumnCards) : new() { "card-audio-routing", "card-dj-eq", "card-network-access", "card-web-branding" };
-                CenterColumn = p.CenterColumnCards?.Any() == true ? new List<string>(p.CenterColumnCards) : new() { "card-vu-talk", "card-voice-fx", "card-queue", "card-chat" };
-                RightColumn = p.RightColumnCards?.Any() == true ? new List<string>(p.RightColumnCards) : new() { "card-encoding", "card-media-player", "card-soundboard" };
-                CollapsedCards = p.CollapsedCards != null ? new HashSet<string>(p.CollapsedCards) : new();
-            } else {
-                LeftColumn = new() { "card-audio-routing", "card-dj-eq", "card-network-access", "card-web-branding" };
-                CenterColumn = new() { "card-vu-talk", "card-voice-fx", "card-queue", "card-chat" };
-                RightColumn = new() { "card-encoding", "card-media-player", "card-soundboard" };
-                CollapsedCards = new();
-            }
-            _stationLayouts[cfg.Id] = new StationLayoutState {
-                Left = new List<string>(LeftColumn),
-                Center = new List<string>(CenterColumn),
-                Right = new List<string>(RightColumn),
-                Collapsed = CollapsedCards.ToList()
-            };
-        }
-        _ = ReinitDragDropAsync();
-
-        WindowInfo? initialWin = null;
-        if (!string.IsNullOrEmpty(cfg.TargetProcessName) && !cfg.TargetProcessName.Equals("System Audio", StringComparison.OrdinalIgnoreCase)) {
-            initialWin = Windows.FirstOrDefault(w => string.Equals(w.ProcessName, cfg.TargetProcessName, StringComparison.OrdinalIgnoreCase))
-                      ?? Windows.FirstOrDefault(w => w.Title.Contains(cfg.TargetProcessName, StringComparison.OrdinalIgnoreCase));
-        }
-        if (initialWin == null && cfg.TargetProcessId > 0) {
-            initialWin = Windows.FirstOrDefault(w => w.ProcessId == (uint)cfg.TargetProcessId);
-        }
-
-        if (initialWin != null) {
-            SelectedProcessId = initialWin.ProcessId;
-            SelectedProcessDisplayName = !string.IsNullOrEmpty(initialWin.ProcessName) ? initialWin.ProcessName : initialWin.Title;
-        } else if (!string.IsNullOrEmpty(cfg.TargetProcessName) && !cfg.TargetProcessName.Equals("System Audio", StringComparison.OrdinalIgnoreCase)) {
-            SelectedProcessId = (uint)(cfg.TargetProcessId > 0 ? cfg.TargetProcessId : 999999);
-            SelectedProcessDisplayName = cfg.TargetProcessName;
-        } else {
-            SelectedProcessId = 0;
-            SelectedProcessDisplayName = "System Audio";
-        }
-
-        ConsoleChatMessages = (active.ChatService ?? ChatService).GetRecentMessages().ToList();
-        SyncDjEqFromProfile();
-    }
-
-    private void OnSwitchStation(string stationId) {
-        var prev = StationManager.GetActiveStation();
-        if (prev != null) {
-            _stationLayouts[prev.Config.Id] = new StationLayoutState {
-                Left = new List<string>(LeftColumn),
-                Center = new List<string>(CenterColumn),
-                Right = new List<string>(RightColumn),
-                Collapsed = CollapsedCards.ToList()
-            };
-            SaveDjEqToProfile();
-        }
-
-        StationManager.SetActiveStation(stationId);
-        var active = StationManager.GetActiveStation();
-        if (active != null) {
-            IsLive = active.IsLive;
-            LoadStationState(active);
-        }
-        StateHasChanged();
-    }
-
-    private bool ShowAddStationModal = false;
-    private string NewStationName = "";
-    private string NewStationMount = "";
-    private AudioSourceType NewStationSource = AudioSourceType.ProcessLoopback;
-    private string NewStationIngestPassword = "scrimpass";
-    private bool NewStationShowOnMainPage = false;
-    private uint NewStationProcessId = 0;
-    private string NewStationProcess = "";
-
-    private void GenerateRandomIngestPassword() {
-        NewStationIngestPassword = GenerateRandomToken(8);
-    }
-
-    private static string GenerateRandomToken(int length) {
-        const string chars = "abcdefghjkmnpqrstuvwxyz23456789";
-        var rng = new Random();
-        return new string(Enumerable.Repeat(chars, length).Select(s => s[rng.Next(s.Length)]).ToArray());
-    }
-
-    private string GetIngestServerHost() {
-        var ip = NetworkDiscovery.GetAllLocalIps()?.FirstOrDefault();
-        return !string.IsNullOrEmpty(ip) ? ip : "127.0.0.1";
-    }
-
-    private void ToggleActiveStationShowOnMainPage(ChangeEventArgs e) {
-        var activeSt = StationManager.GetActiveStation();
-        if (activeSt != null && e.Value is bool val) {
-            activeSt.Config.ShowOnMainPage = val;
-            ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
-            StateHasChanged();
-        }
-    }
-
-    private void OnAddNewStation() {
-        ForceRefreshWindows();
-        int nextNum = StationManager.GetAllStations().Count + 1;
-        NewStationName = $"Station {nextNum}";
-        NewStationMount = $"channel{nextNum}";
-        NewStationSource = AudioSourceType.ProcessLoopback;
-        NewStationIngestPassword = GenerateRandomToken(8);
-        NewStationShowOnMainPage = false;
-
-        var firstPlaying = Windows.FirstOrDefault(w => w.IsPlayingAudio) ?? Windows.FirstOrDefault();
-        if (firstPlaying != null) {
-            NewStationProcessId = firstPlaying.ProcessId;
-            NewStationProcess = firstPlaying.ProcessName;
-            NewStationName = $"{firstPlaying.ProcessName} Stream";
-            NewStationMount = firstPlaying.ProcessName.ToLowerInvariant().Replace(" ", "").Replace(".exe", "");
-        } else {
-            NewStationProcessId = 0;
-            NewStationProcess = "";
-        }
-        ShowAddStationModal = true;
-    }
-
-    private void OnNewStationProcessChanged() {
-        var win = Windows.FirstOrDefault(w => w.ProcessId == NewStationProcessId);
-        if (win != null) {
-            NewStationProcess = win.ProcessName;
-            if (string.IsNullOrWhiteSpace(NewStationName) || NewStationName.StartsWith("Station ")) {
-                NewStationName = $"{win.ProcessName} Stream";
-            }
-            if (string.IsNullOrWhiteSpace(NewStationMount) || NewStationMount.StartsWith("channel")) {
-                NewStationMount = win.ProcessName.ToLowerInvariant().Replace(" ", "").Replace(".exe", "");
-            }
-        }
-    }
-
-    private void ConfirmAddStation() {
-        if (string.IsNullOrWhiteSpace(NewStationName)) return;
-        string mount = string.IsNullOrWhiteSpace(NewStationMount) ? $"channel{StationManager.GetAllStations().Count + 1}" : NewStationMount.Trim().Trim('/');
-
-        var prev = StationManager.GetActiveStation();
-        if (prev != null) {
-            _stationLayouts[prev.Config.Id] = new StationLayoutState {
-                Left = new List<string>(LeftColumn),
-                Center = new List<string>(CenterColumn),
-                Right = new List<string>(RightColumn),
-                Collapsed = CollapsedCards.ToList()
-            };
-            SaveDjEqToProfile();
-        }
-
-        var newConfig = new StationConfig {
-            Id = Guid.NewGuid().ToString("N"),
-            Name = NewStationName.Trim(),
-            StationName = NewStationName.Trim(),
-            MountPoint = mount,
-            SourceType = NewStationSource,
-            IngestPassword = string.IsNullOrWhiteSpace(NewStationIngestPassword) ? "scrimpass" : NewStationIngestPassword.Trim(),
-            ShowOnMainPage = NewStationShowOnMainPage,
-            TargetProcessId = (int)NewStationProcessId,
-            TargetProcessName = NewStationProcess.Trim(),
-            Bitrate = ProfileManager.CurrentProfile.Bitrate,
-            AudioFormat = ProfileManager.CurrentProfile.AudioFormat,
-            WebTheme = ProfileManager.CurrentProfile.WebTheme,
-            AccentColor = ProfileManager.CurrentProfile.AccentColor
-        };
-
-        StationManager.AddStation(newConfig);
-        StationManager.SetActiveStation(newConfig.Id);
-        LoadStationState(StationManager.GetActiveStation());
-        ShowAddStationModal = false;
-        StateHasChanged();
-    }
-
-    private void OnStationManagerChanged() {
-        InvokeAsync(StateHasChanged);
-    }
-
-    private void OnStationBroadcastingChanged(StationPipeline st, bool isBroadcasting) {
-        InvokeAsync(() => {
-            if (st.Config.Id == (StationManager.GetActiveStation()?.Config.Id ?? "")) {
-                IsLive = isBroadcasting;
-            }
-            StateHasChanged();
-        });
     }
 
     private void OnHubBroadcastingStateChanged(object? sender, bool isBroadcasting) {
@@ -2209,11 +1774,8 @@
         volume = Math.Clamp(volume, 0, 150);
         ActiveStationConfig.AppStreamVolume = volume;
         ActiveMixer.AppVolume = (float)volume / 100f;
-        var active = StationManager.GetActiveStation();
-        if (active == null || active.IsPrimary) {
-            ProfileManager.CurrentProfile.AppStreamVolume = volume;
-            ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
-        }
+        ProfileManager.CurrentProfile.AppStreamVolume = volume;
+        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
         StateHasChanged();
     }
 
@@ -2261,11 +1823,8 @@
 
     private void SetFormat(string format) {
         ActiveStationConfig.AudioFormat = format;
-        var active = StationManager.GetActiveStation();
-        if (active == null || active.IsPrimary) {
-            ProfileManager.CurrentProfile.AudioFormat = format;
-            ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
-        }
+        ProfileManager.CurrentProfile.AudioFormat = format;
+        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
 
         if (Enum.TryParse<AudioFormat>(format, true, out var parsed)) {
             ActiveTranscoder.SetFormat(parsed, ActiveStationConfig.Bitrate);
@@ -2275,11 +1834,8 @@
 
     private void SetBitrate(int bitrate) {
         ActiveStationConfig.Bitrate = bitrate;
-        var active = StationManager.GetActiveStation();
-        if (active == null || active.IsPrimary) {
-            ProfileManager.CurrentProfile.Bitrate = bitrate;
-            ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
-        }
+        ProfileManager.CurrentProfile.Bitrate = bitrate;
+        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
 
         if (Enum.TryParse<AudioFormat>(ActiveStationConfig.AudioFormat, true, out var parsed)) {
             ActiveTranscoder.SetFormat(parsed, bitrate);
@@ -2915,8 +2471,6 @@
         RelayService.ActiveRelayDisconnected -= OnActiveRelayDisconnected;
         RelayService.RemoteGreenRoomMessageReceived -= OnRemoteGreenRoomMessageReceived;
         StreamServer.GreenRoomMessagePosted -= OnGreenRoomMessagePosted;
-        StationManager.StationsChanged -= OnStationManagerChanged;
-        StationManager.StationBroadcastingStateChanged -= OnStationBroadcastingChanged;
         _dotNetRef?.Dispose();
         _refreshTimer?.Dispose();
         _vuTimer?.Dispose();
@@ -2998,38 +2552,6 @@
                 </div>
             </div>
 
-            @{
-                var activeSt = StationManager.GetActiveStation();
-            }
-            @if (activeSt != null) {
-                <div style="margin-bottom: 12px; background: rgba(0, 210, 255, 0.06); border: 1px solid rgba(0, 210, 255, 0.25); border-radius: 8px; padding: 8px 10px; display: flex; justify-content: space-between; align-items: center;">
-                    <div>
-                        <div style="font-size: 11px; font-weight: 700; color: #00d2ff;">Active Station: @activeSt.Config.Name</div>
-                        <div style="font-size: 10px; color: #94a3b8;">Mount: /@(activeSt.Config.MountPoint?.Trim('/') ?? "stream") • Audio Source: @activeSt.Config.SourceType</div>
-                        @if (!activeSt.IsPrimary) {
-                            <label style="display: inline-flex; align-items: center; gap: 5px; font-size: 10px; color: #cbd5e1; cursor: pointer; margin-top: 4px;">
-                                <input type="checkbox" checked="@activeSt.Config.ShowOnMainPage" @onchange="ToggleActiveStationShowOnMainPage" style="accent-color: #00d2ff;" />
-                                <span>Link on Main Page Channel Dial</span>
-                            </label>
-                        }
-                    </div>
-                    <span class="station-tab-dot @(activeSt.IsLive ? "live" : "offline")"></span>
-                </div>
-                @if (activeSt.Config.SourceType == AudioSourceType.IcecastIngest) {
-                    <div style="margin-bottom: 12px; background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 10px 12px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                            <span style="font-size: 11px; font-weight: 700; color: #10b981;">🎧 External DJ Ingest</span>
-                            <span style="font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; background: @(activeSt.IsDjConnected ? "rgba(16, 185, 129, 0.2)" : "rgba(245, 158, 11, 0.2)"); color: @(activeSt.IsDjConnected ? "#34d399" : "#fbbf24");">
-                                @(activeSt.IsDjConnected ? $"● Live: {activeSt.ConnectedDjName}" : "⏳ Waiting for DJ to connect...")
-                            </span>
-                        </div>
-                        <div style="font-size: 10px; color: #94a3b8; font-family: monospace; line-height: 1.4;">
-                            Host: @(GetIngestServerHost()):@(ProfileManager.CurrentProfile.Port) • Mount: /@(activeSt.Config.MountPoint?.Trim('/') ?? "stream") • User: source • Pass: @activeSt.Config.IngestPassword
-                        </div>
-                    </div>
-                }
-            }
-            
             <div style="margin-bottom: 14px;">
                 <label class="scrim-label">Application Window</label>
                 <select class="scrim-select" @bind="SelectedProcessId" @bind:after="OnProcessChanged">
@@ -3172,7 +2694,7 @@
                 </div>
                 <div style="font-size: 11px; color: #94a3b8; line-height: 1.4;">
                     @if (IsVirtualDeviceActive) {
-                        <span>Music is actively captured from <strong>@(RenderDevices.FirstOrDefault(d => d.Id == ProfileManager.CurrentProfile.CaptureDeviceId).Name ?? "Virtual Cable")</strong> continuously. The microphone channel remains completely independent.</span>
+                        <span>Music is actively captured from <strong>@(RenderDevices.FirstOrDefault(d => d.Id == ActiveStationConfig.CaptureDeviceId).Name ?? "Virtual Cable")</strong> continuously. The microphone channel remains completely independent.</span>
                     } else {
                         <span>Music is captured directly from your selected application window or default audio endpoint.</span>
                     }
@@ -7133,29 +6655,13 @@
     private void OnStreamMountPointChanged(ChangeEventArgs e) {
         var val = e.Value?.ToString()?.Trim().Trim('/') ?? "";
         string finalMount = string.IsNullOrEmpty(val) ? "stream" : val;
-        var active = StationManager.GetActiveStation();
-        var cfg = active?.Config ?? ProfileManager.CurrentProfile.EnsureDefaultStation();
-        cfg.MountPoint = finalMount;
-        if (active != null) {
-            active.ApplyConfig(cfg);
-            if (active.IsPrimary) {
-                ProfileManager.CurrentProfile.StreamMountPoint = finalMount;
-            }
-        }
+        ProfileManager.CurrentProfile.StreamMountPoint = finalMount;
         ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
         StateHasChanged();
     }
 
     private void SetPresetMount(string mount) {
-        var active = StationManager.GetActiveStation();
-        var cfg = active?.Config ?? ProfileManager.CurrentProfile.EnsureDefaultStation();
-        cfg.MountPoint = mount;
-        if (active != null) {
-            active.ApplyConfig(cfg);
-            if (active.IsPrimary) {
-                ProfileManager.CurrentProfile.StreamMountPoint = mount;
-            }
-        }
+        ProfileManager.CurrentProfile.StreamMountPoint = mount;
         ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
         StateHasChanged();
     }
@@ -7309,11 +6815,8 @@
     private void ToggleSongRequestsEnabled() {
         ActiveStationConfig.EnableSongRequests = !ActiveStationConfig.EnableSongRequests;
         ActiveRequestController.IsEnabled = ActiveStationConfig.EnableSongRequests;
-        var active = StationManager.GetActiveStation();
-        if (active == null || active.IsPrimary) {
-            ProfileManager.CurrentProfile.EnableSongRequests = ActiveStationConfig.EnableSongRequests;
-            ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
-        }
+        ProfileManager.CurrentProfile.EnableSongRequests = ActiveStationConfig.EnableSongRequests;
+        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
         StreamServer.BroadcastBrandingUpdate();
         StateHasChanged();
     }
@@ -7537,124 +7040,61 @@
     };
 
     private void SyncDjEqFromProfile() {
-        var activeId = ActiveStationConfig.Id;
-        DjEqualizerConfig? cfg = null;
-        if (!_stationDjEqs.TryGetValue(activeId, out cfg)) {
-            var pCfg = ProfileManager.CurrentProfile.DjEq;
-            if (pCfg != null) {
-                cfg = new DjEqualizerConfig {
-                    MusicTrimDb = pCfg.MusicTrimDb,
-                    MusicPan = pCfg.MusicPan,
-                    MusicStereoWidth = pCfg.MusicStereoWidth,
-                    MusicMuted = pCfg.MusicMuted,
-                    MicGainDb = pCfg.MicGainDb,
-                    MicPan = pCfg.MicPan,
-                    MicLowCut = pCfg.MicLowCut,
-                    LowGainDb = pCfg.LowGainDb,
-                    MidGainDb = pCfg.MidGainDb,
-                    HighGainDb = pCfg.HighGainDb,
-                    LowKill = pCfg.LowKill,
-                    MidKill = pCfg.MidKill,
-                    HighKill = pCfg.HighKill,
-                    ColorFilterKnob = pCfg.ColorFilterKnob,
-                    Is10BandMode = pCfg.Is10BandMode,
-                    MasterGainDb = pCfg.MasterGainDb,
-                    MasterBalance = pCfg.MasterBalance,
-                    SoftLimiterEnabled = pCfg.SoftLimiterEnabled,
-                    EqBypass = pCfg.EqBypass,
-                    ActivePreset = pCfg.ActivePreset,
-                    Bands10Db = (float[])pCfg.Bands10Db.Clone()
-                };
-                _stationDjEqs[activeId] = cfg;
-            }
-        }
-        if (cfg == null) return;
+        var pCfg = ProfileManager.CurrentProfile.DjEq;
+        if (pCfg == null) return;
         var eq = ActiveMixer.DjEq;
-        eq.MusicTrimDb = cfg.MusicTrimDb;
-        eq.MusicPan = cfg.MusicPan;
-        eq.MusicStereoWidth = cfg.MusicStereoWidth;
-        eq.MusicMuted = cfg.MusicMuted;
-        eq.MicGainDb = cfg.MicGainDb;
-        eq.MicPan = cfg.MicPan;
-        eq.MicLowCut = cfg.MicLowCut;
-        eq.LowGainDb = cfg.LowGainDb;
-        eq.MidGainDb = cfg.MidGainDb;
-        eq.HighGainDb = cfg.HighGainDb;
-        eq.LowKill = cfg.LowKill;
-        eq.MidKill = cfg.MidKill;
-        eq.HighKill = cfg.HighKill;
-        eq.ColorFilterKnob = cfg.ColorFilterKnob;
-        eq.Is10BandMode = cfg.Is10BandMode;
-        eq.MasterGainDb = cfg.MasterGainDb;
-        eq.MasterBalance = cfg.MasterBalance;
-        eq.SoftLimiterEnabled = cfg.SoftLimiterEnabled;
-        eq.EqBypass = cfg.EqBypass;
-        if (cfg.Bands10Db != null && cfg.Bands10Db.Length >= 10) {
-            Array.Copy(cfg.Bands10Db, eq.Bands10Db, 10);
+        eq.MusicTrimDb = pCfg.MusicTrimDb;
+        eq.MusicPan = pCfg.MusicPan;
+        eq.MusicStereoWidth = pCfg.MusicStereoWidth;
+        eq.MusicMuted = pCfg.MusicMuted;
+        eq.MicGainDb = pCfg.MicGainDb;
+        eq.MicPan = pCfg.MicPan;
+        eq.MicLowCut = pCfg.MicLowCut;
+        eq.LowGainDb = pCfg.LowGainDb;
+        eq.MidGainDb = pCfg.MidGainDb;
+        eq.HighGainDb = pCfg.HighGainDb;
+        eq.LowKill = pCfg.LowKill;
+        eq.MidKill = pCfg.MidKill;
+        eq.HighKill = pCfg.HighKill;
+        eq.ColorFilterKnob = pCfg.ColorFilterKnob;
+        eq.Is10BandMode = pCfg.Is10BandMode;
+        eq.MasterGainDb = pCfg.MasterGainDb;
+        eq.MasterBalance = pCfg.MasterBalance;
+        eq.SoftLimiterEnabled = pCfg.SoftLimiterEnabled;
+        eq.EqBypass = pCfg.EqBypass;
+        if (pCfg.Bands10Db != null && pCfg.Bands10Db.Length >= 10) {
+            Array.Copy(pCfg.Bands10Db, eq.Bands10Db, 10);
         }
         eq.RecalculateFilters();
     }
 
     private void SaveDjEqToProfile() {
-        var activeId = ActiveStationConfig.Id;
-        if (!_stationDjEqs.TryGetValue(activeId, out var cfg)) {
-            cfg = new DjEqualizerConfig();
-            _stationDjEqs[activeId] = cfg;
-        }
         var eq = ActiveMixer.DjEq;
-        cfg.MusicTrimDb = eq.MusicTrimDb;
-        cfg.MusicPan = eq.MusicPan;
-        cfg.MusicStereoWidth = eq.MusicStereoWidth;
-        cfg.MusicMuted = eq.MusicMuted;
-        cfg.MicGainDb = eq.MicGainDb;
-        cfg.MicPan = eq.MicPan;
-        cfg.MicLowCut = eq.MicLowCut;
-        cfg.LowGainDb = eq.LowGainDb;
-        cfg.MidGainDb = eq.MidGainDb;
-        cfg.HighGainDb = eq.HighGainDb;
-        cfg.LowKill = eq.LowKill;
-        cfg.MidKill = eq.MidKill;
-        cfg.HighKill = eq.HighKill;
-        cfg.ColorFilterKnob = eq.ColorFilterKnob;
-        cfg.Is10BandMode = eq.Is10BandMode;
-        cfg.MasterGainDb = eq.MasterGainDb;
-        cfg.MasterBalance = eq.MasterBalance;
-        cfg.SoftLimiterEnabled = eq.SoftLimiterEnabled;
-        cfg.EqBypass = eq.EqBypass;
-        if (cfg.Bands10Db == null || cfg.Bands10Db.Length < 10) {
-            cfg.Bands10Db = new float[10];
+        var pCfg = ProfileManager.CurrentProfile.DjEq;
+        pCfg.MusicTrimDb = eq.MusicTrimDb;
+        pCfg.MusicPan = eq.MusicPan;
+        pCfg.MusicStereoWidth = eq.MusicStereoWidth;
+        pCfg.MusicMuted = eq.MusicMuted;
+        pCfg.MicGainDb = eq.MicGainDb;
+        pCfg.MicPan = eq.MicPan;
+        pCfg.MicLowCut = eq.MicLowCut;
+        pCfg.LowGainDb = eq.LowGainDb;
+        pCfg.MidGainDb = eq.MidGainDb;
+        pCfg.HighGainDb = eq.HighGainDb;
+        pCfg.LowKill = eq.LowKill;
+        pCfg.MidKill = eq.MidKill;
+        pCfg.HighKill = eq.HighKill;
+        pCfg.ColorFilterKnob = eq.ColorFilterKnob;
+        pCfg.Is10BandMode = eq.Is10BandMode;
+        pCfg.MasterGainDb = eq.MasterGainDb;
+        pCfg.MasterBalance = eq.MasterBalance;
+        pCfg.SoftLimiterEnabled = eq.SoftLimiterEnabled;
+        pCfg.EqBypass = eq.EqBypass;
+        if (pCfg.Bands10Db == null || pCfg.Bands10Db.Length < 10) {
+            pCfg.Bands10Db = new float[10];
         }
-        Array.Copy(eq.Bands10Db, cfg.Bands10Db, 10);
-
-        var active = StationManager.GetActiveStation();
-        if (active == null || active.IsPrimary) {
-            var pCfg = ProfileManager.CurrentProfile.DjEq;
-            pCfg.MusicTrimDb = eq.MusicTrimDb;
-            pCfg.MusicPan = eq.MusicPan;
-            pCfg.MusicStereoWidth = eq.MusicStereoWidth;
-            pCfg.MusicMuted = eq.MusicMuted;
-            pCfg.MicGainDb = eq.MicGainDb;
-            pCfg.MicPan = eq.MicPan;
-            pCfg.MicLowCut = eq.MicLowCut;
-            pCfg.LowGainDb = eq.LowGainDb;
-            pCfg.MidGainDb = eq.MidGainDb;
-            pCfg.HighGainDb = eq.HighGainDb;
-            pCfg.LowKill = eq.LowKill;
-            pCfg.MidKill = eq.MidKill;
-            pCfg.HighKill = eq.HighKill;
-            pCfg.ColorFilterKnob = eq.ColorFilterKnob;
-            pCfg.Is10BandMode = eq.Is10BandMode;
-            pCfg.MasterGainDb = eq.MasterGainDb;
-            pCfg.MasterBalance = eq.MasterBalance;
-            pCfg.SoftLimiterEnabled = eq.SoftLimiterEnabled;
-            pCfg.EqBypass = eq.EqBypass;
-            pCfg.ActivePreset = cfg.ActivePreset;
-            if (pCfg.Bands10Db == null || pCfg.Bands10Db.Length < 10) {
-                pCfg.Bands10Db = new float[10];
-            }
-            Array.Copy(eq.Bands10Db, pCfg.Bands10Db, 10);
-            ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
-        }
+        Array.Copy(eq.Bands10Db, pCfg.Bands10Db, 10);
+        ProfileManager.SaveProfile(ProfileManager.CurrentProfile);
     }
 
     private void SetDjEqMode(bool is10Band) {
@@ -7665,12 +7105,9 @@
 
     private void SetDjEqPreset(string presetName) {
         if (!DjEqPresets.TryGetValue(presetName, out var preset)) return;
-        var activeId = ActiveStationConfig.Id;
-        if (!_stationDjEqs.TryGetValue(activeId, out var cfg)) {
-            cfg = new DjEqualizerConfig();
-            _stationDjEqs[activeId] = cfg;
+        if (ProfileManager.CurrentProfile.DjEq != null) {
+            ProfileManager.CurrentProfile.DjEq.ActivePreset = presetName;
         }
-        cfg.ActivePreset = presetName;
         ActiveMixer.DjEq.LowGainDb = preset.Low;
         ActiveMixer.DjEq.MidGainDb = preset.Mid;
         ActiveMixer.DjEq.HighGainDb = preset.High;

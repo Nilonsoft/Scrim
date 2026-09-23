@@ -1023,11 +1023,12 @@ namespace Scrim.Server {
             var hub = station?.Hub ?? _hub;
             bool isLive = hub.IsBroadcasting;
             var profile = _profileManager.CurrentProfile;
-            var stationConfig = station?.Config;
-            string format = (stationConfig?.AudioFormat ?? profile.AudioFormat)?.ToUpperInvariant() ?? "MP3";
-            int bitrate = stationConfig?.Bitrate ?? profile.Bitrate;
+            bool isSubStation = station != null && !station.IsPrimary;
+            var sc = isSubStation ? station!.Config : null;
+            string format = (sc?.AudioFormat ?? profile.AudioFormat)?.ToUpperInvariant() ?? "MP3";
+            int bitrate = isSubStation && sc?.Bitrate > 0 ? sc.Bitrate : profile.Bitrate;
             bool isRestricted = profile.RestrictToLocalNetwork && !IsLocalNetworkClient(context);
-            string streamMount = stationConfig?.MountPoint?.Trim().Trim('/') ?? GetNormalizedMountPoint();
+            string streamMount = sc?.MountPoint?.Trim().Trim('/') ?? GetNormalizedMountPoint();
             string json = $"{{\"isLive\":{(isLive ? "true" : "false")},\"listeners\":{hub.ActiveClientCount},\"format\":\"{EscapeJson(format)}\",\"bitrate\":{bitrate},\"streamUrl\":\"/{streamMount}\",\"isPrivate\":{(isRestricted ? "true" : "false")},\"restrictToLocal\":{(profile.RestrictToLocalNetwork ? "true" : "false")},\"useHttps\":{(profile.UseHttps ? "true" : "false")},\"useReverseProxy\":{(profile.UseReverseProxy ? "true" : "false")}}}";
             byte[] buffer = System.Text.Encoding.UTF8.GetBytes(json);
             response.ContentLength64 = buffer.Length;
@@ -1049,17 +1050,20 @@ namespace Scrim.Server {
             response.Headers.Add("Accept-Ranges", "none");
             response.Headers.Add("X-Powered-By", "Scrim");
 
-            string stationName = stationConfig?.StationName ?? currentProfile.StationName ?? "Scrim Broadcast Station";
-            int bitrate = stationConfig?.Bitrate ?? currentProfile.Bitrate;
-            string hostName = stationConfig?.HostName ?? currentProfile.HostName;
+            bool isSubStation = station != null && !station.IsPrimary;
+            var sc = isSubStation ? station!.Config : null;
+
+            string stationName = isSubStation && !string.IsNullOrWhiteSpace(sc?.StationName) ? sc.StationName : (currentProfile.StationName ?? "Scrim Broadcast Station");
+            int bitrate = isSubStation && sc?.Bitrate > 0 ? sc.Bitrate : currentProfile.Bitrate;
+            string hostName = isSubStation && !string.IsNullOrWhiteSpace(sc?.HostName) ? sc.HostName : currentProfile.HostName;
 
             response.Headers.Add("icy-name", stationName);
-            response.Headers.Add("icy-genre", stationConfig?.GenreTag ?? "Live Stream");
+            response.Headers.Add("icy-genre", isSubStation && !string.IsNullOrWhiteSpace(sc?.GenreTag) ? sc.GenreTag : (currentProfile.GenreTag ?? "Live Stream"));
             response.Headers.Add("icy-br", bitrate.ToString());
             if (!string.IsNullOrWhiteSpace(hostName)) {
                 response.Headers.Add("X-Scrim-Host", hostName);
             }
-            string effectiveLogo = !string.IsNullOrWhiteSpace(stationConfig?.LogoUrl) ? stationConfig.LogoUrl : GetEffectiveLogoUrl();
+            string effectiveLogo = isSubStation && !string.IsNullOrWhiteSpace(sc?.LogoUrl) ? sc.LogoUrl : GetEffectiveLogoUrl();
             if (!string.IsNullOrWhiteSpace(effectiveLogo)) {
                 response.Headers.Add("X-Scrim-Avatar", effectiveLogo);
             }
@@ -1214,20 +1218,22 @@ namespace Scrim.Server {
             string BuildBrandingJson() {
                 var profile = _profileManager.CurrentProfile;
                 var navLinksArray = string.Join(",", profile.CustomNavLinks.Select(l => $"{{\"label\":\"{EscapeJson(l.Label)}\",\"url\":\"{EscapeJson(l.Url)}\"}}"));
-                string themeStr = stationConfig?.WebTheme ?? profile.WebTheme ?? "dark";
+                bool isSubStation = station != null && !station.IsPrimary;
+                var sc = isSubStation ? station!.Config : null;
+                string themeStr = sc?.WebTheme ?? profile.WebTheme ?? "dark";
                 string customThemeJson = GetCustomThemeJson(themeStr);
-                string streamMount = stationConfig?.MountPoint?.Trim().Trim('/') ?? GetNormalizedMountPoint();
-                string bannerUrl = GetEffectiveBannerUrl();
-                string logoUrl = GetEffectiveLogoUrl();
+                string streamMount = sc?.MountPoint?.Trim().Trim('/') ?? GetNormalizedMountPoint();
+                string bannerUrl = isSubStation && !string.IsNullOrWhiteSpace(sc?.BannerUrl) ? sc.BannerUrl : GetEffectiveBannerUrl();
+                string logoUrl = isSubStation && !string.IsNullOrWhiteSpace(sc?.LogoUrl) ? sc.LogoUrl : GetEffectiveLogoUrl();
 
-                string stationName = stationConfig?.StationName ?? profile.StationName;
-                string pageTitle = stationConfig?.PageTitle ?? profile.PageTitle;
-                string showTitle = stationConfig?.ShowTitle ?? profile.ShowTitle;
-                string hostName = stationConfig?.HostName ?? profile.HostName;
-                string genreTag = stationConfig?.GenreTag ?? profile.GenreTag;
-                string tagline = stationConfig?.StationTagline ?? profile.StationTagline;
-                string accentColor = stationConfig?.AccentColor ?? profile.AccentColor;
-                bool enableSongRequests = stationConfig?.EnableSongRequests ?? profile.EnableSongRequests;
+                string stationName = isSubStation && !string.IsNullOrWhiteSpace(sc?.StationName) ? sc.StationName : profile.StationName;
+                string pageTitle = isSubStation && !string.IsNullOrWhiteSpace(sc?.PageTitle) ? sc.PageTitle : profile.PageTitle;
+                string showTitle = isSubStation ? (sc?.ShowTitle ?? "") : profile.ShowTitle;
+                string hostName = isSubStation && !string.IsNullOrWhiteSpace(sc?.HostName) ? sc.HostName : profile.HostName;
+                string genreTag = isSubStation ? (sc?.GenreTag ?? "") : profile.GenreTag;
+                string tagline = isSubStation ? (sc?.StationTagline ?? "") : profile.StationTagline;
+                string accentColor = isSubStation && !string.IsNullOrWhiteSpace(sc?.AccentColor) ? sc.AccentColor : profile.AccentColor;
+                bool enableSongRequests = isSubStation ? (sc?.EnableSongRequests ?? true) : profile.EnableSongRequests;
 
                 var activeRelay = _relayService?.ActivePassthroughStream;
                 string effectiveHost = activeRelay != null && !string.IsNullOrWhiteSpace(activeRelay.EffectiveDjName) ? activeRelay.EffectiveDjName : hostName;
@@ -1380,7 +1386,7 @@ namespace Scrim.Server {
                 var blacklist = _profileManager.CurrentProfile.NicknameBlacklist;
                 string blacklistJson = string.Join(",", blacklist.Select(b => $"\"{EscapeJson(b)}\""));
 
-                string hostName = station?.Config.HostName ?? _profileManager.CurrentProfile.HostName;
+                string hostName = !string.IsNullOrWhiteSpace(_profileManager.CurrentProfile.HostName) ? _profileManager.CurrentProfile.HostName : (station?.Config.HostName ?? "");
                 if (!string.IsNullOrWhiteSpace(hostName)) {
                     chatSvc.ReserveHostNickname(hostName);
                 }
@@ -1471,7 +1477,7 @@ namespace Scrim.Server {
                     return;
                 }
 
-                string hostName = station?.Config.HostName ?? _profileManager.CurrentProfile.HostName;
+                string hostName = !string.IsNullOrWhiteSpace(_profileManager.CurrentProfile.HostName) ? _profileManager.CurrentProfile.HostName : (station?.Config.HostName ?? "");
                 if (!string.IsNullOrWhiteSpace(hostName)) {
                     chatSvc.ReserveHostNickname(hostName);
                 }
@@ -1753,25 +1759,25 @@ namespace Scrim.Server {
         private void HandleBrandingRequest(HttpListenerContext context) {
             try {
                 var profile = _profileManager.CurrentProfile;
-                var station = ResolveStationPipeline(context);
-                var stationConfig = station?.Config;
-
                 var navLinksArray = string.Join(",", profile.CustomNavLinks.Select(l => $"{{\"label\":\"{EscapeJson(l.Label)}\",\"url\":\"{EscapeJson(l.Url)}\"}}"));
-                string themeStr = stationConfig?.WebTheme ?? profile.WebTheme ?? "dark";
+                var station = ResolveStationPipeline(context);
+                bool isSubStation = station != null && !station.IsPrimary;
+                var sc = isSubStation ? station!.Config : null;
+                string themeStr = sc?.WebTheme ?? profile.WebTheme ?? "dark";
                 string customThemeJson = GetCustomThemeJson(themeStr);
                 bool isRestricted = profile.RestrictToLocalNetwork && !IsLocalNetworkClient(context);
-                string streamMount = stationConfig?.MountPoint?.Trim().Trim('/') ?? GetNormalizedMountPoint();
-                string bannerUrl = GetEffectiveBannerUrl();
-                string logoUrl = GetEffectiveLogoUrl();
+                string streamMount = sc?.MountPoint?.Trim().Trim('/') ?? GetNormalizedMountPoint();
+                string bannerUrl = isSubStation && !string.IsNullOrWhiteSpace(sc?.BannerUrl) ? sc.BannerUrl : GetEffectiveBannerUrl();
+                string logoUrl = isSubStation && !string.IsNullOrWhiteSpace(sc?.LogoUrl) ? sc.LogoUrl : GetEffectiveLogoUrl();
 
-                string stationName = stationConfig?.StationName ?? profile.StationName;
-                string pageTitle = stationConfig?.PageTitle ?? profile.PageTitle;
-                string showTitle = stationConfig?.ShowTitle ?? profile.ShowTitle;
-                string hostName = stationConfig?.HostName ?? profile.HostName;
-                string genreTag = stationConfig?.GenreTag ?? profile.GenreTag;
-                string tagline = stationConfig?.StationTagline ?? profile.StationTagline;
-                string accentColor = stationConfig?.AccentColor ?? profile.AccentColor;
-                bool enableSongRequests = stationConfig?.EnableSongRequests ?? profile.EnableSongRequests;
+                string stationName = isSubStation && !string.IsNullOrWhiteSpace(sc?.StationName) ? sc.StationName : profile.StationName;
+                string pageTitle = isSubStation && !string.IsNullOrWhiteSpace(sc?.PageTitle) ? sc.PageTitle : profile.PageTitle;
+                string showTitle = isSubStation ? (sc?.ShowTitle ?? "") : profile.ShowTitle;
+                string hostName = isSubStation && !string.IsNullOrWhiteSpace(sc?.HostName) ? sc.HostName : profile.HostName;
+                string genreTag = isSubStation ? (sc?.GenreTag ?? "") : profile.GenreTag;
+                string tagline = isSubStation ? (sc?.StationTagline ?? "") : profile.StationTagline;
+                string accentColor = isSubStation && !string.IsNullOrWhiteSpace(sc?.AccentColor) ? sc.AccentColor : profile.AccentColor;
+                bool enableSongRequests = isSubStation ? (sc?.EnableSongRequests ?? true) : profile.EnableSongRequests;
 
                 var activeRelay = _relayService?.ActivePassthroughStream;
                 string effectiveHost = activeRelay != null && !string.IsNullOrWhiteSpace(activeRelay.EffectiveDjName) ? activeRelay.EffectiveDjName : hostName;
